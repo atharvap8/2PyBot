@@ -30,6 +30,7 @@
 ├── hardware/                   # PCB schematics and BOM (KiCad)
 ├── software/                   # Auxiliary desktop tools and scripts
 ├── models/                     # 3D CAD files (STEP / GLB)
+├── assets/                     # Media: demo videos, photos, renders
 ├── docs/
 │   ├── BaseLink/               # Robot-side technical documentation
 │   │   ├── System_Architecture.md
@@ -143,6 +144,18 @@ PCB design files (KiCad) and the bill of materials are located in [`hardware/`](
 - ISM330DHCX or compatible 6-axis IMU
 - QMC5883L magnetometer
 - LiPo battery + power regulation board
+
+---
+
+## Media
+
+Demo footage and build photos are in [`assets/`](assets/).
+
+| Asset | Description |
+| :--- | :--- |
+| [Demo Video](assets/demo.mp4) | Robot balancing and driving under remote control |
+| [Build Photo](assets/build.jpg) | Assembled hardware with electronics visible |
+| [Dashboard Screenshot](assets/dashboard.png) | Python telemetry dashboard during a live session |
 
 ---
 
