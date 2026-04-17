@@ -67,8 +67,8 @@ The **Controller** firmware runs on a second ESP32 fitted with a joystick and bu
 
 The robot streams telemetry packets over Bluetooth serial. Two interfaces are provided for interaction:
 
-- **`robot_controller_ui.py`** — A Python desktop dashboard for real-time telemetry plots and control input.
-- **`tuner.html`** — A browser-based Web Bluetooth interface for on-the-fly PID constant adjustment.
+- **`robot_controller_ui.py`** - A Python desktop dashboard for real-time telemetry plots and control input.
+- **`tuner.html`** - A browser-based Web Bluetooth interface for on-the-fly PID constant adjustment.
 
 ---
 
