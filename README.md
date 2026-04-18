@@ -170,4 +170,4 @@ Demo footage and build photos are in [`assets/`](assets/).
 
 ---
 
-*Self-balancing robotics project — open for reference and research use.*
+*Self-balancing robotics project — open for reference and research use.* 

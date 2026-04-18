@@ -203,4 +203,4 @@
 #define SERIAL_BAUD           115200
 #define PLOT_DIVIDER          10      // Instructs the serial printing function to intentionally skip evaluations. Example: 200 Hz / 10 = an efficient 20 Hz output stream.
 
-#endif // CONFIG_H
+#endif  // CONFIG_H
