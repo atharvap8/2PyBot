@@ -52,7 +52,7 @@
 
 The main control loop runs at **200 Hz** (`dt = 5 ms`). On each tick:
 
-1. The IMU (ISM330DHCX or compatible) is read and fused through a **Mahony AHRS** filter to produce a drift-corrected pitch angle.
+1. The IMU (ISM6HG256x) is read and fused through a **Mahony AHRS** filter to produce a drift-corrected pitch angle.
 2. A **Balance PID** controller computes a target stepper speed proportional to the deviation from the equilibrium angle.
 3. An optional **Heading PID** loop corrects yaw drift using magnetometer feedback (QMC5883L).
 
@@ -141,9 +141,16 @@ PCB design files (KiCad) and the bill of materials are located in [`hardware/`](
 - ESP32 (×2 — robot and transmitter)
 - TMC2208 stepper motor drivers (×2)
 - NEMA 17 stepper motors (×2)
-- ISM330DHCX or compatible 6-axis IMU
+- ISM6HG256x IMU breakout (Custom PCB)
 - QMC5883L magnetometer
-- LiPo battery + power regulation board
+- MP1584 Buck Converter (12V-5V)
+- 3S Li-Ion Battery
+- XT-60 Male-Female Pair
+- Slide Switch
+- Standoffs, Screws
+- Zero PCB
+- Nema17 Motor Bracket
+- Robot Wheels (Big diameter is better)
 
 ---
 
