@@ -4,6 +4,10 @@
 #  Compiles both ESP32 sketches (BaseLink robot + Controller
 #  transmitter) using arduino-cli to catch syntax and type
 #  errors before they reach hardware.
+#
+#  Uses arduino-cli directly (not compile-sketches action)
+#  because the .ino filenames don't match their parent
+#  directory names.
 # ============================================================
 
 name: Firmware CI
@@ -26,21 +30,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Configure ESP32 board core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "TMCStepper"
+          arduino-cli lib install "STM32duino ISM6HG256X"
+          arduino-cli lib install "QMC5883LCompass"
+
       - name: Compile BaseLink sketch
-        uses: arduino/compile-sketches@v1
-        with:
-          fqbn: esp32:esp32:esp32
-          platforms: |
-            - name: esp32:esp32
-              source-url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-          libraries: |
-            - name: TMCStepper
-            - name: STM32duino ISM6HG256X
-            - name: QMC5883LCompass
-          sketch-paths: |
-            - firmware/BaseLink
-          cli-compile-flags: |
-            - --warnings=default
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/BaseLink/Self_Balancing_Robot.ino
 
   # ---- Controller (Joystick Transmitter) ----
   compile-controller:
@@ -50,14 +57,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Configure ESP32 board core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
       - name: Compile Controller sketch
-        uses: arduino/compile-sketches@v1
-        with:
-          fqbn: esp32:esp32:esp32
-          platforms: |
-            - name: esp32:esp32
-              source-url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-          sketch-paths: |
-            - firmware/Controller
-          cli-compile-flags: |
-            - --warnings=default
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/Controller/Joystick_Transmitter.ino
