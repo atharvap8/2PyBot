@@ -84,7 +84,7 @@ The robot streams telemetry packets over Bluetooth serial. Two interfaces are pr
 | `pid_controller.h` | Generic PID template used by balance and heading loops |
 | `espnow_comm.h` | ESP-NOW peer registration, packet parsing, and callback handler |
 | `serial_tuner.h` | Bluetooth serial command parser for live PID adjustment |
-| `robot_controller_ui.py` | Python telemetry dashboard (PySerial + Matplotlib) |
+| `gui/robot_controller_ui.py` | Python telemetry dashboard (PySerial + Matplotlib) |
 | `tuner.html` | Web Bluetooth PID tuner, no installation required |
 
 ---
@@ -123,7 +123,7 @@ All technical write-ups are in [`docs/`](docs/).
 ### Python Dashboard
 
 ```bash
-cd firmware/BaseLink
+cd gui
 pip install pyserial matplotlib
 python robot_controller_ui.py
 ```
