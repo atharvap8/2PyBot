@@ -9,7 +9,7 @@ graph TD
     UI[Python UI: robot_controller_ui.py] -- Bluetooth Serial --> BT[ESP32 Bluetooth Parser]
     
     subgraph ESP32 Firmware core
-        INO[Self_Balancing_Robot.ino]
+        INO[BaseLink.ino]
         CFG[config.h]
         
         subgraph Sensors
@@ -54,7 +54,7 @@ graph TD
 
 ## Directory & File Overview
 
-### `Self_Balancing_Robot.ino`
+### `BaseLink.ino`
 - **Purpose:** The "Main Logic Loop". It dictates the master state machine (`STATE_IDLE`, `STATE_BALANCING`), calculates timestamps (`dt`), and pieces together the cascading PID outputs.
 - **Controls:** Links the target position offset to the balance PID, and splits the final calculated motor speeds between the Left and Right wheels. Parses Bluetooth command payloads.
 

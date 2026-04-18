@@ -6,8 +6,7 @@
 #  errors before they reach hardware.
 #
 #  Uses arduino-cli directly (not compile-sketches action)
-#  because the .ino filenames don't match their parent
-#  directory names.
+#  for explicit control over sketch paths and warnings.
 # ============================================================
 
 name: Firmware CI
@@ -47,7 +46,7 @@ jobs:
           arduino-cli lib install "QMC5883LCompass"
 
       - name: Compile BaseLink sketch
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/BaseLink/Self_Balancing_Robot.ino
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/BaseLink/BaseLink.ino
 
   # ---- Controller (Joystick Transmitter) ----
   compile-controller:
@@ -68,4 +67,4 @@ jobs:
           arduino-cli core install esp32:esp32
 
       - name: Compile Controller sketch
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/Controller/Joystick_Transmitter.ino
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/Controller/Controller.ino

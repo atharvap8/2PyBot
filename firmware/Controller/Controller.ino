@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  Joystick_Transmitter.ino
+ *  Controller.ino
  * ============================================================
  *  ESP32 joystick controller for the Self-Balancing Robot.
  *  Reads a 2-axis analog joystick and sends drive commands

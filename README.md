@@ -19,7 +19,7 @@
 24_2PyBot/
 ├── firmware/
 │   ├── BaseLink/               # Robot (receiver) firmware
-│   │   ├── Self_Balancing_Robot.ino
+│   │   ├── BaseLink.ino
 │   │   ├── config.h
 │   │   ├── imu_sensor.h / .cpp
 │   │   ├── stepper_control.h / .cpp
@@ -29,7 +29,7 @@
 │   │   ├── system_architecture.md  # Inline architecture reference
 │   │   └── tuner.html              # Web Bluetooth PID tuner
 │   └── Controller/             # Joystick transmitter firmware
-│       └── Joystick_Transmitter.ino
+│       └── Controller.ino
 ├── gui/                        # Desktop control & telemetry software
 │   └── robot_controller_ui.py
 ├── hardware/                   # PCB schematics and BOM (KiCad)
@@ -81,7 +81,7 @@ The robot streams telemetry packets over Bluetooth serial. Two interfaces are pr
 
 | File | Role |
 | :--- | :--- |
-| `Self_Balancing_Robot.ino` | Main entry point; loop timing and state orchestration |
+| `BaseLink.ino` | Main entry point; loop timing and state orchestration |
 | `config.h` | All tunable constants: PID gains, pin assignments, motor specs |
 | `imu_sensor.h / .cpp` | IMU initialization, DMP/raw read, Mahony filter integration |
 | `stepper_control.h / .cpp` | ISR-driven step generation, velocity ramping, direction control |
@@ -113,14 +113,14 @@ All technical write-ups are in [`docs/`](docs/).
 
 ### Robot Firmware
 
-1. Open `firmware/BaseLink/Self_Balancing_Robot.ino` in the Arduino IDE.
+1. Open `firmware/BaseLink/BaseLink.ino` in the Arduino IDE.
 2. Review `config.h` and set pin assignments and motor parameters for your hardware.
 3. Install required libraries (see `config.h` header comments for the full list).
 4. Flash to the robot ESP32.
 
 ### Controller Firmware
 
-1. Open `firmware/Controller/Joystick_Transmitter.ino`.
+1. Open `firmware/Controller/Controller.ino`.
 2. Set the robot's MAC address in the ESP-NOW peer configuration.
 3. Flash to the transmitter ESP32.
 

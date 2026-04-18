@@ -1,3 +1,5 @@
+"""2PyBot Desktop Dashboard — Real-time telemetry and PID tuning over Bluetooth serial."""
+
 import threading
 import time
 from collections import deque

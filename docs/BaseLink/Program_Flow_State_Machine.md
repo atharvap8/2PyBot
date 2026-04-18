@@ -1,6 +1,6 @@
 # Program Flow and State Machine Architecture
 
-This document meticulously traces the chronological structure spanning the initialization, evaluation, and physical execution routines inherent to the `Self_Balancing_Robot.ino` firmware.
+This document meticulously traces the chronological structure spanning the initialization, evaluation, and physical execution routines inherent to the `BaseLink.ino` firmware.
 
 ## Process Initialization & Calibration Flow
 
