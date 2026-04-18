@@ -332,10 +332,14 @@ class ModernRobotController:
         key = event.keysym.lower()
         if key in self.pressed_keys and not self.pressed_keys[key]:
             self.pressed_keys[key] = True
-            if key == 'w': self.send_drive('W')
-            elif key == 's': self.send_drive('S')
-            elif key == 'a': self.send_drive('A')
-            elif key == 'd': self.send_drive('D')
+            if key == 'w':
+                self.send_drive('W')
+            elif key == 's':
+                self.send_drive('S')
+            elif key == 'a':
+                self.send_drive('A')
+            elif key == 'd':
+                self.send_drive('D')
 
     def on_key_release(self, event):
         key = event.keysym.lower()

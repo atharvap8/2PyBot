@@ -2,7 +2,7 @@
  * ============================================================
  *  config.h — Self-Balancing Robot Configuration
  * ============================================================
- *  Central configuration for pin assignments, motor parameters,
+ *  Central configuration file for pin assignments, motor parameters,
  *  PID gains, filter coefficients, and safety limits.
  *
  *  All tunable constants are placed here so that implementation

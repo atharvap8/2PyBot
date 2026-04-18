@@ -12,9 +12,11 @@ on:
     branches: [main]
     paths:
       - 'gui/**'
+      - 'pyproject.toml'
   pull_request:
     paths:
       - 'gui/**'
+      - 'pyproject.toml'
 
 jobs:
   lint:

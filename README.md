@@ -9,7 +9,7 @@
 [![Python Lint](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml)
 [![Docs Check](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml)
 
-2PyBot is a self-balancing wheeled robot built around the ESP32 microcontroller. It uses stepper motors for precise actuation, a 6-axis IMU fused with a Mahony AHRS filter for orientation estimation, and an ESP-NOW wireless link to a custom joystick transmitter. A Python-based desktop dashboard provides real-time telemetry and live PID tuning over Bluetooth.
+2PyBot is a self-balancing wheeled robot built around the ESP32 microcontroller. It uses stepper motors for precise actuation, a 6-axis IMU fused with a Mahony AHRS filter for orientation estimation, and an ESP-NOW wireless link to a custom joystick transmitter. A Python desktop dashboard provides real-time telemetry and live PID tuning over Bluetooth.
 
 ---
 
