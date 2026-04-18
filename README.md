@@ -1,4 +1,4 @@
-# 2PyBot — Self-Balancing Robot Platform
+# 2PyBot: Self-Balancing Robot Project
 
 [![Status](https://img.shields.io/badge/status-active-brightgreen)](#)
 [![MCU](https://img.shields.io/badge/MCU-ESP32-blue)](#)
@@ -17,7 +17,7 @@
 ## Project Structure
 
 ```
-24_2PyBot/
+2PyBot/
 ├── firmware/
 │   ├── BaseLink/               # Robot (receiver) firmware
 │   │   ├── BaseLink.ino
