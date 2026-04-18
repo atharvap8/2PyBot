@@ -5,6 +5,7 @@
 [![Wireless](https://img.shields.io/badge/Wireless-ESP--NOW-orange)](#)
 [![Language](https://img.shields.io/badge/Firmware-Arduino%20C%2B%2B-lightgrey)](#)
 [![Python](https://img.shields.io/badge/Dashboard-Python%203-yellow)](#)
+[![Release](https://img.shields.io/github/v/release/atharvap8/2PyBot?label=release&color=success)](https://github.com/atharvap8/2PyBot/releases)
 [![Firmware CI](https://github.com/atharvap8/2PyBot/actions/workflows/firmware-ci.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/firmware-ci.yml)
 [![Python Lint](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml)
 [![Docs Check](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml)
