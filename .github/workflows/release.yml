@@ -91,7 +91,7 @@ jobs:
 
             ---
 
-            ## 📦 Release Assets
+            ## Release Assets
 
             | File | Board | Description |
             | :--- | :--- | :--- |
@@ -102,7 +102,7 @@ jobs:
 
             ---
 
-            ## ⚡ Flashing Instructions
+            ## Flashing Instructions
 
             ### Prerequisites
 
@@ -116,7 +116,7 @@ jobs:
 
             ---
 
-            ### 🤖 BaseLink — Robot Receiver
+            ### BaseLink: Robot Receiver
 
             The BaseLink firmware is compiled with the **`huge_app` partition scheme** (3 MB application
             partition) to accommodate the combined footprint of Bluetooth Serial, ESP-NOW, Mahony AHRS,
@@ -150,7 +150,7 @@ jobs:
 
             ---
 
-            ### 🎮 Controller — Joystick Transmitter
+            ### Controller: Joystick Transmitter
 
             The Controller firmware only requires flashing the single application binary.
 
@@ -167,7 +167,7 @@ jobs:
 
             ---
 
-            ### 🔧 Arduino IDE Alternative
+            ### Arduino IDE Alternative
 
             If you prefer not to use `esptool.py`:
 
@@ -179,7 +179,7 @@ jobs:
 
             ---
 
-            ## ⚙️ First-Time Configuration
+            ## First-Time Configuration
 
             ### 1. Set the Receiver MAC Address
 
@@ -207,7 +207,7 @@ jobs:
 
             ---
 
-            ## 🐍 Python Dashboard
+            ## Python Dashboard
 
             ```bash
             cd gui
@@ -220,7 +220,7 @@ jobs:
 
             ---
 
-            ## 📋 Hardware
+            ## Hardware
 
             | Component | Qty | Notes |
             | :--- | :---: | :--- |
@@ -235,7 +235,7 @@ jobs:
 
             ---
 
-            ## 📄 Documentation
+            ## Documentation
 
             Full technical documentation is available in [`docs/`](../../tree/main/docs):
 
