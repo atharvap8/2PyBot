@@ -1,0 +1,63 @@
+# ============================================================
+#  Firmware CI — Arduino Compilation Verification
+# ============================================================
+#  Compiles both ESP32 sketches (BaseLink robot + Controller
+#  transmitter) using arduino-cli to catch syntax and type
+#  errors before they reach hardware.
+# ============================================================
+
+name: Firmware CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+  pull_request:
+    paths:
+      - 'firmware/**'
+
+jobs:
+  # ---- BaseLink (Robot Receiver) ----
+  compile-baselink:
+    name: Compile BaseLink Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile BaseLink sketch
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: esp32:esp32:esp32
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          libraries: |
+            - name: TMCStepper
+            - name: STM32duino ISM6HG256X
+            - name: QMC5883LCompass
+          sketch-paths: |
+            - firmware/BaseLink
+          cli-compile-flags: |
+            - --warnings=default
+
+  # ---- Controller (Joystick Transmitter) ----
+  compile-controller:
+    name: Compile Controller Firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Compile Controller sketch
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: esp32:esp32:esp32
+          platforms: |
+            - name: esp32:esp32
+              source-url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          sketch-paths: |
+            - firmware/Controller
+          cli-compile-flags: |
+            - --warnings=default
