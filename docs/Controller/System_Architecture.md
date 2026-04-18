@@ -26,8 +26,8 @@ graph TD
     end
 
     subgraph Synthesis & Transmission
-        CALC -->|Y [-1 to +1]| SCL_Y[Scale to MAX_TARGET_ANGLE]:::process
-        CALC -->|X [-1 to +1]| SCL_X[Scale to MAX_STEERING]:::process
+        CALC -->|Y -1 to +1| SCL_Y[Scale to MAX_TARGET_ANGLE]:::process
+        CALC -->|X -1 to +1| SCL_X[Scale to MAX_STEERING]:::process
         SCL_Y --> PKT[JoystickPacket Struct]:::software
         SCL_X --> PKT
         INT --> PKT
