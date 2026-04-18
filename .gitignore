@@ -46,3 +46,6 @@ _autosave-*
 # OS
 .DS_Store
 Thumbs.db
+
+#venv
+gui/2PyBot
