@@ -1,0 +1,113 @@
+# ============================================================
+#  Release — Firmware Build & GitHub Release Publisher
+# ============================================================
+#  Triggered by a version tag (e.g. v1.2.0) pushed to main.
+#  Compiles both ESP32 sketches, then creates a GitHub Release
+#  and attaches the flashable .bin files as assets.
+#
+#  Partition scheme:
+#    BaseLink   — huge_app (3 MB) for large firmware footprint
+#    Controller — default  (1.25 MB) sufficient for transmitter
+#
+#  To cut a release:
+#    git tag v1.0.0
+#    git push origin v1.0.0
+# ============================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # required to create GitHub Releases
+
+jobs:
+  build-and-release:
+    name: Build Firmware & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Configure ESP32 board core
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Install BaseLink libraries
+        run: |
+          arduino-cli lib install "TMCStepper"
+          arduino-cli lib install "STM32duino ISM6HG256X"
+          arduino-cli lib install "QMC5883LCompass"
+
+      # ---- Compile BaseLink (Robot Receiver) ----
+      - name: Compile BaseLink sketch
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --warnings default \
+            --output-dir build/BaseLink \
+            firmware/BaseLink/BaseLink.ino
+
+      # ---- Compile Controller (Joystick Transmitter) ----
+      - name: Compile Controller sketch
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32 \
+            --warnings default \
+            --output-dir build/Controller \
+            firmware/Controller/Controller.ino
+
+      # ---- Stage release assets with descriptive names ----
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+          cp build/BaseLink/BaseLink.ino.bin        release/BaseLink-${{ github.ref_name }}.bin
+          cp build/BaseLink/BaseLink.ino.bootloader.bin  release/BaseLink-${{ github.ref_name }}.bootloader.bin
+          cp build/BaseLink/BaseLink.ino.partitions.bin  release/BaseLink-${{ github.ref_name }}.partitions.bin
+          cp build/Controller/Controller.ino.bin    release/Controller-${{ github.ref_name }}.bin
+
+      # ---- Create GitHub Release and upload assets ----
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "2PyBot ${{ github.ref_name }}"
+          body: |
+            ## Firmware Release — ${{ github.ref_name }}
+
+            ### Flashing Instructions
+
+            Flash using `esptool.py` or the ESP32 Flash Download Tool:
+
+            **BaseLink (Robot):**
+            ```
+            esptool.py --chip esp32 --baud 921600 write_flash \
+              0x1000  BaseLink-${{ github.ref_name }}.bootloader.bin \
+              0x8000  BaseLink-${{ github.ref_name }}.partitions.bin \
+              0x10000 BaseLink-${{ github.ref_name }}.bin
+            ```
+
+            **Controller (Transmitter):**
+            ```
+            esptool.py --chip esp32 --baud 921600 write_flash 0x10000 \
+              Controller-${{ github.ref_name }}.bin
+            ```
+
+            > **BaseLink** is compiled with the `huge_app` partition scheme (3 MB app flash).
+          files: |
+            release/BaseLink-${{ github.ref_name }}.bin
+            release/BaseLink-${{ github.ref_name }}.bootloader.bin
+            release/BaseLink-${{ github.ref_name }}.partitions.bin
+            release/Controller-${{ github.ref_name }}.bin
+          draft: false
+          prerelease: false

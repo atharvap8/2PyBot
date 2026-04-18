@@ -5,8 +5,12 @@
 #  transmitter) using arduino-cli to catch syntax and type
 #  errors before they reach hardware.
 #
-#  Uses arduino-cli directly (not compile-sketches action)
-#  for explicit control over sketch paths and warnings.
+#  BaseLink uses the "huge_app" partition scheme (3 MB flash)
+#  because the sketch + Bluetooth + ESP-NOW + AHRS libraries
+#  exceed the default 1.25 MB application partition.
+#
+#  Compiled .bin artifacts are uploaded per run so they can
+#  be inspected or manually flashed without a local toolchain.
 # ============================================================
 
 name: Firmware CI
@@ -21,6 +25,7 @@ on:
       - 'firmware/**'
 
 jobs:
+
   # ---- BaseLink (Robot Receiver) ----
   compile-baselink:
     name: Compile BaseLink Firmware
@@ -35,7 +40,8 @@ jobs:
       - name: Configure ESP32 board core
         run: |
           arduino-cli config init
-          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
@@ -46,7 +52,21 @@ jobs:
           arduino-cli lib install "QMC5883LCompass"
 
       - name: Compile BaseLink sketch
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/BaseLink/BaseLink.ino
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --warnings default \
+            --output-dir build/BaseLink \
+            firmware/BaseLink/BaseLink.ino
+
+      - name: Upload BaseLink build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BaseLink-firmware-${{ github.sha }}
+          path: |
+            build/BaseLink/*.bin
+            build/BaseLink/*.elf
+          if-no-files-found: error
 
   # ---- Controller (Joystick Transmitter) ----
   compile-controller:
@@ -62,9 +82,24 @@ jobs:
       - name: Configure ESP32 board core
         run: |
           arduino-cli config init
-          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
       - name: Compile Controller sketch
-        run: arduino-cli compile --fqbn esp32:esp32:esp32 --warnings default firmware/Controller/Controller.ino
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32 \
+            --warnings default \
+            --output-dir build/Controller \
+            firmware/Controller/Controller.ino
+
+      - name: Upload Controller build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Controller-firmware-${{ github.sha }}
+          path: |
+            build/Controller/*.bin
+            build/Controller/*.elf
+          if-no-files-found: error
