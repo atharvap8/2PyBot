@@ -23,12 +23,13 @@
 │   │   ├── pid_controller.h
 │   │   ├── espnow_comm.h
 │   │   ├── serial_tuner.h
-│   │   ├── robot_controller_ui.py
-│   │   └── tuner.html
+│   │   ├── system_architecture.md  # Inline architecture reference
+│   │   └── tuner.html              # Web Bluetooth PID tuner
 │   └── Controller/             # Joystick transmitter firmware
 │       └── Joystick_Transmitter.ino
+├── gui/                        # Desktop control & telemetry software
+│   └── robot_controller_ui.py
 ├── hardware/                   # PCB schematics and BOM (KiCad)
-├── software/                   # Auxiliary desktop tools and scripts
 ├── models/                     # 3D CAD files (STEP / GLB)
 ├── assets/                     # Media: demo videos, photos, renders
 ├── docs/
@@ -85,7 +86,7 @@ The robot streams telemetry packets over Bluetooth serial. Two interfaces are pr
 | `espnow_comm.h` | ESP-NOW peer registration, packet parsing, and callback handler |
 | `serial_tuner.h` | Bluetooth serial command parser for live PID adjustment |
 | `gui/robot_controller_ui.py` | Python telemetry dashboard (PySerial + Matplotlib) |
-| `tuner.html` | Web Bluetooth PID tuner, no installation required |
+| `firmware/BaseLink/tuner.html` | Web Bluetooth PID tuner, no installation required |
 
 ---
 
