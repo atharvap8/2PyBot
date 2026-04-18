@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  config.h — Self-Balancing Robot Configuration
+ *  config.h — BaseLink Robot Configuration  (partition: huge_app)
  * ============================================================
  *  Central configuration file for pin assignments, motor parameters,
  *  PID gains, filter coefficients, and safety limits.

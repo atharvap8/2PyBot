@@ -1,4 +1,4 @@
-"""2PyBot Desktop Dashboard — Real-time telemetry and PID tuning over Bluetooth serial."""
+"""2PyBot Desktop Dashboard — Real-time telemetry and live PID tuning over Bluetooth serial."""
 
 import threading
 import time
