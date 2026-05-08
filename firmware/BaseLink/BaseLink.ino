@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino
+ *  Self_Balancing_Robot.ino
  * ============================================================
  *  Phase 1 — Core Self-Balancing and Locomotion Physics
  *
@@ -92,11 +92,18 @@ float manualDriveTilt = 3.0f;
 
 // Variable tracking structural displacement actively during position-hold procedures.
 bool DEBUG = true; // Toggles high-frequency serial evaluation rendering via UART.
-float posHoldKp = POS_HOLD_KP;
-float posHoldKd = POS_HOLD_KD;
 float maxPosHoldTilt = MAX_POS_HOLD_TILT;
-int32_t heldPosition = 0;
-int32_t lastPosition = 0;
+
+// Windowed tick-rate drift detection.
+// Normal balancing: ticks oscillate up/down, net change over window ≈ 0.
+// Drifting: ticks grow monotonically in one direction, net change is large.
+// We keep a circular buffer of encoder positions spanning DRIFT_WINDOW_SEC.
+#define DRIFT_WINDOW_TICKS  60       // 60 samples at 200Hz = 0.3 seconds window.
+#define DRIFT_TICK_THRESHOLD 300     // Net encoder ticks over window to consider drift.
+#define DRIFT_GAIN          0.0008f  // Corrective lean (degrees) per net tick of drift.
+int64_t driftBuffer[DRIFT_WINDOW_TICKS];  // Circular buffer of avg encoder positions.
+uint8_t driftBufIdx = 0;                   // Current write index.
+bool    driftBufFilled = false;            // True once buffer has wrapped once (full window of data).
 
 // Instantiates the live parsing engine consuming Serial updates actively.
 SerialTuner tuner(pid, steppers, imu);
@@ -139,7 +146,7 @@ void setup() {
 
     Serial.println();
     Serial.println("==================================================");
-    Serial.println("    SELF-BALANCING ROBOT  —  State Evaluation    ");
+    Serial.println("                SELF-BALANCING ROBOT              ");
     Serial.println("==================================================");
     Serial.println();
 
@@ -226,8 +233,8 @@ void loop() {
             // Initialize physics setpoints directly utilizing current physical metrics.
             targetAngleOffset = 0.0f;
             targetYaw = imu.getYaw();
-            heldPosition = steppers.getAveragePosition();
-            lastPosition = heldPosition;
+            driftBufIdx = 0;
+            driftBufFilled = false;
             
             Serial.println("[MAIN] State execution logically proceeding → BALANCING");
         }
@@ -263,8 +270,6 @@ void loop() {
                     else if (key == "KD") pid.Kd = val;
                     else if (key == "T") dynamicTargetAngle = val;
                     else if (key == "MDT") manualDriveTilt = val;
-                    else if (key == "PKP") posHoldKp = val;
-                    else if (key == "PKD") posHoldKd = val;
                     else if (key == "PMT") maxPosHoldTilt = val;
                     else if (key == "YKP") yawPid.Kp = val;
                     else if (key == "YKD") yawPid.Kd = val;
@@ -272,10 +277,7 @@ void loop() {
                     else if (key == "INV_Y") invertYaw = (val > 0.5f);
                     else if (key == "EN_P") {
                         enableDriftCorrection = (val > 0.5f);
-                        if (enableDriftCorrection) {
-                            heldPosition = steppers.getAveragePosition();
-                            lastPosition = heldPosition;
-                        } else {
+                        if (!enableDriftCorrection) {
                             targetAngleOffset = 0.0f;
                         }
                     }
@@ -309,12 +311,6 @@ void loop() {
                 
                 // Track forward and reverse commands uniquely logic.
                 if (nextC == 'W' || nextC == 'S' || nextC == 'X') {
-                    // Restrict baseline target coordinates exactly upon drive event conclusion 
-                    // providing seamless positional hold intersection.
-                    if (driveState != 'X' && nextC == 'X') {
-                        heldPosition = steppers.getAveragePosition();
-                        lastPosition = heldPosition;
-                    }
                     driveState = nextC;
                 }
                 
@@ -355,6 +351,7 @@ void loop() {
             // Formulates snapping tolerances reducing terminal evaluation overheads locally.
             if (fabsf(targetAngleOffset - desired) < 0.02f) targetAngleOffset = desired;
             driving = true;
+            driftBufIdx = 0; driftBufFilled = false;  // Reset drift buffer when actively driving.
         }
 
         // --- Active Button State Interpretation ---
@@ -365,8 +362,7 @@ void loop() {
         if (joyEn && !lastJoyEn) {
             pid.reset(); targetAngleOffset = 0.0f;
             targetYaw = imu.getYaw();
-            heldPosition = steppers.getAveragePosition();
-            lastPosition = heldPosition;
+            driftBufIdx = 0; driftBufFilled = false;
             steppers.enable();
         } else if (!joyEn && lastJoyEn) {
             steppers.setSpeed(0); steppers.disable(); state = STATE_IDLE;
@@ -380,11 +376,14 @@ void loop() {
         if (driveState == 'W') {
             targetAngleOffset -= MANUAL_DRIVE_RATE * dt;
             driving = true;
+            driftBufIdx = 0; driftBufFilled = false;
         } else if (driveState == 'S') {
             targetAngleOffset += MANUAL_DRIVE_RATE * dt;
             driving = true;
+            driftBufIdx = 0; driftBufFilled = false;
         }
     }
+
 
     // ============================================================
     //  IDLE POSITION-HOLD BRAKING CORRECTIONS
@@ -394,19 +393,34 @@ void loop() {
         // Define baseline fallback target uniquely centered to absolute zero.
         float desired = 0.0f;
         
-        // Execute dynamic positional estimation correcting native physical drift errors.
+        // Windowed tick-rate drift detection.
+        // Every tick: record encoder position into circular buffer.
+        // Compare current vs 0.3s-ago position. Large net delta = drift.
+        // Normal balancing oscillates, so net delta ≈ 0 over 0.3s.
         if (enableDriftCorrection && state == STATE_BALANCING) {
             
-            // Derive identical coordinates from structural step counting mechanics uniquely.
-            int32_t currentPos = steppers.getAveragePosition();
+            int64_t currentPos = steppers.getAveragePosition();
             
-            // Refine constraints aggressively mapping excessive manual drive vectors cleanly 
-            // into manageable holding routines.
-            if (fabsf(targetAngleOffset) > 0.3f) heldPosition = currentPos;
-            float posError = (float)(currentPos - heldPosition);
+            // Push current position into circular buffer.
+            driftBuffer[driftBufIdx] = currentPos;
+            driftBufIdx++;
+            if (driftBufIdx >= DRIFT_WINDOW_TICKS) {
+                driftBufIdx = 0;
+                driftBufFilled = true;
+            }
             
-            // Convert physical step errors entirely into localized compensatory angular influence.
-            desired = constrain(posError * posHoldKp, -maxPosHoldTilt, maxPosHoldTilt);
+            // Only evaluate once we have a full window of data.
+            if (driftBufFilled) {
+                // The oldest sample in the buffer is at driftBufIdx (just wrapped).
+                int64_t oldestPos = driftBuffer[driftBufIdx];
+                int64_t netDelta = currentPos - oldestPos;
+                
+                if (abs((int32_t)netDelta) > DRIFT_TICK_THRESHOLD) {
+                    // Monotonic drift detected — lean opposite.
+                    desired = -(float)netDelta * DRIFT_GAIN;
+                    desired = constrain(desired, -maxPosHoldTilt, maxPosHoldTilt);
+                }
+            }
         }
         
         // Exponentially filter positional decay curves creating flawlessly simulated mechanical inertia.
@@ -542,15 +556,28 @@ void loop() {
     // Serializes extensive variable combinations utilizing structured string manipulations 
     // selectively routing datasets dynamically rendering external graphical interfaces effortlessly.
     if (loopCounter % PLOT_DIVIDER == 0 && DEBUG) {
-        char buff[256];
-        snprintf(buff, sizeof(buff), "%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.1f\t%.1f\t%.1f\t%d\t%d\n",
+        // Compute wheel angles from encoder ticks (0-360° within current revolution)
+        int64_t encTicksL = steppers.getPositionL();
+        int64_t encTicksR = steppers.getPositionR();
+        int32_t modL = (int32_t)(encTicksL % ENCODER_CPR);
+        int32_t modR = (int32_t)(encTicksR % ENCODER_CPR);
+        if (modL < 0) modL += ENCODER_CPR;
+        if (modR < 0) modR += ENCODER_CPR;
+        float wheelAngleL = (float)modL / ENCODER_CPR * 360.0f;
+        float wheelAngleR = (float)modR / ENCODER_CPR * 360.0f;
+        
+        // 20 tab-separated fields: original 16 + 4 encoder fields
+        char buff[320];
+        snprintf(buff, sizeof(buff), "%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.1f\t%.1f\t%.1f\t%d\t%d\t%ld\t%ld\t%.1f\t%.1f\n",
                       angle,
                       pid.setpoint,
                       imu.getAx(), imu.getAy(), imu.getAz(),
                       imu.getGx(), imu.getGy(), imu.getGz(),
                       imu.getMx(), imu.getMy(), imu.getMz(),
                       pid.getP(), pid.getI(), pid.getD(),
-                      latestLeftSpeed, latestRightSpeed);
+                      latestLeftSpeed, latestRightSpeed,
+                      (long)encTicksL, (long)encTicksR,
+                      wheelAngleL, wheelAngleR);
         Serial.print(buff);
         SerialBT.print(buff);
     }

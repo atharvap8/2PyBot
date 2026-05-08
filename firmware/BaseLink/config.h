@@ -1,8 +1,8 @@
 /*
  * ============================================================
- *  config.h — BaseLink Robot Configuration  (partition: huge_app)
+ *  config.h — Self-Balancing Robot Configuration
  * ============================================================
- *  Central configuration file for pin assignments, motor parameters,
+ *  Central configuration for pin assignments, motor parameters,
  *  PID gains, filter coefficients, and safety limits.
  *
  *  All tunable constants are placed here so that implementation
@@ -37,6 +37,16 @@
 #define I2C_CLOCK_HZ      400000  // 400 kHz Fast-mode capability configuration.
 #define ONBOARD_LED       2
 
+// ---- MT6816 ABZ Quadrature Encoders (PCNT Hardware Decode) ----
+#define ENC_LEFT_A         4      // Left encoder A channel.
+#define ENC_LEFT_B         5      // Left encoder B channel.
+#define ENC_RIGHT_A       13      // Right encoder A channel.
+#define ENC_RIGHT_B       23      // Right encoder B channel.
+#define ENCODER_PPR       1024    // MT6816 ABZ pulses per revolution.
+#define ENCODER_CPR       (ENCODER_PPR * 4)  // 4096 counts/rev with 4x hardware decode.
+#define PCNT_H_LIM        30000   // PCNT overflow high limit.
+#define PCNT_L_LIM       -30000   // PCNT overflow low limit.
+
 // ============================================================
 //  MOTOR / DRIVER PARAMETERS
 // ============================================================
@@ -70,21 +80,21 @@
 // ============================================================
 //  BALANCE PID PARAMETERS
 // ============================================================
-#define DEFAULT_KP           1000.0f
-#define DEFAULT_KI            30.0f
-#define DEFAULT_KD            30.0f
-#define DEFAULT_TARGET_ANGLE  -1.469f    // The naturally settled upright center of gravity offset (measured in degrees).
+#define DEFAULT_KP           1250.0f
+#define DEFAULT_KI            0.0f
+#define DEFAULT_KD            1.786f
+#define DEFAULT_TARGET_ANGLE  0.071f    // The naturally settled upright center of gravity offset (measured in degrees).
 
 // PID Output limits map directly to the maximum capability of the stepper timer routine (steps per second).
 #define PID_OUTPUT_MIN       (-((float)TIMER_FREQ_HZ))
 #define PID_OUTPUT_MAX       ((float)TIMER_FREQ_HZ)
 
 // Prevents integral windup accumulation during long mechanical stalls.
-#define INTEGRAL_LIMIT        5000.0f
+#define INTEGRAL_LIMIT        1500.0f
 
 // Adaptive PID multipliers scale specific coefficients conditionally when the robot falls deeply out of balance.
-#define ADAPTIVE_ERROR_THRESHOLD 2.0f   // The dynamic tilt angle threshold causing Kp to multiply.
-#define ADAPTIVE_KP_BOOST        1.5f   // The mathematical multiplier applied to Kp when the threshold is exceeded.
+#define ADAPTIVE_ERROR_THRESHOLD 4.0f   // The dynamic tilt angle threshold causing Kp to multiply.
+#define ADAPTIVE_KP_BOOST        1.2f   // The mathematical multiplier applied to Kp when the threshold is exceeded.
 
 // ============================================================
 //  MANUAL DRIVING & POSITION HOLD
@@ -93,10 +103,8 @@
 #define MAX_MANUAL_TILT        6.0f     // Absolute maximum positional lean angle command constraint allowed for safety.
 #define BRAKE_DECAY_RATE       8.0f     // Exponential damping rate applied mathematically to angular velocity upon returning to zero input.
 
-// Position Maintenance Algorithm (stepper-odometry drift correction).
-#define POS_HOLD_KP            0.0006f  // Factor translating raw stepped physical distance error back into correcting angular influence.
-#define POS_HOLD_KD            0.003f   // Derivative factor dampening physical sway while maintaining position.
-#define MAX_POS_HOLD_TILT      3.0f     // Peak pitch limit angle authority allocated specifically for autonomous positional corrections.
+// Position Maintenance Algorithm (encoder-based drift correction).
+#define MAX_POS_HOLD_TILT      1.5f     // Peak pitch limit angle authority allocated specifically for autonomous positional corrections.
 #define STEER_SMOOTHING        25.0f    // Mathematical ramp time coefficient mitigating instantaneous mechanical shocks when initiating a turn.
 
 // ============================================================
@@ -112,7 +120,7 @@
 // Determines the maximum allowable stepper speed rate change, categorized mathematically in steps/sec^2.
 // Prevents total electromechanical starvation (stalling) during sudden PID speed spikes.
 // A limit of 200,000 correlates to a maximum discrete variation of 1,000 velocity units per 200Hz evaluation tick.
-#define MOTOR_ACCEL_LIMIT     200000.0f
+#define MOTOR_ACCEL_LIMIT     80000.0f
 
 // ============================================================
 //  PID DERIVATIVE FILTER
@@ -120,7 +128,7 @@
 // Dedicated low-pass signal filter isolated explicitly to the reactive Derivative component output.
 // Lowering the 'Alpha' coefficient mitigates high-frequency IMU signal noise but intrinsically introduces reactive phase lag.
 // Values range between 0.0 (frozen differential) and 1.0 (unfiltered transmission).
-#define PID_D_FILTER_ALPHA    0.7f
+#define PID_D_FILTER_ALPHA    0.3f
 
 // ============================================================
 //  HEADING HOLD PID PARAMETERS (YAW)
@@ -203,4 +211,4 @@
 #define SERIAL_BAUD           115200
 #define PLOT_DIVIDER          10      // Instructs the serial printing function to intentionally skip evaluations. Example: 200 Hz / 10 = an efficient 20 Hz output stream.
 
-#endif  // CONFIG_H
+#endif // CONFIG_H

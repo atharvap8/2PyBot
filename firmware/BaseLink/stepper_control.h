@@ -1,4 +1,4 @@
-/*
+    /*
  * ============================================================
  *  stepper_control.h — Dual TMC2208 Stepper Driver Array
  * ============================================================
@@ -13,6 +13,11 @@
  *  A Bresenham-style pulse accumulator algorithm translates 
  *  continuous velocity demands into discrete, evenly distributed 
  *  step pulses across the timer's constant underlying frequency.
+ *
+ *  ODOMETRY: Position feedback is sourced exclusively from 
+ *  MT6816 magnetic encoders via ESP32 PCNT hardware quadrature 
+ *  decoding — NOT from internal step counting. This provides 
+ *  genuine closed-loop feedback immune to missed steps.
  * ============================================================
  */
 
@@ -21,17 +26,24 @@
 
 #include <Arduino.h>
 #include <TMCStepper.h>
+#include "driver/pcnt.h"
 #include "config.h"
 
 class StepperControl {
 public:
+    // PCNT encoder overflow accumulators — public so the free C-style 
+    // overflow ISR trampoline can accumulate counts directly.
+    static volatile int64_t _encOverflowL;
+    static volatile int64_t _encOverflowR;
+
     StepperControl();
 
     // ============================================================
     //  Initialization
     // ============================================================
     // Bootstraps UART communications, verifies driver register availability,
-    // configures stealthChop parameters, and establishes the hardware timer ISR.
+    // configures stealthChop parameters, establishes the hardware timer ISR,
+    // and initializes PCNT hardware units for encoder feedback.
     // Returns gracefully as false if either TMC2208 integrated circuit fails 
     // to respond to a boot-up connectivity ping.
     bool begin();
@@ -48,15 +60,15 @@ public:
     void setSpeeds(int32_t leftStepsPerSec, int32_t rightStepsPerSec);
 
     // ============================================================
-    //  Odometry & Position Tracking
+    //  Odometry & Position Tracking (ENCODER-BASED)
     // ============================================================
-    // The ISR autonomously increments/decrements these precise counters 
-    // exactly simultaneously with every physical pulse dispatched.
-    // This provides a pristine, drift-free methodology for tracking spatial 
-    // displacement utilized exclusively by the Position-Hold algorithmic cascade.
-    int32_t getPositionL() const;
-    int32_t getPositionR() const;
-    int32_t getAveragePosition() const;
+    // Reads real-time wheel positions directly from the MT6816 magnetic 
+    // encoders via hardware PCNT quadrature decoding. These values represent 
+    // actual physical shaft rotation — immune to stepper missed-step errors.
+    // Units: encoder counts (4096 per revolution at 1024 PPR with 4x decode).
+    int64_t getPositionL();
+    int64_t getPositionR();
+    int64_t getAveragePosition();
 
     // ============================================================
     //  Driver States
@@ -106,13 +118,13 @@ private:
     volatile uint32_t _accumR;      // Internal fractional accumulator (Bresenham Right).
     volatile uint32_t _accumL;      // Internal fractional accumulator (Bresenham Left).
 
-    volatile int32_t  _posL;        // Absolute pulse tracker establishing odometry.
-    volatile int32_t  _posR;        // Absolute pulse tracker establishing odometry.
-
     bool _enabled;                  // Mirrors the physical assertion state of the EN pins.
 
     // Internal abstraction handling monotonous boilerplate register configuration.
     void setupDriver(TMC2208Stepper& drv, const char* label);
+    
+    // Configures one PCNT hardware unit for full 4x quadrature decoding.
+    void setupPCNT(pcnt_unit_t unit, int pinA, int pinB);
 };
 
 // Global instance declaration allows the free-floating C-style ISR trampoline 

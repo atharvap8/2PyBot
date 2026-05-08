@@ -5,6 +5,10 @@
  *  Provides the executable logic coordinating high-frequency 
  *  hardware interrupts with asynchronous UART configuration 
  *  payloads to seamlessly operate dual stepper motors.
+ *
+ *  ODOMETRY: All position feedback is sourced from MT6816 
+ *  magnetic encoders via ESP32 PCNT hardware — replacing the 
+ *  previous open-loop step counting entirely.
  * ============================================================
  */
 
@@ -32,6 +36,31 @@ void IRAM_ATTR stepperTimerISR() {
 }
 
 // ============================================================
+//  Static PCNT overflow accumulators (class-level storage)
+// ============================================================
+volatile int64_t StepperControl::_encOverflowL = 0;
+volatile int64_t StepperControl::_encOverflowR = 0;
+
+// ============================================================
+//  PCNT Overflow ISR — Extends 16-bit counters to 64-bit
+// ============================================================
+// When the hardware counter hits ±30000, this ISR fires and 
+// accumulates the overflow into the 64-bit software tracker.
+static void IRAM_ATTR pcnt_overflow_isr(void *arg) {
+    uint32_t status = 0;
+
+    // Left encoder (PCNT_UNIT_0)
+    pcnt_get_event_status(PCNT_UNIT_0, &status);
+    if (status & PCNT_EVT_H_LIM) StepperControl::_encOverflowL += PCNT_H_LIM;
+    if (status & PCNT_EVT_L_LIM) StepperControl::_encOverflowL += PCNT_L_LIM;
+
+    // Right encoder (PCNT_UNIT_1)
+    pcnt_get_event_status(PCNT_UNIT_1, &status);
+    if (status & PCNT_EVT_H_LIM) StepperControl::_encOverflowR += PCNT_H_LIM;
+    if (status & PCNT_EVT_L_LIM) StepperControl::_encOverflowR += PCNT_L_LIM;
+}
+
+// ============================================================
 //  Constructor
 // ============================================================
 // Initializes the serial driver abstractions. The TMC2208Stepper instances
@@ -44,9 +73,57 @@ StepperControl::StepperControl()
       _absRateL(0), _absRateR(0), 
       _dirFwdL(true), _dirFwdR(true),
       _accumR(0), _accumL(0),
-      _posL(0), _posR(0),
       _enabled(false)
 {}
+
+// ============================================================
+//  setupPCNT() — Configure one PCNT unit for 4x quadrature
+// ============================================================
+// Uses both PCNT channels on a single unit to achieve full 4x 
+// decode: counting on both A and B edges with direction from 
+// the opposite signal.
+void StepperControl::setupPCNT(pcnt_unit_t unit, int pinA, int pinB) {
+    // Channel 0: count on A edges, use B for direction
+    pcnt_config_t cfg0 = {};
+    cfg0.pulse_gpio_num = pinA;
+    cfg0.ctrl_gpio_num  = pinB;
+    cfg0.channel         = PCNT_CHANNEL_0;
+    cfg0.unit            = unit;
+    cfg0.pos_mode        = PCNT_COUNT_INC;
+    cfg0.neg_mode        = PCNT_COUNT_DEC;
+    cfg0.lctrl_mode      = PCNT_MODE_REVERSE;
+    cfg0.hctrl_mode      = PCNT_MODE_KEEP;
+    cfg0.counter_h_lim   = PCNT_H_LIM;
+    cfg0.counter_l_lim   = PCNT_L_LIM;
+    pcnt_unit_config(&cfg0);
+
+    // Channel 1: count on B edges, use A for direction (completes 4x)
+    pcnt_config_t cfg1 = {};
+    cfg1.pulse_gpio_num = pinB;
+    cfg1.ctrl_gpio_num  = pinA;
+    cfg1.channel         = PCNT_CHANNEL_1;
+    cfg1.unit            = unit;
+    cfg1.pos_mode        = PCNT_COUNT_DEC;
+    cfg1.neg_mode        = PCNT_COUNT_INC;
+    cfg1.lctrl_mode      = PCNT_MODE_REVERSE;
+    cfg1.hctrl_mode      = PCNT_MODE_KEEP;
+    cfg1.counter_h_lim   = PCNT_H_LIM;
+    cfg1.counter_l_lim   = PCNT_L_LIM;
+    pcnt_unit_config(&cfg1);
+
+    // Glitch filter: ignore pulses shorter than 100 × 12.5 ns = 1.25 µs
+    pcnt_set_filter_value(unit, 100);
+    pcnt_filter_enable(unit);
+
+    // Enable overflow events
+    pcnt_event_enable(unit, PCNT_EVT_H_LIM);
+    pcnt_event_enable(unit, PCNT_EVT_L_LIM);
+
+    // Clear and start
+    pcnt_counter_pause(unit);
+    pcnt_counter_clear(unit);
+    pcnt_counter_resume(unit);
+}
 
 // ============================================================
 //  begin()
@@ -81,6 +158,21 @@ bool StepperControl::begin() {
     // Sequentially pump configuration data frames through the UART streams.
     setupDriver(_rightDrv, "RIGHT");
     setupDriver(_leftDrv,  "LEFT");
+
+    // ---- MT6816 Encoder PCNT Initialization ----
+    // Sets up hardware quadrature decoding for both wheel encoders.
+    // PCNT_UNIT_0 = Left wheel, PCNT_UNIT_1 = Right wheel.
+    setupPCNT(PCNT_UNIT_0, ENC_LEFT_A,  ENC_LEFT_B);
+    setupPCNT(PCNT_UNIT_1, ENC_RIGHT_A, ENC_RIGHT_B);
+
+    // Install shared overflow ISR for both PCNT units
+    pcnt_isr_service_install(0);
+    pcnt_isr_handler_add(PCNT_UNIT_0, pcnt_overflow_isr, NULL);
+    pcnt_isr_handler_add(PCNT_UNIT_1, pcnt_overflow_isr, NULL);
+    pcnt_intr_enable(PCNT_UNIT_0);
+    pcnt_intr_enable(PCNT_UNIT_1);
+
+    Serial.println("[STEP] MT6816 encoders initialized (PCNT 4x decode, 4096 CPR)");
 
     // ---- Hardware Timer Structure (ESP32 Core 3.0+ Compliant) ----
     // Requests exclusive access to an internal silicon timer.
@@ -166,26 +258,26 @@ void StepperControl::setSpeeds(int32_t leftStepsPerSec, int32_t rightStepsPerSec
 }
 
 // ============================================================
-//  Position Analytics
+//  Position Analytics — REAL ENCODER FEEDBACK
 // ============================================================
-// Disconnects identical Mutex boundaries temporarily to extract cleanly
-// formatted position integers previously disjointed across multi-byte boundaries.
-int32_t StepperControl::getPositionL() const {
-    int32_t p;
-    portENTER_CRITICAL(&timerMux); p = _posL; portEXIT_CRITICAL(&timerMux);
-    return p;
+// Reads accumulated encoder counts from the PCNT hardware units.
+// Each count represents 1/4096th of a shaft revolution.
+// This replaces the previous open-loop step counting entirely.
+
+int64_t StepperControl::getPositionL() {
+    int16_t hw = 0;
+    pcnt_get_counter_value(PCNT_UNIT_0, &hw);
+    return _encOverflowL + hw;
 }
-int32_t StepperControl::getPositionR() const {
-    int32_t p;
-    portENTER_CRITICAL(&timerMux); p = _posR; portEXIT_CRITICAL(&timerMux);
-    return p;
+
+int64_t StepperControl::getPositionR() {
+    int16_t hw = 0;
+    pcnt_get_counter_value(PCNT_UNIT_1, &hw);
+    return -(_encOverflowR + hw); // Inverted to match left encoder's forward direction
 }
-int32_t StepperControl::getAveragePosition() const {
-    int32_t l, r;
-    portENTER_CRITICAL(&timerMux);
-    l = _posL; r = _posR;
-    portEXIT_CRITICAL(&timerMux);
-    return (l + r) / 2;
+
+int64_t StepperControl::getAveragePosition() {
+    return (getPositionL() + getPositionR()) / 2;
 }
 
 // ============================================================
@@ -239,6 +331,9 @@ void StepperControl::setCurrent(uint16_t mA) {
 // 
 // This creates flawlessly uniform pulse displacement, even mapping obscure or
 // prime numerical velocity constraints optimally across constant procedural intervals.
+//
+// NOTE: Step counting has been REMOVED from this ISR. Position tracking is now 
+// handled entirely by the MT6816 encoder PCNT hardware — true closed-loop feedback.
 
 void IRAM_ATTR StepperControl::tick() {
     
@@ -261,8 +356,7 @@ void IRAM_ATTR StepperControl::tick() {
             // Collapse the physical waveform back LOW.
             GPIO.out1_w1tc.val = (1 << (RIGHT_STEP_PIN - 32));
             
-            // Maintain absolute chronological tracking.
-            if (_dirFwdR) _posR++; else _posR--;
+            // Position tracking removed — encoder handles this now.
         }
     }
 
@@ -278,7 +372,7 @@ void IRAM_ATTR StepperControl::tick() {
             __asm__ __volatile__("nop; nop; nop; nop; nop; nop; nop; nop;");
             GPIO.out_w1tc = (1 << LEFT_STEP_PIN);
             
-            if (_dirFwdL) _posL++; else _posL--;
+            // Position tracking removed — encoder handles this now.
         }
     }
 }
