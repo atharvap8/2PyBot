@@ -5,8 +5,8 @@
  *  Central configuration for pin assignments, motor parameters,
  *  PID gains, filter coefficients, and safety limits.
  *
- *  All tunable constants are placed here so that implementation
- *  files do not require manual editing during a tuning session.
+ *  All tunable constants live here. Implementation files do
+ *  not require manual edits during a tuning session.
  * ============================================================
  */
 
@@ -21,61 +21,58 @@
 #define RIGHT_STEP_PIN    33
 #define RIGHT_DIR_PIN     25
 #define RIGHT_EN_PIN      32
-#define RIGHT_UART_TX     17    // Requires a 1 kΩ inline resistor on the TX line.
+#define RIGHT_UART_TX     17    // Requires a 1 kΩ inline resistor.
 #define RIGHT_UART_RX     16
 
 // ---- Left Stepper Motor (TMC2208) ----
 #define LEFT_STEP_PIN     27
 #define LEFT_DIR_PIN      14
 #define LEFT_EN_PIN       26
-#define LEFT_UART_TX      19    // Requires a 1 kΩ inline resistor on the TX line.
+#define LEFT_UART_TX      19    // Requires a 1 kΩ inline resistor.
 #define LEFT_UART_RX      18
 
-// ---- I2C Bus (default Wire) ----
+// ---- I2C Bus ----
 #define I2C_SDA           21
 #define I2C_SCL           22
-#define I2C_CLOCK_HZ      400000  // 400 kHz Fast-mode capability configuration.
+#define I2C_CLOCK_HZ      400000  // 400 kHz fast-mode.
 #define ONBOARD_LED       2
 
-// ---- MT6816 ABZ Quadrature Encoders (PCNT Hardware Decode) ----
-#define ENC_LEFT_A         4      // Left encoder A channel.
-#define ENC_LEFT_B         5      // Left encoder B channel.
-#define ENC_RIGHT_A       13      // Right encoder A channel.
-#define ENC_RIGHT_B       23      // Right encoder B channel.
-#define ENCODER_PPR       1024    // MT6816 ABZ pulses per revolution.
-#define ENCODER_CPR       (ENCODER_PPR * 4)  // 4096 counts/rev with 4x hardware decode.
-#define PCNT_H_LIM        30000   // PCNT overflow high limit.
-#define PCNT_L_LIM       -30000   // PCNT overflow low limit.
+// ---- MT6816 ABZ Quadrature Encoders (PCNT) ----
+#define ENC_LEFT_A         4
+#define ENC_LEFT_B         5
+#define ENC_RIGHT_A       13
+#define ENC_RIGHT_B       23
+#define ENCODER_PPR       1024    // MT6816 pulses per revolution.
+#define ENCODER_CPR       (ENCODER_PPR * 4)  // 4096 counts/rev with 4x decode.
+#define PCNT_H_LIM        30000
+#define PCNT_L_LIM       -30000
 
 // ============================================================
 //  MOTOR / DRIVER PARAMETERS
 // ============================================================
-#define MICROSTEPS           16       // Software microstep configuration for the TMC2208 drivers.
-#define STEPS_PER_REV        200      // Full physical steps per revolution for a standard 1.8-degree motor.
-#define USTEPS_PER_REV       (STEPS_PER_REV * MICROSTEPS)  // Equals 3200 steps per revolution.
-#define MOTOR_CURRENT_MA     1100     // Maximum RMS current target delivered to the TMC2208 via UART.
-#define R_SENSE              0.11f    // Rated sense resistor value on the specific TMC2208 module PCB (measured in Ohms).
+#define MICROSTEPS           16
+#define STEPS_PER_REV        200      // Full steps/rev for a 1.8° motor.
+#define USTEPS_PER_REV       (STEPS_PER_REV * MICROSTEPS)  // 3200 steps/rev.
+#define MOTOR_CURRENT_MA     1100     // RMS current target via UART.
+#define R_SENSE              0.11f    // Sense resistor on the TMC2208 PCB (Ω).
 
-// Direction inversion logic.
-// Because the stepper motors physically mirror each other on the chassis, one must be inverted electrically.
-// This ensures that a positive aggregate PID output successfully drives the robot forwards.
+// Motors are mechanically mirrored; one axis must be inverted so that
+// a positive PID output drives the robot forward.
 #define RIGHT_DIR_INVERT     false
 #define LEFT_DIR_INVERT      true
 
 // ============================================================
 //  STEPPER TIMER
 // ============================================================
-//  A high-speed hardware timer fires at the configured TIMER_FREQ_HZ. 
-//  Inside the underlying Interrupt Service Routine (ISR), a Bresenham 
-//  accumulator algorithm decides whether to pulse each motor on that specific tick.
-//  Therefore, the absolute maximum achievable step rate equals TIMER_FREQ_HZ.
+//  A hardware timer fires at TIMER_FREQ_HZ. A Bresenham accumulator
+//  inside the ISR decides whether to pulse each motor on that tick.
+//  Maximum step rate equals TIMER_FREQ_HZ.
 //
-//  For example: A 20 kHz interrupt translates to a 50 µs timing period, yielding a max of 20,000 steps/s.
-//  At 16 microsteps, this results in: 20000 / 3200 ≈ 6.25 rev/s (approximately 375 RPM), which is adequate.
+//  At 20 kHz / 16 microsteps: 20000 / 3200 ≈ 6.25 rev/s (~375 RPM).
 // ============================================================
 #define TIMER_FREQ_HZ        20000
-#define TIMER_PRESCALER       80      // Divides the 80 MHz APB system clock by 80 to establish a 1 MHz base tick.
-#define TIMER_ALARM_COUNT    (1000000 / TIMER_FREQ_HZ)  // Derives the specific alarm interrupt boundary count.
+#define TIMER_PRESCALER       80      // Divides 80 MHz APB clock to 1 MHz base.
+#define TIMER_ALARM_COUNT    (1000000 / TIMER_FREQ_HZ)
 
 // ============================================================
 //  BALANCE PID PARAMETERS
@@ -83,132 +80,128 @@
 #define DEFAULT_KP           1250.0f
 #define DEFAULT_KI            0.0f
 #define DEFAULT_KD            1.786f
-#define DEFAULT_TARGET_ANGLE  0.071f    // The naturally settled upright center of gravity offset (measured in degrees).
+#define DEFAULT_TARGET_ANGLE  0.071f    // Upright center-of-gravity offset (degrees).
 
-// PID Output limits map directly to the maximum capability of the stepper timer routine (steps per second).
-#define PID_OUTPUT_MIN       (-((float)TIMER_FREQ_HZ))
-#define PID_OUTPUT_MAX       ((float)TIMER_FREQ_HZ)
+// Output limits map to the stepper timer's maximum step rate.
+#define PID_OUTPUT_MIN       -10000
+#define PID_OUTPUT_MAX       10000
 
-// Prevents integral windup accumulation during long mechanical stalls.
+// Anti-windup clamp on the integral accumulator.
 #define INTEGRAL_LIMIT        1500.0f
 
-// Adaptive PID multipliers scale specific coefficients conditionally when the robot falls deeply out of balance.
-#define ADAPTIVE_ERROR_THRESHOLD 4.0f   // The dynamic tilt angle threshold causing Kp to multiply.
-#define ADAPTIVE_KP_BOOST        1.2f   // The mathematical multiplier applied to Kp when the threshold is exceeded.
+// Adaptive Kp — multiplies Kp when tilt error exceeds the threshold.
+#define ADAPTIVE_ERROR_THRESHOLD 4.0f
+#define ADAPTIVE_KP_BOOST        1.05f
 
 // ============================================================
 //  MANUAL DRIVING & POSITION HOLD
 // ============================================================
-#define MANUAL_DRIVE_RATE      3.0f     // Rate of angle accumulation (degrees per second) when receiving a W/S keyhold command.
-#define MAX_MANUAL_TILT        6.0f     // Absolute maximum positional lean angle command constraint allowed for safety.
-#define BRAKE_DECAY_RATE       8.0f     // Exponential damping rate applied mathematically to angular velocity upon returning to zero input.
+#define MANUAL_DRIVE_RATE      3.0f     // Angle accumulation rate for W/S keyhold (°/s).
+#define MAX_MANUAL_TILT        6.0f     // Maximum commanded lean angle (degrees).
+#define BRAKE_DECAY_RATE       8.0f     // EMA decay rate when input returns to zero.
 
-// Position Maintenance Algorithm (encoder-based drift correction).
-#define MAX_POS_HOLD_TILT      1.5f     // Peak pitch limit angle authority allocated specifically for autonomous positional corrections.
-#define STEER_SMOOTHING        25.0f    // Mathematical ramp time coefficient mitigating instantaneous mechanical shocks when initiating a turn.
+// Encoder-based drift correction.
+#define MAX_POS_HOLD_TILT      1.5f     // Maximum lean authority for drift correction (degrees).
+#define STEER_SMOOTHING        25.0f    // EMA ramp coefficient for steering input smoothing.
 
 // ============================================================
 //  IMU OUTPUT FILTER (2nd-order cascaded low-pass)
 // ============================================================
-// Cutoff frequency in Hz. Actuates exponential averaging in two cascading sequences.
-// An elevated cutoff rate (e.g. 50Hz) resolves phase-lag instability problems by improving input responsiveness.
+// Higher cutoff = less lag, more noise. Lower cutoff = smoother, more lag.
 #define IMU_FILTER_CUTOFF_HZ  50.0f
 
 // ============================================================
 //  MOTOR ACCELERATION LIMITER
 // ============================================================
-// Determines the maximum allowable stepper speed rate change, categorized mathematically in steps/sec^2.
-// Prevents total electromechanical starvation (stalling) during sudden PID speed spikes.
-// A limit of 200,000 correlates to a maximum discrete variation of 1,000 velocity units per 200Hz evaluation tick.
-#define MOTOR_ACCEL_LIMIT     80000.0f
+// Maximum speed change rate (steps/s²). Prevents stall on abrupt PID spikes.
+// 60000 steps/s² = 300 steps/s change per 200 Hz tick.
+#define MOTOR_ACCEL_LIMIT     60000.0f
 
 // ============================================================
 //  PID DERIVATIVE FILTER
 // ============================================================
-// Dedicated low-pass signal filter isolated explicitly to the reactive Derivative component output.
-// Lowering the 'Alpha' coefficient mitigates high-frequency IMU signal noise but intrinsically introduces reactive phase lag.
-// Values range between 0.0 (frozen differential) and 1.0 (unfiltered transmission).
+// First-order low-pass on the derivative term.
+// Range: 0.0 (fully filtered) to 1.0 (unfiltered).
 #define PID_D_FILTER_ALPHA    0.3f
 
 // ============================================================
-//  HEADING HOLD PID PARAMETERS (YAW)
+//  HEADING HOLD PID (YAW)
 // ============================================================
 #define YAW_KP               20.0f
 #define YAW_KI               0.1f
 #define YAW_KD               5.0f
-#define MAX_STEERING         4000.0f  // Defines the peak allowable differential split-step output allocated for yaw control.
+#define MAX_STEERING         4000.0f  // Peak differential step split for yaw control.
 
 // ============================================================
-//  BLUETOOTH DRIVING CONSTANTS
+//  BLUETOOTH DRIVING
 // ============================================================
-#define DRIVE_SPEED_STEPS_SEC 6000.0f   // The theoretical ghost-target pursuit pace when employing purely autonomous forward movement algorithms.
-#define TURN_SPEED_DEG_SEC    120.0f    // The peak angular momentum target assigned when executing a rotation command via A/D keyboard input.
+#define DRIVE_SPEED_STEPS_SEC 6000.0f   // Forward drive target (steps/s).
+#define TURN_SPEED_DEG_SEC    120.0f    // Peak yaw rate for A/D commands (°/s).
 
 // ============================================================
 //  AHRS / MAHONY FILTER
 // ============================================================
-//  The integrated Mahony algorithm consumes raw vectors from the accelerometer, gyroscope,
-//  and accompanying magnetometer to fuse a highly resolute, 9 Degrees of Freedom orientation quaternion.
-//  This geometric construct is then functionally decomposed back into pitch, roll, and heading planes.
+//  Fuses accel, gyro, and magnetometer into a 9-DOF quaternion,
+//  then decomposes it to pitch, roll, and heading angles.
 // ============================================================
-#define MAHONY_KP 2.0f    // The prominent proportional gain guiding global convergence rate towards magnetic north / absolute gravity.
-#define MAHONY_KI 0.005f  // The integral accumulator gain dedicated internally to rectifying long-term static drift specific to the gyroscope.
+#define MAHONY_KP 2.0f    // Proportional gain — convergence speed toward gravity/north.
+#define MAHONY_KI 0.005f  // Integral gain — compensates long-term gyro drift.
 
 // ============================================================
-//  MAGNETOMETER (QMC5883L) PARAMETERS
+//  MAGNETOMETER (QMC5883L)
 // ============================================================
-// Standard offset variables for calibrating local magnetic distortions specific to the chassis environment.
+// Hard-iron offsets for local magnetic distortion calibration.
 #define MAG_OFFSET_X  0.0f
 #define MAG_OFFSET_Y  0.0f
 #define MAG_OFFSET_Z  0.0f
 
-// Mathematical inversion flags aligning the logical magnetic fields with the primary accelerometer coordinate structure.
+// Axis sign corrections to align magnetometer with accelerometer frame.
 #define MAG_SIGN_X  1
 #define MAG_SIGN_Y  1
 #define MAG_SIGN_Z  1
 
-// Total amount of sampled evaluations gathered dynamically on initial boot to synthesize the average localized gyroscope bias.
+// Samples averaged during static gyro bias calibration.
 #define GYRO_CAL_SAMPLES      500
 
 // ============================================================
 //  IMU AXIS MAPPING
 // ============================================================
-//  Adjusts the algorithmic processing directions to perfectly match the
-//  precise physical mounting orientation of the ISM6HG256X module hardware on the robot chassis.
+//  Maps software axes to the physical mounting orientation of the
+//  ISM6HG256X on this chassis.
 //
-//  Configuration specific to this chassis variant: Y axis extends Forward; Z axis extends vertically Upwards.
-//      Pitching tilt dynamically projects the primary gravity vector onto the localized Y axis.
-//      Pitching rotational velocity circulates primarily around the localized lateral X axis.
+//  This chassis: Y = forward, Z = up.
+//    Pitch tilt projects gravity onto Y.
+//    Pitch rate circulates around X.
 // ============================================================
-#define PITCH_ACCEL_PRIMARY    'Y'    // Directs the algorithm to the specific positional data containing raw primary tilt variations.
-#define PITCH_ACCEL_SECONDARY  'Z'    // Defines the orthogonal measurement axis dedicated for stabilization.
-#define PITCH_ACCEL_SIGN        -1    // Flips mathematical evaluation parity internally so physical rotation precisely equates to logical variation (1 or -1).
-#define PITCH_GYRO_AXIS        'X'    // Exposes the independent gyroscope orientation axis recording the pitch velocity.
-#define PITCH_GYRO_SIGN         -1    // Flips evaluation parity for the gyroscope specific vectors.
+#define PITCH_ACCEL_PRIMARY    'Y'    // Primary accel axis for tilt.
+#define PITCH_ACCEL_SECONDARY  'Z'    // Orthogonal accel axis for atan2.
+#define PITCH_ACCEL_SIGN        -1    // Sign correction (1 or -1).
+#define PITCH_GYRO_AXIS        'X'    // Gyro axis recording pitch rate.
+#define PITCH_GYRO_SIGN         -1    // Sign correction (1 or -1).
 
 // ============================================================
 //  IMU SENSOR SETTINGS
 // ============================================================
-#define IMU_ODR_HZ             960.0f   // Output Data Rate evaluation frequency established globally exclusively on the physical component level.
-#define IMU_ACCEL_FS           4        // Sets the internal operational full-scale structural range dynamically up to ±4 forces of gravity.
-#define IMU_GYRO_FS            2000     // Establishes maximum recordable rotational capacity boundaries directly at ±2000 angular degrees per second.
+#define IMU_ODR_HZ             960.0f   // Output data rate (Hz).
+#define IMU_ACCEL_FS           4        // Accelerometer full-scale (±g).
+#define IMU_GYRO_FS            2000     // Gyroscope full-scale (±°/s).
 
 // ============================================================
 //  SAFETY
 // ============================================================
-#define MAX_TILT_ANGLE        95.0f   // The peak physical boundary limit triggering the automatic motor disconnection emergency cutoff.
-#define STARTUP_SETTLE_MS     3000    // Artificial time delay initializing core component logic prior to beginning balance functions.
+#define MAX_TILT_ANGLE        95.0f   // Tilt angle that triggers motor cutoff (degrees).
+#define STARTUP_SETTLE_MS     3000    // Sensor warm-up delay before balancing starts (ms).
 
 // ============================================================
 //  CONTROL LOOP TIMING
 // ============================================================
-#define LOOP_FREQ_HZ          200     // Central control loop execution rate mapping hardware inputs natively to PID functions.
-#define LOOP_PERIOD_US        (1000000UL / LOOP_FREQ_HZ)  // Derived mathematical duration representing a single 200Hz time frame evaluating in microseconds.
+#define LOOP_FREQ_HZ          200
+#define LOOP_PERIOD_US        (1000000UL / LOOP_FREQ_HZ)
 
 // ============================================================
 //  SERIAL / DEBUG
 // ============================================================
 #define SERIAL_BAUD           115200
-#define PLOT_DIVIDER          10      // Instructs the serial printing function to intentionally skip evaluations. Example: 200 Hz / 10 = an efficient 20 Hz output stream.
+#define PLOT_DIVIDER          10      // Print every Nth loop: 200 Hz / 10 = 20 Hz output.
 
 #endif // CONFIG_H
