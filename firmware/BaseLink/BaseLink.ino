@@ -339,7 +339,7 @@ void loop() {
 
                 if (abs((int32_t)netDelta) > DRIFT_ERROR_SETPOINT) {
                     // Lean opposite to the direction of drift.
-                    activeDriftCorrection = (netDelta > 0) ? -maxPosHoldTilt : maxPosHoldTilt;
+                    activeDriftCorrection = (netDelta > 0) ? maxPosHoldTilt : -maxPosHoldTilt;
                 } else {
                     activeDriftCorrection = 0.0f;
                 }
@@ -463,8 +463,30 @@ void loop() {
     // ============================================================
     //  SERIAL TELEMETRY (5 Hz)
     // ============================================================
-    if (loopCounter % (LOOP_FREQ_HZ / 5) == 0 && DEBUG) {
-        Serial.printf("Angle: %5.1f | SP: %5.2f | P: %6.1f | I: %6.1f | D: %6.1f | DriftCorr: %5.2f | LeftSpd: %5d\n",
-                      angle, pid.setpoint, pid.getP(), pid.getI(), pid.getD(), activeDriftCorrection, latestLeftSpeed);
+    if (loopCounter % PLOT_DIVIDER == 0 && DEBUG) {
+        // Compute wheel angles from encoder ticks (0-360° within current revolution)
+        int64_t encTicksL = steppers.getPositionL();
+        int64_t encTicksR = steppers.getPositionR();
+        int32_t modL = (int32_t)(encTicksL % ENCODER_CPR);
+        int32_t modR = (int32_t)(encTicksR % ENCODER_CPR);
+        if (modL < 0) modL += ENCODER_CPR;
+        if (modR < 0) modR += ENCODER_CPR;
+        float wheelAngleL = (float)modL / ENCODER_CPR * 360.0f;
+        float wheelAngleR = (float)modR / ENCODER_CPR * 360.0f;
+        
+        // 20 tab-separated fields: original 16 + 4 encoder fields
+        char buff[320];
+        snprintf(buff, sizeof(buff), "%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.1f\t%.1f\t%.1f\t%d\t%d\t%ld\t%ld\t%.1f\t%.1f\n",
+                      angle,
+                      pid.setpoint,
+                      imu.getAx(), imu.getAy(), imu.getAz(),
+                      imu.getGx(), imu.getGy(), imu.getGz(),
+                      imu.getMx(), imu.getMy(), imu.getMz(),
+                      pid.getP(), pid.getI(), pid.getD(),
+                      latestLeftSpeed, latestRightSpeed,
+                      (long)encTicksL, (long)encTicksR,
+                      wheelAngleL, wheelAngleR);
+        Serial.print(buff);
+        SerialBT.print(buff);
     }
 }

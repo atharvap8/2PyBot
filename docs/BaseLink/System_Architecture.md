@@ -85,8 +85,3 @@ The ESP32 processes two disparate concurrent wireless network environments:
 - An asynchronous text parser operating on `BluetoothSerial`, permitting complex string evaluations.
 - Translates dynamic textual configuration instructions directly into variable manipulation modifying PID structural constraints natively on the fly without demanding code recompilation.
 
----
-
-## 3. RQT Control Structure Graph
-
-![Robot Control Architecture Graph](file:///C:/Users/athar/.gemini/antigravity/brain/d352c9d8-8d63-4a38-986c-dd8a13bb8bf4/robot_control_rqt_graph_1776442966804.png)

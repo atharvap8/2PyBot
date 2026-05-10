@@ -175,10 +175,10 @@ class ModernRobotController:
         
         # Balance
         self.create_slider_group(self.tuning_frame, "Balance PID", [
-            ("Kp", "KP", 0, 5000, 1000),
-            ("Ki", "KI", 0, 200, 30),
-            ("Kd", "KD", 0, 200, 30),
-            ("Target Angle", "T", -10.0, 10.0, -1.469)
+            ("Kp", "KP", 0, 5000, 1250),
+            ("Ki", "KI", 0, 200, 42.86),
+            ("Kd", "KD", 0, 200, 1.786),
+            ("Target Angle", "T", -10.0, 10.0, 0.071)
         ])
         
         # Position Hold
