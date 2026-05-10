@@ -25,8 +25,13 @@ class ModernRobotController:
             self.angle_data.append(0.0)
             self.target_data.append(0.0)
 
-        self.pressed_keys = {'w': False, 'a': False, 's': False, 'd': False}
         self.telemetry_vars = {}
+        
+        # Action tracking
+        self.prev_l_ticks = 0
+        self.prev_r_ticks = 0
+        self.last_state_time = 0
+        self.robot_state_var = tk.StringVar(value="Stationary")
         
         self.setup_ui()
         
@@ -106,13 +111,13 @@ class ModernRobotController:
         log_switch.pack(side="right", padx=20)
         
         self.tel_labels = {
-            "Ax": (1, 0), "Ay": (2, 0), "Az": (3, 0),
-            "Gx": (1, 1), "Gy": (2, 1), "Gz": (3, 1),
-            "Mx": (1, 2), "My": (2, 2), "Mz": (3, 2),
-            "P": (5, 0), "I": (5, 1), "D": (5, 2),
-            "L_Speed": (5, 3), "R_Speed": (6, 3),
-            "L_Ticks": (7, 3), "R_Ticks": (8, 3),
-            "L_WhlAng": (9, 3), "R_WhlAng": (10, 3)
+            "Ax": (0, 2), "Ay": (0, 3), "Az": (0, 4),
+            "Gx": (1, 2), "Gy": (1, 3), "Gz": (1, 4),
+            "Mx": (2, 2), "My": (2, 3), "Mz": (2, 4),
+            "P": (0, 6), "I": (1, 6), "D": (2, 6),
+            "L_Speed": (3, 2), "R_Speed": (3, 3),
+            "L_Ticks": (3, 6), "R_Ticks": (3, 7),
+            "L_WhlAng": (3, 8), "R_WhlAng": (3, 9)
         }
         
         ctk.CTkLabel(self.telemetry_frame, text="Accelerometer", font=ctk.CTkFont(weight="bold")).grid(row=1, column=0, padx=10)
@@ -154,6 +159,12 @@ class ModernRobotController:
         self.create_tel_row("R_Ticks", 3, row_offset+5)
         self.create_tel_row("L_WhlAng", 3, row_offset+6)
         self.create_tel_row("R_WhlAng", 3, row_offset+7)
+        
+        # Action Display in center (under Balance PID Terms)
+        action_frame = ctk.CTkFrame(self.telemetry_frame, corner_radius=10, fg_color="#1e272e")
+        action_frame.grid(row=row_offset+5, column=0, columnspan=3, rowspan=3, padx=10, pady=10, sticky="nsew")
+        ctk.CTkLabel(action_frame, text="Current Robot Action", font=ctk.CTkFont(weight="bold", size=14)).pack(pady=(5, 0))
+        ctk.CTkLabel(action_frame, textvariable=self.robot_state_var, font=ctk.CTkFont(size=24, weight="bold"), text_color="#f1c40f").pack(pady=10)
 
         # ==========================================
         # RIGHT SIDEBAR - PID SLIDERS & OPTIONS
@@ -308,10 +319,44 @@ class ModernRobotController:
                                                 
                                                 # Encoder data (fields 16-19, present in 20-field packets)
                                                 if len(vals) >= 20:
-                                                    self.telemetry_vars["L_Ticks"].set(f"{int(vals[16]):<8d}")
-                                                    self.telemetry_vars["R_Ticks"].set(f"{int(vals[17]):<8d}")
+                                                    curr_l = int(vals[16])
+                                                    curr_r = int(vals[17])
+                                                    
+                                                    self.telemetry_vars["L_Ticks"].set(f"{curr_l:<8d}")
+                                                    self.telemetry_vars["R_Ticks"].set(f"{curr_r:<8d}")
                                                     self.telemetry_vars["L_WhlAng"].set(f"{vals[18]:<7.1f}°")
                                                     self.telemetry_vars["R_WhlAng"].set(f"{vals[19]:<7.1f}°")
+
+                                                    # State estimation logic
+                                                    dl = curr_l - self.prev_l_ticks
+                                                    dr = curr_r - self.prev_r_ticks
+                                                    
+                                                    # Threshold to ignore minor balancing jitter
+                                                    t = 3 
+                                                    new_state = "Stationary"
+                                                    if abs(dl) < t and abs(dr) < t:
+                                                        new_state = "Stationary"
+                                                    elif dl >= t and dr >= t:
+                                                        new_state = "Moving Forward"
+                                                    elif dl <= -t and dr <= -t:
+                                                        new_state = "Moving Backward"
+                                                    elif dl >= t and dr <= -t:
+                                                        new_state = "Turning Right"
+                                                    elif dl <= -t and dr >= t:
+                                                        new_state = "Turning Left"
+                                                    
+                                                    # Visual delay: keep text for at least 0.2s to prevent flickering
+                                                    now = time.time()
+                                                    if new_state != self.robot_state_var.get():
+                                                        if (now - self.last_state_time) > 0.2:
+                                                            self.robot_state_var.set(new_state)
+                                                            self.last_state_time = now
+                                                    else:
+                                                        # Mixed movement or small changes
+                                                        pass
+                                                        
+                                                    self.prev_l_ticks = curr_l
+                                                    self.prev_r_ticks = curr_r
                                                 
                                                 updated = True
                                             except ValueError:

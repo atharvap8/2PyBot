@@ -78,16 +78,16 @@ float maxPosHoldTilt = MAX_POS_HOLD_TILT;
 // ============================================================
 //  DRIFT CORRECTION
 // ============================================================
-// Evaluates encoder displacement over a fixed 0.5 s window.
-// A net tick delta exceeding DRIFT_ERROR_SETPOINT triggers a
-// corrective lean opposite to the direction of drift.
-#define DRIFT_EVAL_PERIOD_HZ 2.0f
-#define DRIFT_EVAL_LOOPS    (int)(LOOP_FREQ_HZ / DRIFT_EVAL_PERIOD_HZ)
-#define DRIFT_ERROR_SETPOINT 500
-
-int64_t lastDriftEvalTicks = 0;
-uint32_t driftLoopCounter = 0;
 float activeDriftCorrection = 0.0f;
+
+// Positional PID (Drift Correction) parameters
+
+// Positional PID (Drift Correction) parameters
+float posKp = 0.0006f;
+float posKd = 0.003f;
+int64_t targetPos = 0;
+float lastPosError = 0.0f;
+bool wasDriving = false;
 
 SerialTuner tuner(pid, steppers, imu);
 
@@ -178,6 +178,16 @@ void loop() {
 
     tuner.process();
 
+    // 0. Update Encoders & Calculate Velocities
+    static int64_t lastPosL = 0;
+    static int64_t lastPosR = 0;
+    int64_t currPosL = steppers.getPositionL();
+    int64_t currPosR = steppers.getPositionR();
+    int32_t encVelL = (int32_t)(currPosL - lastPosL);
+    int32_t encVelR = (int32_t)(currPosR - lastPosR);
+    lastPosL = currPosL;
+    lastPosR = currPosR;
+
     // Transition IDLE -> BALANCING when motors are enabled and upright.
     if (steppers.isEnabled() && state == STATE_IDLE) {
         if (fabsf(angle) < 5.0f) {
@@ -186,8 +196,6 @@ void loop() {
             yawPid.reset();
             targetAngleOffset = 0.0f;
             targetYaw = imu.getYaw();
-            lastDriftEvalTicks = steppers.getAveragePosition();
-            driftLoopCounter = 0;
             activeDriftCorrection = 0.0f;
             Serial.println("[MAIN] State -> BALANCING");
         }
@@ -221,6 +229,8 @@ void loop() {
                     else if (key == "T")     dynamicTargetAngle = val;
                     else if (key == "MDT")   manualDriveTilt = val;
                     else if (key == "PMT")   maxPosHoldTilt = val;
+                    else if (key == "PKP")   posKp = val;
+                    else if (key == "PKD")   posKd = val;
                     else if (key == "YKP")   yawPid.Kp = val;
                     else if (key == "YKD")   yawPid.Kd = val;
                     else if (key == "YMT")   { yawPid.outputMax = val; yawPid.outputMin = -val; }
@@ -283,9 +293,6 @@ void loop() {
             targetAngleOffset += (desired - targetAngleOffset) * alpha;
             if (fabsf(targetAngleOffset - desired) < 0.02f) targetAngleOffset = desired;
             driving = true;
-            // Reset drift state while actively driving.
-            lastDriftEvalTicks = steppers.getAveragePosition();
-            driftLoopCounter = 0;
             activeDriftCorrection = 0.0f;
         }
 
@@ -296,8 +303,6 @@ void loop() {
             pid.reset();
             targetAngleOffset = 0.0f;
             targetYaw = imu.getYaw();
-            lastDriftEvalTicks = steppers.getAveragePosition();
-            driftLoopCounter = 0;
             activeDriftCorrection = 0.0f;
             steppers.enable();
         } else if (!joyEn && lastJoyEn) {
@@ -312,50 +317,56 @@ void loop() {
         if (driveState == 'W') {
             targetAngleOffset -= MANUAL_DRIVE_RATE * dt;
             driving = true;
-            lastDriftEvalTicks = steppers.getAveragePosition();
-            driftLoopCounter = 0;
             activeDriftCorrection = 0.0f;
         } else if (driveState == 'S') {
             targetAngleOffset += MANUAL_DRIVE_RATE * dt;
             driving = true;
-            lastDriftEvalTicks = steppers.getAveragePosition();
-            driftLoopCounter = 0;
             activeDriftCorrection = 0.0f;
         }
     }
 
     // ============================================================
-    //  IDLE DRIFT CORRECTION
+    //  POSITIONAL PD (DRIFT CORRECTION)
     // ============================================================
     if (!driving) {
-        float desired = 0.0f;
-
-        if (enableDriftCorrection && state == STATE_BALANCING) {
-            driftLoopCounter++;
-            int64_t currentPos = steppers.getAveragePosition();
-
-            if (driftLoopCounter >= DRIFT_EVAL_LOOPS) {
-                int64_t netDelta = currentPos - lastDriftEvalTicks;
-
-                if (abs((int32_t)netDelta) > DRIFT_ERROR_SETPOINT) {
-                    // Lean opposite to the direction of drift.
-                    activeDriftCorrection = (netDelta > 0) ? maxPosHoldTilt : -maxPosHoldTilt;
-                } else {
-                    activeDriftCorrection = 0.0f;
-                }
-
-                lastDriftEvalTicks = currentPos;
-                driftLoopCounter = 0;
-            }
-            desired = activeDriftCorrection;
-        } else {
-            activeDriftCorrection = 0.0f;
+        if (wasDriving) {
+            // Transition from driving to stationary: lock current position.
+            targetPos = steppers.getAveragePosition();
+            lastPosError = 0.0f;
+            wasDriving = false;
         }
 
-        // Exponential decay toward the drift correction target.
+        float desired = 0.0f;
+        // Handover Logic: Only allow positional corrections when the balance loop is in a calm, stabilized state.
+        // This prevents the positional hold from "fighting" the PID during recovery.
+        float pitchError = fabsf(angle - (dynamicTargetAngle + targetAngleOffset));
+        bool stabilized = (pitchError < PITCH_ERROR_DEGREES); // Degrees
+
+        if (enableDriftCorrection && state == STATE_BALANCING && stabilized) {
+            int64_t currentPos = steppers.getAveragePosition();
+            float error = (float)(targetPos - currentPos);
+            float dError = (error - lastPosError) / dt;
+            lastPosError = error;
+
+            // Deadband to ignore micro-oscillations and sensor noise.
+            if (fabsf(error) > 15.0f) {
+                activeDriftCorrection = (error * posKp) + (dError * posKd);
+                activeDriftCorrection = constrain(activeDriftCorrection, -maxPosHoldTilt, maxPosHoldTilt);
+                desired = activeDriftCorrection;
+            } else {
+                desired = activeDriftCorrection; // Maintain current correction
+            }
+        } else {
+            // If unstable or disabled, decay targetAngleOffset toward 0 to let the balance PID take full priority.
+            desired = 0.0f;
+        }
+
+        // Smooth transition between balance-only and position-hold modes.
         float alpha = 1.0f - expf(-BRAKE_DECAY_RATE * dt);
         targetAngleOffset += (desired - targetAngleOffset) * alpha;
-        if (fabsf(targetAngleOffset - desired) < 0.02f) targetAngleOffset = desired;
+        if (fabsf(targetAngleOffset - desired) < 0.01f) targetAngleOffset = desired;
+    } else {
+        wasDriving = true; // Bot is actively being driven; don't fight it.
     }
 
     targetAngleOffset = constrain(targetAngleOffset, -MAX_MANUAL_TILT, MAX_MANUAL_TILT);
@@ -389,12 +400,16 @@ void loop() {
 
         case STATE_BALANCING: {
 
-            // Fall detection — cut motors immediately.
-            if (fabsf(angle) > MAX_TILT_ANGLE) {
+            // Fall/Spike detection — cut motors immediately.
+            if (fabsf(angle) > MAX_TILT_ANGLE || fabsf(imu.getPitchRate()) > MAX_PITCH_RATE_SAFETY) {
                 steppers.setSpeed(0);
                 steppers.disable();
                 state = STATE_FALLEN;
-                Serial.printf("[MAIN] Fell at angle=%.1f° — control disabled\n", angle);
+                if (fabsf(angle) > MAX_TILT_ANGLE) {
+                    Serial.printf("[MAIN] Fell at angle=%.1f° — control disabled\n", angle);
+                } else {
+                    Serial.printf("[MAIN] SPIKE DETECTED (%.1f°/s) — control disabled\n", imu.getPitchRate());
+                }
                 break;
             }
 
@@ -423,6 +438,12 @@ void loop() {
                 // Manual proportional yaw mapping; keep ghost target aligned.
                 yawOutput = steeringOffset * (MAX_STEERING / TURN_SPEED_DEG_SEC);
                 targetYaw = imu.getYaw();
+            }
+
+            // Differential Damping: Prevent pivoting by opposing uneven wheel velocities.
+            if (!driving && state == STATE_BALANCING) {
+                float diffVelocity = (float)(encVelL - encVelR);
+                yawOutput += diffVelocity * 0.5f; 
             }
 
             // 4. Rate-limit speed changes to prevent stepper stall.
@@ -464,11 +485,9 @@ void loop() {
     //  SERIAL TELEMETRY (5 Hz)
     // ============================================================
     if (loopCounter % PLOT_DIVIDER == 0 && DEBUG) {
-        // Compute wheel angles from encoder ticks (0-360° within current revolution)
-        int64_t encTicksL = steppers.getPositionL();
-        int64_t encTicksR = steppers.getPositionR();
-        int32_t modL = (int32_t)(encTicksL % ENCODER_CPR);
-        int32_t modR = (int32_t)(encTicksR % ENCODER_CPR);
+        // Compute wheel angles from encoder ticks
+        int32_t modL = (int32_t)(currPosL % ENCODER_CPR);
+        int32_t modR = (int32_t)(currPosR % ENCODER_CPR);
         if (modL < 0) modL += ENCODER_CPR;
         if (modR < 0) modR += ENCODER_CPR;
         float wheelAngleL = (float)modL / ENCODER_CPR * 360.0f;
@@ -484,7 +503,7 @@ void loop() {
                       imu.getMx(), imu.getMy(), imu.getMz(),
                       pid.getP(), pid.getI(), pid.getD(),
                       latestLeftSpeed, latestRightSpeed,
-                      (long)encTicksL, (long)encTicksR,
+                      (long)currPosL, (long)currPosR,
                       wheelAngleL, wheelAngleR);
         Serial.print(buff);
         SerialBT.print(buff);

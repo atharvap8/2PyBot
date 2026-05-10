@@ -197,6 +197,8 @@
 //  SAFETY
 // ============================================================
 #define MAX_TILT_ANGLE        55.0f   // The peak physical boundary limit triggering the automatic motor disconnection emergency cutoff.
+#define MAX_PITCH_RATE_SAFETY 450.0f  // Degrees per second; cut motors if exceeded (enormous spike).
+#define PITCH_ERROR_DEGREES   1.0f    // Degrees; cut motors if exceeded (enormous spike).
 #define STARTUP_SETTLE_MS     3000    // Artificial time delay initializing core component logic prior to beginning balance functions.
 
 // ============================================================
