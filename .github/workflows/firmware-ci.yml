@@ -50,6 +50,7 @@ jobs:
           arduino-cli lib install "TMCStepper"
           arduino-cli lib install "STM32duino ISM6HG256X"
           arduino-cli lib install "QMC5883LCompass"
+          arduino-cli lib install "FastLED"
 
       - name: Compile BaseLink sketch
         run: |
