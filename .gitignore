@@ -47,5 +47,6 @@ _autosave-*
 .DS_Store
 Thumbs.db
 
-#venv
-gui/2PyBot
+# Scripts and local batch files
+upload.bat
+scripts/upload.bat

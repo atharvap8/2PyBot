@@ -47,6 +47,13 @@
 #define PCNT_H_LIM        30000   // PCNT overflow high limit.
 #define PCNT_L_LIM       -30000   // PCNT overflow low limit.
 
+// ---- WS2812 LED Ring ----
+#define LED_RING_PIN      15      // GPIO pin connected to the DI of the LED ring.
+#define LED_RING_COUNT    16      // Total number of addressable LEDs in the ring.
+#define LED_BRIGHTNESS    64      // Default brightness level (0-255).
+#define LED_MOTION_SPEED_MAX 3000.0f // Speed threshold for full red saturation.
+#define LED_MOTION_DEADBAND  500.0f  // Minimum speed required before the LED ring shows directional movement feedback.
+
 // ============================================================
 //  MOTOR / DRIVER PARAMETERS
 // ============================================================

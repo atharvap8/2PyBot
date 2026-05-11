@@ -29,6 +29,9 @@
 #include "serial_tuner.h"
 #include "espnow_comm.h"
 #include <BluetoothSerial.h>
+#include <FastLED.h>
+
+CRGB leds[LED_RING_COUNT];
 
 IMUSensor imu;
 
@@ -81,8 +84,6 @@ float maxPosHoldTilt = MAX_POS_HOLD_TILT;
 float activeDriftCorrection = 0.0f;
 
 // Positional PID (Drift Correction) parameters
-
-// Positional PID (Drift Correction) parameters
 float posKp = 0.0006f;
 float posKd = 0.003f;
 int64_t targetPos = 0;
@@ -113,6 +114,77 @@ enum RobotState {
 RobotState state = STATE_INIT;
 
 // ============================================================
+//  LED RING FEEDBACK
+// ============================================================
+void showLoadingAnimation() {
+    static uint8_t pos = 0;
+    static unsigned long lastUpdate = 0;
+    static unsigned long animStart = 0;
+    
+    if (animStart == 0) animStart = millis();
+    if (millis() - lastUpdate < 40) return;
+    lastUpdate = millis();
+
+    FastLED.clear();
+    
+    // Relative progress through the settle period (0.0 to 1.0)
+    float progress = (float)(millis() - animStart) / STARTUP_SETTLE_MS;
+    progress = constrain(progress, 0.0f, 1.0f);
+    
+    // Simple Red to Green transition (no Blue/Violet)
+    CRGB color = CRGB(255 * (1.0f - progress), 255 * progress, 0);
+
+    leds[pos] = color;
+    // Simple trail
+    leds[(pos + LED_RING_COUNT - 1) % LED_RING_COUNT] = color;
+    leds[(pos + LED_RING_COUNT - 1) % LED_RING_COUNT].nscale8(128);
+
+    FastLED.show();
+    pos = (pos + 1) % LED_RING_COUNT;
+}
+
+void updateLEDMotionFeedback(float speedL, float speedR) {
+    static float smoothedAvg = 0.0f;
+    static float smoothedDiff = 0.0f;
+    
+    // Smoothing factor (0.1 = slow/smooth, 1.0 = instant/jittery)
+    const float alpha = 0.15f; 
+    
+    float avgSpeed = (speedL + speedR) / 2.0f;
+    float diff = speedR - speedL;
+    
+    // Apply Exponential Moving Average to eliminate jitter
+    smoothedAvg += (avgSpeed - smoothedAvg) * alpha;
+    smoothedDiff += (diff - smoothedDiff) * alpha;
+
+    FastLED.clear();
+    
+    // Intensity mapping based on smoothed speed, starting from the deadband threshold.
+    uint8_t intensity = (uint8_t)constrain(map(fabsf(smoothedAvg) + fabsf(smoothedDiff), LED_MOTION_DEADBAND, LED_MOTION_SPEED_MAX, 0, 255), 0, 255);
+    CRGB color = CRGB(intensity, 255 - intensity, 0); // Green -> Red
+
+    // Directional segments
+    if (smoothedAvg > LED_MOTION_DEADBAND) {
+        leds[14] = leds[15] = leds[0] = leds[1] = color;
+    } else if (smoothedAvg < -LED_MOTION_DEADBAND) {
+        leds[6] = leds[7] = leds[8] = leds[9] = color;
+    }
+
+    if (smoothedDiff > LED_MOTION_DEADBAND) {
+        leds[2] = leds[3] = leds[4] = leds[5] = color;
+    } else if (smoothedDiff < -LED_MOTION_DEADBAND) {
+        leds[10] = leds[11] = leds[12] = leds[13] = color;
+    }
+
+    // Steady Green if effectively stopped (within deadband).
+    if (fabsf(smoothedAvg) < LED_MOTION_DEADBAND && fabsf(smoothedDiff) < LED_MOTION_DEADBAND) {
+        fill_solid(leds, LED_RING_COUNT, CRGB::Green);
+    }
+
+    FastLED.show();
+}
+
+// ============================================================
 //  SETUP
 // ============================================================
 void setup() {
@@ -139,11 +211,35 @@ void setup() {
     }
 
     Serial.printf("[MAIN] Settling sensors for %d ms\n", STARTUP_SETTLE_MS);
-    delay(STARTUP_SETTLE_MS);
+    
+    // LED Ring Initialization (Using WS2812B with GRB order)
+    FastLED.addLeds<WS2812B, LED_RING_PIN, GRB>(leds, LED_RING_COUNT);
+    FastLED.setBrightness(LED_BRIGHTNESS);
+
+    // Play loading animation during the sensor settle period.
+    unsigned long startSettle = millis();
+    while (millis() - startSettle < STARTUP_SETTLE_MS) {
+        showLoadingAnimation();
+        delay(20);
+    }
 
     if (!imu.calibrateGyro()) {
         Serial.println("[MAIN] WARNING: Gyro calibration reported insufficient samples");
     }
+
+    // --- Init Complete Animation ---
+    // Slow fill
+    for (int i = 0; i < LED_RING_COUNT; i++) {
+        leds[i] = CRGB::Green;
+        FastLED.show();
+        delay(30); 
+    }
+    // Sharp flash
+    fill_solid(leds, LED_RING_COUNT, CRGB::Black);
+    FastLED.show();
+    delay(150);
+    fill_solid(leds, LED_RING_COUNT, CRGB::Green);
+    FastLED.show();
 
     digitalWrite(ONBOARD_LED, LOW);
 
@@ -390,7 +486,10 @@ void loop() {
     switch (state) {
 
         case STATE_IDLE:
-            // Slow LED blink in idle.
+            // Steady Green in IDLE means "Ready".
+            fill_solid(leds, LED_RING_COUNT, CRGB::Green);
+            FastLED.show();
+            
             if (millis() - lastBlinkMs >= 500) {
                 lastBlinkMs = millis();
                 onboardLedState = !onboardLedState;
@@ -458,6 +557,9 @@ void loop() {
             latestLeftSpeed  = (int32_t)(smoothedOutput - yawOutput);
             latestRightSpeed = (int32_t)(smoothedOutput + yawOutput);
             steppers.setSpeeds(latestLeftSpeed, latestRightSpeed);
+            
+            // 6. Visual feedback based on speed and direction.
+            updateLEDMotionFeedback((float)latestLeftSpeed, (float)latestRightSpeed);
 
             break;
         }
