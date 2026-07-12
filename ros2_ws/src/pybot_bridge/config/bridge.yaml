@@ -1,0 +1,8 @@
+pybot_serial_bridge:
+  ros__parameters:
+    baud: 115200
+    wheel_radius: 0.055        # meters
+    wheel_separation: 0.16     # meters
+    max_lean_deg: 3.0          # lean angle at full cmd_vel linear speed
+    max_linear: 0.5            # m/s mapped to max_lean_deg
+    max_angular: 2.0           # rad/s mapped to full steering
