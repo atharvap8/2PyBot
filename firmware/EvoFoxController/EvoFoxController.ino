@@ -39,7 +39,6 @@
 #include <Bluepad32.h>
 #include <esp_now.h>
 #include <WiFi.h>
-#include "esp_mac.h"
 #include "config.h"
 
 // ============================================================
@@ -114,7 +113,9 @@ static void onDisconnectedController(ControllerPtr ctl) {
 // ============================================================
 //  ESP-NOW SEND CALLBACK
 // ============================================================
-static void onSendComplete(const wifi_tx_info_t *info,
+// Signature for ESP32 Arduino Core 2.x / IDF 4.4 (the Bluepad32
+// board package). Core 3.x uses (const wifi_tx_info_t*, ...).
+static void onSendComplete(const uint8_t *mac_addr,
                            esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS && gamepad == nullptr) {
         digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
@@ -138,9 +139,7 @@ void setup() {
 
     // ---- ESP-NOW (WiFi STA) ----
     WiFi.mode(WIFI_STA);
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    Serial.printf("[TX] This device MAC: %s\n", macToString(mac).c_str());
+    Serial.printf("[TX] This device MAC: %s\n", WiFi.macAddress().c_str());
     Serial.printf("[TX] Target receiver:  %s\n",
                   macToString(receiverMAC).c_str());
 
