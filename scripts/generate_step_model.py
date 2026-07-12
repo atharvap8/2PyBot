@@ -37,6 +37,14 @@ WHEEL_THICKNESS = 0.18 * U
 WHEEL_X = 0.80 * U      # axle offset from centerline
 HUB_RADIUS = 0.12 * U
 
+# NEMA17-style stepper motors (42.3 mm square body, 40 mm long),
+# mounted inside the lower frame, shafts pointing out to the wheels.
+MOTOR_BODY = 42.3       # square face size (mm)
+MOTOR_LENGTH = 40.0     # body length along the axle (mm)
+MOTOR_SHAFT_R = 2.5     # 5 mm shaft
+MOTOR_BOSS_R = 11.0     # front pilot boss radius (22 mm dia)
+MOTOR_BOSS_LEN = 2.0
+
 
 def box_at(size, z0):
     """Box centered in XY, resting with its base at height z0."""
@@ -47,6 +55,37 @@ def box_at(size, z0):
     )
 
 
+def make_motor(side):
+    """NEMA17-style stepper: square body + pilot boss + shaft.
+
+    Body sits on the axle line (z = 0), inboard of the wheel; the shaft
+    extends outward through the frame to the wheel hub at x = WHEEL_X.
+    """
+    # Body: extrude inward from the mounting face.
+    face_x = side * (WHEEL_X - WHEEL_THICKNESS - MOTOR_BOSS_LEN)
+    body = (
+        cq.Workplane("YZ")
+        .rect(MOTOR_BODY, MOTOR_BODY)
+        .extrude(-MOTOR_LENGTH * side)  # extrude toward robot center
+        .edges("|X")
+        .chamfer(4.0)                   # NEMA corner chamfers
+        .translate((face_x, 0, 0))
+    )
+    boss = (
+        cq.Workplane("YZ")
+        .circle(MOTOR_BOSS_R)
+        .extrude(MOTOR_BOSS_LEN * side)
+        .translate((face_x, 0, 0))
+    )
+    shaft = (
+        cq.Workplane("YZ")
+        .circle(MOTOR_SHAFT_R)
+        .extrude((WHEEL_X - abs(face_x) + WHEEL_THICKNESS) * side)
+        .translate((face_x, 0, 0))
+    )
+    return body.union(boss).union(shaft)
+
+
 def build_robot():
     body = box_at(LOWER_FRAME, LOWER_Z0)
     body = body.union(box_at(MAIN_BODY, MAIN_Z0))
@@ -54,6 +93,10 @@ def build_robot():
 
     indicator = box_at(INDICATOR, INDICATOR_Z0).translate((0, INDICATOR_Y, 0))
     body = body.union(indicator)
+
+    # Stepper motors on the axle line, one per side.
+    for side in (-1, 1):
+        body = body.union(make_motor(side))
 
     # Wheels: cylinders along X axis, centered on the axle (z = 0)
     for side in (-1, 1):
