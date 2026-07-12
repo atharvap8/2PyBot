@@ -524,6 +524,18 @@ class ModernRobotController:
         self.create_switch(opt_group, "Enable Position Hold", "EN_P", False)
         self.create_switch(opt_group, "Enable Heading / Yaw PID", "EN_Y", False)
         self.create_switch(opt_group, "Invert Yaw PID Direction", "INV_Y", True)
+        self.create_switch(opt_group, "Fall Protection", "FP_EN", True)
+
+        # Fall Protection tuning
+        self.create_slider_group(
+            self.tuning_frame,
+            "Fall Protection",
+            [
+                ("Predict Horizon (s)", "FP_H", 0.05, 0.6, 0.25),
+                ("Risk Start (\u00b0)", "FP_S", 3.0, 20.0, 8.0),
+                ("Risk Full (\u00b0)", "FP_F", 10.0, 45.0, 20.0),
+            ],
+        )
 
         # Balance
         self.create_slider_group(

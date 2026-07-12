@@ -28,6 +28,7 @@
 #include "stepper_control.h"
 #include "serial_tuner.h"
 #include "espnow_comm.h"
+#include "fall_protection.h"
 #include <BluetoothSerial.h>
 #include <FastLED.h>
 
@@ -77,6 +78,9 @@ float manualDriveTilt = 3.0f;
 
 bool DEBUG = true;
 float maxPosHoldTilt = MAX_POS_HOLD_TILT;
+
+// Predictive fall protection (soft input constraints).
+FallProtection fallGuard;
 
 // ============================================================
 //  DRIFT CORRECTION
@@ -272,6 +276,9 @@ void loop() {
     imu.update(dt);
     float angle = imu.getPitch();
 
+    // Predictive fall-risk estimation (pitch relative to equilibrium).
+    fallGuard.update(angle - dynamicTargetAngle, imu.getPitchRate(), dt);
+
     tuner.process();
 
     // 0. Update Encoders & Calculate Velocities
@@ -331,6 +338,10 @@ void loop() {
                     else if (key == "YKD")   yawPid.Kd = val;
                     else if (key == "YMT")   { yawPid.outputMax = val; yawPid.outputMin = -val; }
                     else if (key == "INV_Y") invertYaw = (val > 0.5f);
+                    else if (key == "FP_EN") fallGuard.enabled = (val > 0.5f);
+                    else if (key == "FP_H")  fallGuard.predictHorizonS = val;
+                    else if (key == "FP_S")  fallGuard.riskStartDeg = val;
+                    else if (key == "FP_F")  fallGuard.riskFullDeg = val;
                     else if (key == "EN_P") {
                         enableDriftCorrection = (val > 0.5f);
                         if (!enableDriftCorrection) targetAngleOffset = 0.0f;
@@ -381,10 +392,12 @@ void loop() {
 
     if (joyActive) {
         float joyFwd = joyForward;
-        targetSteering = joySteering * TURN_SPEED_DEG_SEC;
+        targetSteering = fallGuard.constrainSteering(joySteering * TURN_SPEED_DEG_SEC);
 
         if (fabsf(joyFwd) > 0.05f) {
-            float desired = -joyFwd;
+            // Fall guard: cancel lean commands aimed toward a predicted
+            // fall; de-rate all others while risk is elevated.
+            float desired = fallGuard.constrainDrive(-joyFwd);
             float alpha = 1.0f - expf(-BRAKE_DECAY_RATE * dt);
             targetAngleOffset += (desired - targetAngleOffset) * alpha;
             if (fabsf(targetAngleOffset - desired) < 0.02f) targetAngleOffset = desired;
@@ -419,6 +432,11 @@ void loop() {
             driving = true;
             activeDriftCorrection = 0.0f;
         }
+        // Fall guard for keyboard drive: clamp the accumulated lean.
+        if (driving && fallGuard.isActive()) {
+            targetAngleOffset = fallGuard.constrainDrive(targetAngleOffset);
+        }
+        targetSteering = fallGuard.constrainSteering(targetSteering);
     }
 
     // ============================================================
@@ -545,6 +563,10 @@ void loop() {
                 yawOutput += diffVelocity * 0.5f; 
             }
 
+            // Fall guard: constrain the differential split while at risk
+            // so mid-turn wheel authority returns to the balance loop.
+            yawOutput = fallGuard.constrainYawOutput(yawOutput);
+
             // 4. Rate-limit speed changes to prevent stepper stall.
             static float smoothedOutput = 0.0f;
             float maxChange = MOTOR_ACCEL_LIMIT * dt;
@@ -559,7 +581,14 @@ void loop() {
             steppers.setSpeeds(latestLeftSpeed, latestRightSpeed);
             
             // 6. Visual feedback based on speed and direction.
-            updateLEDMotionFeedback((float)latestLeftSpeed, (float)latestRightSpeed);
+            if (fallGuard.isActive()) {
+                // Amber pulse signals constrained inputs / fall risk.
+                uint8_t pulse = (uint8_t)(128 + 127 * sinf(millis() * 0.02f));
+                fill_solid(leds, LED_RING_COUNT, CRGB(pulse, (uint8_t)(pulse * 0.55f), 0));
+                FastLED.show();
+            } else {
+                updateLEDMotionFeedback((float)latestLeftSpeed, (float)latestRightSpeed);
+            }
 
             break;
         }

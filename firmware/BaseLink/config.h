@@ -209,6 +209,21 @@
 #define STARTUP_SETTLE_MS     3000    // Artificial time delay initializing core component logic prior to beginning balance functions.
 
 // ============================================================
+//  PREDICTIVE FALL PROTECTION
+// ============================================================
+// Soft safety layer that activates well before MAX_TILT_ANGLE.
+// Predicts pitch a short horizon ahead and, while at risk,
+// de-rates operator lean/steer inputs so the balance PID keeps
+// full wheel authority. The balance loop itself is never limited.
+#define FP_PREDICT_HORIZON_S     0.25f  // Look-ahead horizon: predicted = pitch + rate * horizon.
+#define FP_RISK_START_DEG        8.0f   // Predicted pitch where risk begins rising above zero.
+#define FP_RISK_FULL_DEG         20.0f  // Predicted pitch where risk saturates at 1.0 (inputs fully cut).
+#define FP_STEER_CUT_FACTOR      1.0f   // Fraction of steering removed at full risk (1.0 = complete lockout).
+#define FP_RELEASE_TIME_S        0.40f  // Slow-release time constant preventing constraint chatter.
+#define FP_ACTIVE_ON_THRESHOLD   0.05f  // Risk level that latches the protection active.
+#define FP_ACTIVE_OFF_THRESHOLD  0.02f  // Risk level that releases it (hysteresis gap).
+
+// ============================================================
 //  CONTROL LOOP TIMING
 // ============================================================
 #define LOOP_FREQ_HZ          200     // Central control loop execution rate mapping hardware inputs natively to PID functions.
