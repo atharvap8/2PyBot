@@ -45,6 +45,33 @@ MOTOR_SHAFT_R = 2.5     # 5 mm shaft
 MOTOR_BOSS_R = 11.0     # front pilot boss radius (22 mm dia)
 MOTOR_BOSS_LEN = 2.0
 
+# ---- Detail features (inspired by concept render) ----
+TREAD_COUNT = 24        # tread lugs around each tire
+TREAD_DEPTH = 4.0       # radial lug height (mm)
+TREAD_WIDTH = 6.0       # lug width along circumference (mm)
+RIM_GROOVE_R = 0.42 * U  # glow-ring groove radius on wheel face
+RIM_GROOVE_W = 4.0      # groove width (mm)
+SPOKE_HOLE_R = 6.0      # lightening holes in wheel face
+SPOKE_HOLE_COUNT = 6
+SPOKE_HOLE_PITCH_R = 0.27 * U
+
+CAM_POD_R = 9.0         # side camera pod barrel radius
+CAM_POD_LEN = 26.0      # pod length (sticks out sideways)
+CAM_LENS_R = 5.0
+CAM_Z = 1.10 * U        # pod height on the body
+
+CONSOLE = (0.70 * U, 0.34 * U, 0.10 * U)   # top console box
+DISPLAY = (0.60 * U, 6.0, 0.34 * U)        # thin tilted display panel
+DISPLAY_TILT_DEG = 20.0
+
+VENT_COUNT = 5          # front vent slots
+VENT = (0.30 * U, 4.0, 5.0)                # slot size (x, depth, z)
+VENT_Z0 = 0.45 * U
+VENT_PITCH = 10.0
+
+PANEL_INSET = (0.80 * U, 3.0, 0.70 * U)    # recessed side panel pocket
+PANEL_Z0 = 0.42 * U
+
 
 def box_at(size, z0):
     """Box centered in XY, resting with its base at height z0."""
@@ -86,6 +113,110 @@ def make_motor(side):
     return body.union(boss).union(shaft)
 
 
+def make_wheel(side):
+    """Detailed wheel: treaded tire, glow-ring groove, spoke holes, hub."""
+    import math
+
+    x_out = side * WHEEL_X                       # outer face
+    x_mid = side * (WHEEL_X - WHEEL_THICKNESS / 2)
+
+    wheel = (
+        cq.Workplane("YZ")
+        .circle(WHEEL_RADIUS)
+        .extrude(WHEEL_THICKNESS * side)
+        .translate((side * (WHEEL_X - WHEEL_THICKNESS), 0, 0))
+    )
+
+    # Tread lugs around the circumference
+    for i in range(TREAD_COUNT):
+        a = i * 2 * math.pi / TREAD_COUNT
+        cy = (WHEEL_RADIUS + TREAD_DEPTH / 2) * math.cos(a)
+        cz = (WHEEL_RADIUS + TREAD_DEPTH / 2) * math.sin(a)
+        lug = (
+            cq.Workplane("YZ")
+            .rect(TREAD_WIDTH, TREAD_DEPTH)
+            .extrude(WHEEL_THICKNESS * 0.9)
+            .rotate((0, 0, 0), (1, 0, 0), math.degrees(a) + 90)
+            .translate((x_mid - WHEEL_THICKNESS * 0.45, cy, cz))
+        )
+        wheel = wheel.union(lug)
+
+    # Glow-ring groove cut into the outer face
+    groove = (
+        cq.Workplane("YZ", origin=(x_out, 0, 0))
+        .circle(RIM_GROOVE_R + RIM_GROOVE_W / 2)
+        .circle(RIM_GROOVE_R - RIM_GROOVE_W / 2)
+        .extrude(-3.0 * side)
+    )
+    wheel = wheel.cut(groove)
+
+    # Spoke lightening holes on the outer face
+    for i in range(SPOKE_HOLE_COUNT):
+        a = i * 2 * math.pi / SPOKE_HOLE_COUNT
+        hy = SPOKE_HOLE_PITCH_R * math.cos(a)
+        hz = SPOKE_HOLE_PITCH_R * math.sin(a)
+        hole = (
+            cq.Workplane("YZ", origin=(x_out, hy, hz))
+            .circle(SPOKE_HOLE_R)
+            .extrude(-6.0 * side)
+        )
+        wheel = wheel.cut(hole)
+
+    # Hub cap
+    hub = (
+        cq.Workplane("YZ")
+        .circle(HUB_RADIUS)
+        .extrude(WHEEL_THICKNESS * 1.2 * side)
+        .translate((side * (WHEEL_X - WHEEL_THICKNESS), 0, 0))
+    )
+    return wheel.union(hub)
+
+
+def make_camera_pod(side):
+    """Cylindrical camera pod on the upper body side, lens facing forward."""
+    x_base = side * (MAIN_BODY[0] / 2)
+    barrel = (
+        cq.Workplane("YZ")
+        .circle(CAM_POD_R)
+        .extrude(CAM_POD_LEN * side)
+        .translate((x_base, 0, CAM_Z))
+    )
+    # Mounting arm back to the body
+    arm = (
+        cq.Workplane("YZ")
+        .rect(8.0, 8.0)
+        .extrude(CAM_POD_LEN * 0.4 * side)
+        .translate((x_base, 0, CAM_Z))
+    )
+    # Lens ring on the front of the barrel
+    lens = (
+        cq.Workplane("XZ", origin=(x_base + side * CAM_POD_LEN * 0.6,
+                                   CAM_POD_R, CAM_Z))
+        .circle(CAM_LENS_R)
+        .extrude(4.0)
+    )
+    return barrel.union(arm).union(lens)
+
+
+def make_console():
+    """Top console box with a tilted display panel (holo screen stand-in)."""
+    import math
+
+    console = (
+        cq.Workplane("XY")
+        .box(CONSOLE[0], CONSOLE[1], CONSOLE[2], centered=(True, True, False))
+        .translate((0, 0, DECK_Z0 + SENSOR_DECK[2]))
+    )
+    display = (
+        cq.Workplane("XY")
+        .box(DISPLAY[0], DISPLAY[1], DISPLAY[2], centered=(True, True, False))
+        .rotate((0, 0, 0), (1, 0, 0), -DISPLAY_TILT_DEG)
+        .translate((0, -CONSOLE[1] / 4,
+                    DECK_Z0 + SENSOR_DECK[2] + CONSOLE[2]))
+    )
+    return console.union(display)
+
+
 def build_robot():
     body = box_at(LOWER_FRAME, LOWER_Z0)
     body = body.union(box_at(MAIN_BODY, MAIN_Z0))
@@ -94,25 +225,41 @@ def build_robot():
     indicator = box_at(INDICATOR, INDICATOR_Z0).translate((0, INDICATOR_Y, 0))
     body = body.union(indicator)
 
+    # Recessed side panels on the main body
+    for side in (-1, 1):
+        pocket = (
+            cq.Workplane("YZ")
+            .rect(PANEL_INSET[0] * 0.6, PANEL_INSET[2])
+            .extrude(-PANEL_INSET[1] * side)
+            .translate((side * MAIN_BODY[0] / 2, 0,
+                        PANEL_Z0 + PANEL_INSET[2] / 2))
+        )
+        body = body.cut(pocket)
+
+    # Front vent slots (horizontal grille)
+    for i in range(VENT_COUNT):
+        vent = (
+            cq.Workplane("XY")
+            .box(VENT[0], VENT[1], VENT[2], centered=(True, True, False))
+            .translate((0, MAIN_BODY[1] / 2 - VENT[1] / 2 + 1.0,
+                        VENT_Z0 + i * VENT_PITCH))
+        )
+        body = body.cut(vent)
+
+    # Top console with tilted display panel
+    body = body.union(make_console())
+
+    # Side camera pods
+    for side in (-1, 1):
+        body = body.union(make_camera_pod(side))
+
     # Stepper motors on the axle line, one per side.
     for side in (-1, 1):
         body = body.union(make_motor(side))
 
-    # Wheels: cylinders along X axis, centered on the axle (z = 0)
+    # Detailed wheels (tread, glow groove, spoke holes, hub)
     for side in (-1, 1):
-        wheel = (
-            cq.Workplane("YZ")
-            .circle(WHEEL_RADIUS)
-            .extrude(WHEEL_THICKNESS * side)
-            .translate((side * (WHEEL_X - WHEEL_THICKNESS / 2), 0, 0))
-        )
-        hub = (
-            cq.Workplane("YZ")
-            .circle(HUB_RADIUS)
-            .extrude(WHEEL_THICKNESS * 1.2 * side)
-            .translate((side * (WHEEL_X - WHEEL_THICKNESS / 2), 0, 0))
-        )
-        body = body.union(wheel).union(hub)
+        body = body.union(make_wheel(side))
 
     return body
 
