@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from collections import deque
@@ -8,6 +9,215 @@ import customtkinter as ctk
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
+
+
+class Robot3DViewer:
+    """Software-rendered 3D visualisation of the balancing robot.
+
+    Pure tk.Canvas renderer (no extra dependencies). Drag with the left
+    mouse button to orbit, scroll to zoom. Robot pitch, heading and wheel
+    rotation are driven live from telemetry.
+    """
+
+    BODY_COLOR = (0, 173, 181)  # teal body panels
+    TOP_COLOR = (238, 238, 238)  # sensor deck
+    WHEEL_COLOR = (60, 64, 72)
+    HUB_COLOR = (241, 196, 15)
+
+    def __init__(self, canvas):
+        self.canvas = canvas
+        self.w, self.h = 420, 320
+        self.cam_yaw = 0.75
+        self.cam_pitch = 0.38
+        self.zoom = 1.0
+        self._drag = None
+
+        # Robot state (degrees)
+        self.pitch = 0.0
+        self.heading = 0.0
+        self.wheel_l = 0.0
+        self.wheel_r = 0.0
+
+        canvas.bind("<Configure>", self._on_resize)
+        canvas.bind("<ButtonPress-1>", self._on_press)
+        canvas.bind("<B1-Motion>", self._on_drag)
+        canvas.bind("<MouseWheel>", self._on_wheel)
+
+    # ---------- interaction ----------
+    def _on_resize(self, e):
+        self.w, self.h = e.width, e.height
+
+    def _on_press(self, e):
+        self._drag = (e.x, e.y)
+
+    def _on_drag(self, e):
+        if self._drag:
+            dx, dy = e.x - self._drag[0], e.y - self._drag[1]
+            self.cam_yaw += dx * 0.01
+            self.cam_pitch = max(-1.35, min(1.35, self.cam_pitch + dy * 0.01))
+            self._drag = (e.x, e.y)
+
+    def _on_wheel(self, e):
+        self.zoom = max(0.4, min(3.0, self.zoom * (1.1 if e.delta > 0 else 0.9)))
+
+    # ---------- math helpers ----------
+    @staticmethod
+    def _rot_x(p, a):
+        s, c = math.sin(a), math.cos(a)
+        return (p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c)
+
+    @staticmethod
+    def _rot_z(p, a):
+        s, c = math.sin(a), math.cos(a)
+        return (p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2])
+
+    def _project(self, p):
+        sy, cy = math.sin(self.cam_yaw), math.cos(self.cam_yaw)
+        sp, cp = math.sin(self.cam_pitch), math.cos(self.cam_pitch)
+        x1 = p[0] * cy - p[1] * sy
+        y1 = p[0] * sy + p[1] * cy
+        zv = p[2] * cp - y1 * sp
+        depth = y1 * cp + p[2] * sp
+        f = 6.0 / (6.0 + depth)
+        scale = min(self.w, self.h) * 0.30 * self.zoom
+        return (
+            self.w / 2 + x1 * scale * f,
+            self.h * 0.52 - zv * scale * f,
+            depth,
+        )
+
+    @staticmethod
+    def _shade(rgb, normal):
+        # Fixed light direction, simple Lambert shading
+        lx, ly, lz = -0.45, -0.6, 0.66
+        nlen = math.sqrt(sum(n * n for n in normal)) or 1.0
+        d = (normal[0] * lx + normal[1] * ly + normal[2] * lz) / nlen
+        k = 0.38 + 0.62 * max(0.0, d)
+        return "#%02x%02x%02x" % tuple(min(255, int(c * k)) for c in rgb)
+
+    @staticmethod
+    def _normal(a, b, c):
+        u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+        v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+        return (
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        )
+
+    # ---------- geometry ----------
+    def _box_faces(self, hx, hy, z0, z1, transform, color):
+        v = [
+            (-hx, -hy, z0), (hx, -hy, z0), (hx, hy, z0), (-hx, hy, z0),
+            (-hx, -hy, z1), (hx, -hy, z1), (hx, hy, z1), (-hx, hy, z1),
+        ]
+        v = [transform(p) for p in v]
+        idx = [
+            (0, 1, 5, 4), (2, 3, 7, 6),  # front / back
+            (1, 2, 6, 5), (3, 0, 4, 7),  # right / left
+            (4, 5, 6, 7), (3, 2, 1, 0),  # top / bottom
+        ]
+        return [([v[i] for i in quad], color) for quad in idx]
+
+    def _wheel_faces(self, side, angle_deg, heading):
+        """Wheel as a segmented cylinder at x = side * 0.80."""
+        r, half_t, n = 0.55, 0.09, 14
+        ang = math.radians(angle_deg)
+        cx = side * 0.80
+        faces = []
+        ring_out, ring_in = [], []
+        for i in range(n):
+            a = ang + i * 2 * math.pi / n
+            y, z = r * math.cos(a), r * math.sin(a)
+            for ring, xoff in ((ring_out, half_t * side + cx), (ring_in, -half_t * side + cx)):
+                p = (xoff, y, z)
+                p = self._rot_z(p, heading)
+                ring.append(p)
+        # tread segments
+        for i in range(n):
+            j = (i + 1) % n
+            quad = [ring_out[i], ring_out[j], ring_in[j], ring_in[i]]
+            faces.append((quad, self.WHEEL_COLOR))
+        # side disc (outer face only, as a fan of triangles)
+        center = self._rot_z((cx + half_t * side, 0, 0), heading)
+        for i in range(n):
+            j = (i + 1) % n
+            faces.append(([center, ring_out[i], ring_out[j]], self.WHEEL_COLOR))
+        # spokes to visualise rotation
+        spokes = []
+        for k in range(3):
+            a = ang + k * 2 * math.pi / 3
+            tip = (cx + half_t * side * 1.02, r * 0.82 * math.cos(a), r * 0.82 * math.sin(a))
+            spokes.append((center, self._rot_z(tip, heading)))
+        return faces, spokes
+
+    # ---------- render ----------
+    def render(self):
+        c = self.canvas
+        c.delete("all")
+        w, h = self.w, self.h
+
+        pitch = math.radians(self.pitch)
+        heading = math.radians(self.heading)
+        ground = -0.55
+
+        def body_tf(p):
+            p = self._rot_x(p, -pitch)  # lean about the axle
+            return self._rot_z(p, heading)
+
+        # Ground grid
+        for i in range(-4, 5):
+            g = i * 0.5
+            for a, b in (((g, -2, ground), (g, 2, ground)), ((-2, g, ground), (2, g, ground))):
+                p1, p2 = self._project(a), self._project(b)
+                c.create_line(p1[0], p1[1], p2[0], p2[1], fill="#26313a")
+
+        # Drop shadow
+        sh = [self._project(self._rot_z(p, heading)) for p in
+              ((-0.95, -0.45, ground + 0.01), (0.95, -0.45, ground + 0.01),
+               (0.95, 0.45, ground + 0.01), (-0.95, 0.45, ground + 0.01))]
+        c.create_polygon([xy for p in sh for xy in p[:2]], fill="#151c22", outline="")
+
+        faces = []
+        # Chassis: lower frame, main body, sensor deck
+        faces += self._box_faces(0.62, 0.30, 0.06, 0.28, body_tf, (35, 40, 46))
+        faces += self._box_faces(0.55, 0.26, 0.28, 1.35, body_tf, self.BODY_COLOR)
+        faces += self._box_faces(0.58, 0.29, 1.35, 1.52, body_tf, self.TOP_COLOR)
+        # Front indicator (marks robot's forward direction)
+        faces += self._box_faces(0.16, 0.05, 1.05, 1.25,
+                                 lambda p: body_tf((p[0], p[1] + 0.29, p[2])),
+                                 (231, 76, 60))
+
+        all_spokes = []
+        for side, wang in ((-1, self.wheel_l), (1, self.wheel_r)):
+            f, spokes = self._wheel_faces(side, wang, heading)
+            faces += f
+            all_spokes += spokes
+
+        # Painter's algorithm
+        drawable = []
+        for pts, color in faces:
+            proj = [self._project(p) for p in pts]
+            depth = sum(p[2] for p in proj) / len(proj)
+            n = self._normal(pts[0], pts[1], pts[2])
+            drawable.append((depth, proj, self._shade(color, n)))
+        drawable.sort(key=lambda item: -item[0])
+        for _, proj, fill in drawable:
+            c.create_polygon([xy for p in proj for xy in p[:2]],
+                             fill=fill, outline="#10151a")
+
+        # Wheel spokes (drawn on top)
+        for a, b in all_spokes:
+            p1, p2 = self._project(a), self._project(b)
+            c.create_line(p1[0], p1[1], p2[0], p2[1],
+                          fill="#f1c40f", width=2)
+
+        # HUD
+        c.create_text(12, 12, anchor="nw", fill="#8395a7",
+                      font=("Consolas", 10),
+                      text=f"Pitch {self.pitch:+6.2f}\u00b0   Heading {self.heading:+7.1f}\u00b0")
+        c.create_text(12, h - 14, anchor="sw", fill="#576574",
+                      font=("Consolas", 9), text="Drag: orbit  |  Scroll: zoom")
 
 
 class ModernRobotController:
@@ -37,6 +247,9 @@ class ModernRobotController:
 
         self.setup_ui()
 
+        # 3D viewer animation loop (~30 FPS, independent of serial thread)
+        self.root.after(100, self._animate_3d)
+
         # Ensure focus stealing for WASD overrides
         self.root.bind_all(
             "<Button-1>",
@@ -59,9 +272,18 @@ class ModernRobotController:
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_rowconfigure(5, weight=1)
 
+        header = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        header.grid(row=0, column=0, padx=20, pady=(20, 10))
         ctk.CTkLabel(
-            self.sidebar, text="Connection", font=ctk.CTkFont(size=20, weight="bold")
-        ).grid(row=0, column=0, padx=20, pady=(20, 10))
+            header, text="2PyBot", font=ctk.CTkFont(size=24, weight="bold")
+        ).pack()
+        self.status_label = ctk.CTkLabel(
+            header,
+            text="\u25cf Disconnected",
+            text_color="#e74c3c",
+            font=ctk.CTkFont(size=13),
+        )
+        self.status_label.pack()
 
         self.port_combo = ctk.CTkComboBox(self.sidebar, values=self.get_ports())
         self.port_combo.grid(row=1, column=0, padx=20, pady=10)
@@ -121,26 +343,42 @@ class ModernRobotController:
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.main_frame.grid_rowconfigure(0, weight=2)
         self.main_frame.grid_rowconfigure(1, weight=1)
-        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_columnconfigure(0, weight=3)
+        self.main_frame.grid_columnconfigure(1, weight=2)
 
         # Matplotlib/Tk Canvas approach manually built with lines for pure speed
         self.plot_frame = ctk.CTkFrame(self.main_frame, corner_radius=10)
-        self.plot_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 20))
+        self.plot_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 20), padx=(0, 10))
         ctk.CTkLabel(
             self.plot_frame,
             text="Live Pitch Angle Tracking",
             font=ctk.CTkFont(size=15, weight="bold"),
-        ).pack(pady=10)
+        ).pack(pady=(10, 0))
 
-        self.canvas = tk.Canvas(self.plot_frame, bg="#2b2b2b", highlightthickness=0)
+        self.canvas = tk.Canvas(self.plot_frame, bg="#1a2026", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, padx=15, pady=15)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
         self.cw = 600
         self.ch = 300
 
+        # 3D Robot Viewer
+        self.viewer_frame = ctk.CTkFrame(self.main_frame, corner_radius=10)
+        self.viewer_frame.grid(row=0, column=1, sticky="nsew", pady=(0, 20))
+        ctk.CTkLabel(
+            self.viewer_frame,
+            text="3D Robot Viewer",
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).pack(pady=(10, 0))
+
+        viewer_canvas = tk.Canvas(
+            self.viewer_frame, bg="#12181d", highlightthickness=0
+        )
+        viewer_canvas.pack(fill="both", expand=True, padx=15, pady=15)
+        self.viewer = Robot3DViewer(viewer_canvas)
+
         # Deep Telemetry Grid
         self.telemetry_frame = ctk.CTkFrame(self.main_frame, corner_radius=10)
-        self.telemetry_frame.grid(row=1, column=0, sticky="nsew")
+        self.telemetry_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
         self.telemetry_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         top_tel = ctk.CTkFrame(self.telemetry_frame, fg_color="transparent")
@@ -396,6 +634,13 @@ class ModernRobotController:
         self.cw = event.width
         self.ch = event.height
 
+    def _animate_3d(self):
+        try:
+            self.viewer.render()
+        except tk.TclError:
+            return  # window closed
+        self.root.after(33, self._animate_3d)
+
     def get_ports(self):
         return [port.device for port in list_ports.comports()] or ["No Comports Found"]
 
@@ -407,6 +652,9 @@ class ModernRobotController:
             self.btn_connect.configure(
                 text="Connect", fg_color="green", hover_color="#006400"
             )
+            self.status_label.configure(
+                text="\u25cf Disconnected", text_color="#e74c3c"
+            )
             print("Disconnected.")
         else:
             port = self.port_combo.get()
@@ -415,6 +663,9 @@ class ModernRobotController:
                 self.is_connected = True
                 self.btn_connect.configure(
                     text="Disconnect", fg_color="red", hover_color="#8b0000"
+                )
+                self.status_label.configure(
+                    text=f"\u25cf {port}", text_color="#2ecc71"
                 )
                 print(f"Connected to {port}")
 
@@ -447,6 +698,12 @@ class ModernRobotController:
                                                 vals = [float(p) for p in parts]
                                                 self.angle_data.append(vals[0])
                                                 self.target_data.append(vals[1])
+
+                                                # Update 3D viewer state
+                                                self.viewer.pitch = vals[0]
+                                                self.viewer.heading = math.degrees(
+                                                    math.atan2(vals[9], vals[8])
+                                                )
 
                                                 self.telemetry_vars["Ax"].set(
                                                     f"{vals[2]:<8.3f}"
@@ -512,6 +769,9 @@ class ModernRobotController:
                                                     self.telemetry_vars["R_WhlAng"].set(
                                                         f"{vals[19]:<7.1f}°"
                                                     )
+
+                                                    self.viewer.wheel_l = vals[18]
+                                                    self.viewer.wheel_r = vals[19]
 
                                                     # State estimation logic
                                                     dl = curr_l - self.prev_l_ticks
@@ -618,8 +878,17 @@ class ModernRobotController:
         self.canvas.delete("all")
         w, h = self.cw, self.ch
 
-        # Center line
-        self.canvas.create_line(0, h / 2, w, h / 2, fill="#3a3a3a", dash=(4, 4))
+        # Horizontal grid lines every 5 degrees
+        y_scale_grid = h / 40.0
+        for deg in range(-15, 20, 5):
+            y = h / 2 - deg * y_scale_grid
+            color = "#3a4750" if deg == 0 else "#232b32"
+            self.canvas.create_line(0, y, w, y, fill=color, dash=(4, 4))
+            if deg != 0:
+                self.canvas.create_text(
+                    w - 6, y - 2, anchor="se", text=f"{deg:+d}°",
+                    fill="#4b5a66", font=("Consolas", 8),
+                )
 
         y_scale = h / 40.0
         points_angle = []
@@ -646,15 +915,15 @@ class ModernRobotController:
             anchor="nw",
             text=f"Actual Angle: {self.angle_data[-1]:.2f}°",
             fill="#00cec9",
-            font=("Arial", 12, "bold"),
+            font=("Consolas", 11, "bold"),
         )
         self.canvas.create_text(
             10,
             30,
             anchor="nw",
             text=f"Target Angle: {self.target_data[-1]:.2f}°",
-            fill="#d63031",
-            font=("Arial", 12, "bold"),
+            fill="#e74c3c",
+            font=("Consolas", 11, "bold"),
         )
 
 
