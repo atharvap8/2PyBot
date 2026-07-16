@@ -35,8 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /ros2_ws
 COPY src ./src
 
+# NOTE: no --symlink-install — the install tree must be self-contained
+# because build/ and log/ are deleted to slim the image.
 RUN . /opt/ros/humble/setup.sh && \
-    colcon build --symlink-install && \
+    colcon build && \
     rm -rf build log
 
 # ---- Entrypoint ----
