@@ -1,0 +1,44 @@
+# ============================================================
+#  2PyBot robot-side stack — Radxa Cubie A7A
+# ============================================================
+#  Usage:
+#    docker compose -f docker/docker-compose.yaml up -d teleop
+#    docker compose -f docker/docker-compose.yaml up -d microros-agent
+# ============================================================
+
+services:
+  teleop:
+    image: 2pybot:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: 2pybot_teleop
+    network_mode: host          # DDS discovery + BT joydev
+    privileged: true            # /dev/input/js*, /dev/hidraw*
+    volumes:
+      - /dev/input:/dev/input
+    command: ros2 launch pybot_teleop teleop.launch.py
+    restart: unless-stopped
+
+  microros-agent:
+    image: 2pybot:latest
+    container_name: 2pybot_microros_agent
+    network_mode: host
+    privileged: true
+    volumes:
+      - /dev:/dev
+    # ESP32 over USB serial; switch to udp4 --port 8888 for WiFi transport
+    command: ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 115200
+    restart: unless-stopped
+
+  # Legacy Bluetooth-serial bridge (pre-micro-ROS fallback)
+  serial-bridge:
+    image: 2pybot:latest
+    container_name: 2pybot_serial_bridge
+    network_mode: host
+    privileged: true
+    volumes:
+      - /dev:/dev
+    command: ros2 launch pybot_bridge bridge.launch.py port:=/dev/rfcomm0
+    restart: unless-stopped
+    profiles: ["legacy"]

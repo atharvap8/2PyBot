@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pybot_teleop</name>
+  <version>0.1.0</version>
+  <description>
+    Teleoperation for the 2PyBot self-balancing robot using an EvoFox
+    One S gamepad paired over Bluetooth to the onboard Radxa Cubie A7A.
+    Converts sensor_msgs/Joy to geometry_msgs/Twist with deadzone, expo
+    shaping, and an enable/kill button scheme.
+  </description>
+  <maintainer email="atharva@example.com">Atharva</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <exec_depend>joy</exec_depend>
+
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
