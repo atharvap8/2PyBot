@@ -28,6 +28,7 @@
 #include "stepper_control.h"
 #include "serial_tuner.h"
 #include "espnow_comm.h"
+#include "microros_bridge.h"
 #include <BluetoothSerial.h>
 #include <FastLED.h>
 
@@ -243,7 +244,13 @@ void setup() {
 
     digitalWrite(ONBOARD_LED, LOW);
 
+#if USE_MICROROS
+    // ROS mode: drive commands arrive via the micro-ROS agent on the
+    // Radxa. ESP-NOW is skipped (the radio is owned by WiFi STA).
+    microros_begin();
+#else
     espnow_receiver_begin();
+#endif
     SerialBT.begin("Self_Balancing_Robot");
     tuner.begin();
 
@@ -271,6 +278,11 @@ void loop() {
     // IMU update must execute first each cycle.
     imu.update(dt);
     float angle = imu.getPitch();
+
+    // micro-ROS: pump executor + agent state machine (no-op if disabled).
+    // Writes the same joy* globals as ESP-NOW, so drive logic below
+    // is source-agnostic.
+    microros_spin();
 
     tuner.process();
 
@@ -609,5 +621,10 @@ void loop() {
                       wheelAngleL, wheelAngleR);
         Serial.print(buff);
         SerialBT.print(buff);
+
+        // micro-ROS telemetry (no-op unless connected).
+        microros_publish(angle, pid.setpoint,
+                         wheelAngleL, wheelAngleR,
+                         latestLeftSpeed, latestRightSpeed);
     }
 }

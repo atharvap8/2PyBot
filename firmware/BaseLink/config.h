@@ -209,6 +209,20 @@
 #define STARTUP_SETTLE_MS     3000    // Artificial time delay initializing core component logic prior to beginning balance functions.
 
 // ============================================================
+//  MICRO-ROS (Radxa Cubie A7A onboard companion)
+// ============================================================
+// When enabled, drive commands come from ROS 2 (/cmd_vel via the
+// micro-ROS agent on the Radxa) instead of the ESP-NOW joystick.
+// Requires the micro_ros_arduino library (humble).
+#define USE_MICROROS      0            // 0 = ESP-NOW joystick, 1 = micro-ROS
+#define MR_WIFI_SSID      "pybot"      // Radxa hotspot / LAN SSID
+#define MR_WIFI_PASS      "pybot1234"
+#define MR_AGENT_IP       "10.42.0.1"  // Radxa (NetworkManager shared mode)
+#define MR_AGENT_PORT     8888
+#define MR_MAX_LINEAR     0.5f         // m/s   -> full joyForward
+#define MR_MAX_ANGULAR    2.0f         // rad/s -> full joySteering
+
+// ============================================================
 //  CONTROL LOOP TIMING
 // ============================================================
 #define LOOP_FREQ_HZ          200     // Central control loop execution rate mapping hardware inputs natively to PID functions.
