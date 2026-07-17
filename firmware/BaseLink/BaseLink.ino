@@ -284,7 +284,11 @@ void loop() {
     // is source-agnostic.
     microros_spin();
 
+#if !MR_SERIAL_IS_MICROROS
+    // Tuner reads USB serial — disabled in serial-transport mode
+    // (micro-ROS owns the port). Use the Bluetooth tuner instead.
     tuner.process();
+#endif
 
     // 0. Update Encoders & Calculate Velocities
     static int64_t lastPosL = 0;
@@ -619,7 +623,11 @@ void loop() {
                       latestLeftSpeed, latestRightSpeed,
                       (long)currPosL, (long)currPosR,
                       wheelAngleL, wheelAngleR);
+#if !MR_SERIAL_IS_MICROROS
+        // USB serial carries the micro-ROS stream in serial-transport
+        // mode — text output would corrupt it. BT stays available.
         Serial.print(buff);
+#endif
         SerialBT.print(buff);
 
         // micro-ROS telemetry (no-op unless connected).

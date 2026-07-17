@@ -33,7 +33,9 @@
 
 #if USE_MICROROS
 
+#if MR_TRANSPORT == 1
 #include <WiFi.h>
+#endif
 #include <micro_ros_arduino.h>
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
@@ -162,16 +164,20 @@ static void mrDestroyEntities() {
 //  Public API
 // ------------------------------------------------------------
 
-// Call once in setup(). Connects WiFi and points the UDP transport
-// at the agent. Non-fatal on failure — the bridge keeps retrying.
+// Call once in setup(). Configures the transport (USB serial to the
+// Radxa, or WiFi UDP). Non-fatal on failure — the bridge keeps retrying.
 inline void microros_begin() {
-    Serial.printf("[uROS] WiFi connecting to %s\n", MR_WIFI_SSID);
+#if MR_TRANSPORT == 0
+    // USB serial transport: the agent on the Radxa opens the ESP32's
+    // CDC port (e.g. /dev/ttyUSB0). Serial must NOT be used for text
+    // output from this point on (MR_SERIAL_IS_MICROROS guards this).
+    set_microros_transports();
+#else
     set_microros_wifi_transports(
         (char *)MR_WIFI_SSID, (char *)MR_WIFI_PASS,
         (char *)MR_AGENT_IP, MR_AGENT_PORT);
+#endif
     mrState = MR_WAITING_AGENT;
-    Serial.printf("[uROS] Transport ready — agent %s:%d\n",
-                  MR_AGENT_IP, MR_AGENT_PORT);
 }
 
 // Call every loop tick. Cheap when idle; never blocks the PID.
@@ -189,7 +195,9 @@ inline void microros_spin() {
         case MR_CONNECTING:
             if (mrCreateEntities()) {
                 mrState = MR_CONNECTED;
+#if !MR_SERIAL_IS_MICROROS
                 Serial.println("[uROS] Agent connected — entities up");
+#endif
             } else {
                 mrDestroyEntities();
                 mrState = MR_WAITING_AGENT;
@@ -204,7 +212,9 @@ inline void microros_spin() {
             if (millis() - mrLastPingMs > 1000) {
                 mrLastPingMs = millis();
                 if (rmw_uros_ping_agent(20, 1) != RMW_RET_OK) {
+#if !MR_SERIAL_IS_MICROROS
                     Serial.println("[uROS] Agent lost — motors safe-stopped");
+#endif
                     joyForward = 0.0f;
                     joySteering = 0.0f;
                     joyEnable = 0;

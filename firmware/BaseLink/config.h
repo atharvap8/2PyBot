@@ -215,12 +215,29 @@
 // micro-ROS agent on the Radxa) instead of the ESP-NOW joystick.
 // Requires the micro_ros_arduino library (humble).
 #define USE_MICROROS      0            // 0 = ESP-NOW joystick, 1 = micro-ROS
+
+// Transport: 0 = USB serial to the Radxa (ESP32 plugged into it),
+//            1 = WiFi UDP to the agent.
+// IMPORTANT (serial mode): the USB port carries the XRCE-DDS binary
+// stream — ALL debug/telemetry text on Serial is suppressed; use the
+// Bluetooth stream (GUI) for telemetry instead.
+#define MR_TRANSPORT      0
+
+// WiFi transport settings (MR_TRANSPORT == 1 only)
 #define MR_WIFI_SSID      "pybot"      // Radxa hotspot / LAN SSID
 #define MR_WIFI_PASS      "pybot1234"
 #define MR_AGENT_IP       "10.42.0.1"  // Radxa (NetworkManager shared mode)
 #define MR_AGENT_PORT     8888
+
 #define MR_MAX_LINEAR     0.5f         // m/s   -> full joyForward
 #define MR_MAX_ANGULAR    2.0f         // rad/s -> full joySteering
+
+// Silence Serial debug output when micro-ROS owns the USB port.
+#if USE_MICROROS && (MR_TRANSPORT == 0)
+  #define MR_SERIAL_IS_MICROROS 1
+#else
+  #define MR_SERIAL_IS_MICROROS 0
+#endif
 
 // ============================================================
 //  CONTROL LOOP TIMING
