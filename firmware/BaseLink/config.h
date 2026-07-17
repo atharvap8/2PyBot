@@ -214,7 +214,7 @@
 // When enabled, drive commands come from ROS 2 (/cmd_vel via the
 // micro-ROS agent on the Radxa) instead of the ESP-NOW joystick.
 // Requires the micro_ros_arduino library (humble).
-#define USE_MICROROS      0            // 0 = ESP-NOW joystick, 1 = micro-ROS
+#define USE_MICROROS      1            // 0 = ESP-NOW joystick, 1 = micro-ROS
 
 // Transport: 0 = USB serial to the Radxa (ESP32 plugged into it),
 //            1 = WiFi UDP to the agent.
