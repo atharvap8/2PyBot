@@ -1,4 +1,6 @@
 # Arduino CLI project file — makes huge_app the default everywhere.
 # `arduino-cli compile` / `upload` in this folder need no --fqbn/-p flags.
-default_fqbn: esp32:esp32:esp32:PartitionScheme=huge_app
+# UploadSpeed pinned to 115200: 921600/460800 are unstable on the
+# Radxa's USB host (esptool 'chip stopped responding' after baud change).
+default_fqbn: esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=115200
 default_port: /dev/ttyUSB0

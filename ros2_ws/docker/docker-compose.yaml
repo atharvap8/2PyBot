@@ -21,14 +21,15 @@ services:
     restart: unless-stopped
 
   microros-agent:
-    image: 2pybot:latest
+    # Official agent image — ros-humble-micro-ros-agent has no deb release.
+    image: microros/micro-ros-agent:humble
     container_name: 2pybot_microros_agent
     network_mode: host
     privileged: true
     volumes:
       - /dev:/dev
     # ESP32 over USB serial; switch to udp4 --port 8888 for WiFi transport
-    command: ros2 run micro_ros_agent micro_ros_agent serial --dev /dev/ttyUSB0 -b 115200
+    command: serial --dev /dev/ttyUSB0 -b 115200
     restart: unless-stopped
 
   # Legacy Bluetooth-serial bridge (pre-micro-ROS fallback)

@@ -14,7 +14,9 @@ set -e
 SKETCH="${1:-$HOME/2pybot/firmware/BaseLink}"
 PORT="${2:-/dev/ttyUSB0}"
 CLI="$HOME/.local/bin/arduino-cli"
-FQBN="esp32:esp32:esp32:PartitionScheme=huge_app"
+# UploadSpeed=115200: 921600 and 460800 are unstable on the Radxa
+# USB host (esptool dies after the baud-change handshake).
+FQBN="esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=115200"
 
 AGENT_WAS_RUNNING=0
 if docker ps --format '{{.Names}}' | grep -q 2pybot_microros_agent; then
