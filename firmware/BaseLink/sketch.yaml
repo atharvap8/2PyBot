@@ -1,0 +1,4 @@
+# Arduino CLI project file — makes huge_app the default everywhere.
+# `arduino-cli compile` / `upload` in this folder need no --fqbn/-p flags.
+default_fqbn: esp32:esp32:esp32:PartitionScheme=huge_app
+default_port: /dev/ttyUSB0

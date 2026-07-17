@@ -1,0 +1,2 @@
+# Arduino CLI project file — huge_app partition by default.
+default_fqbn: esp32:esp32:esp32:PartitionScheme=huge_app
