@@ -1,0 +1,16 @@
+pybot_balance_controller:
+  ros__parameters:
+    # Proven on-chip defaults (firmware config.h @ checkpoint-esp32-balance)
+    kp: 1250.0
+    ki: 0.0
+    kd: 1.786
+    target_angle: 0.071      # deg, equilibrium offset
+    output_limit: 20000.0    # steps/s (= TIMER_FREQ_HZ)
+    integral_limit: 1500.0
+    d_filter_alpha: 0.3
+    accel_limit: 30000.0     # steps/s^2
+    max_lean_deg: 3.0
+    max_linear: 0.5          # m/s at full lean
+    steer_gain: 4000.0       # differential steps/s at full turn
+    max_angular: 2.0         # rad/s
+    state_timeout: 0.1       # s

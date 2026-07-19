@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pybot_balance</name>
+  <version>0.1.0</version>
+  <description>
+    EXPERIMENTAL: full balancing control law running in ROS 2 on the
+    Radxa, with the ESP32 reduced to a micro-ROS I/O slave
+    (firmware/BaseLinkSlave). Ported from the on-chip implementation
+    (checkpoint tag: checkpoint-esp32-balance).
+  </description>
+  <maintainer email="atharva@example.com">Atharva</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

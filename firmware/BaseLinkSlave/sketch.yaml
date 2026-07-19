@@ -1,0 +1,3 @@
+# Arduino CLI project file. 115200 upload: higher rates unstable on Radxa.
+default_fqbn: esp32:esp32:esp32:PartitionScheme=huge_app,UploadSpeed=115200
+default_port: /dev/ttyUSB0
