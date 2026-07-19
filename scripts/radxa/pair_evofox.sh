@@ -20,17 +20,30 @@ case "$CMD" in
         ;;
     pair)
         [ -z "$MAC" ] && { echo "usage: $0 pair <MAC>"; exit 1; }
-        bluetoothctl pair "$MAC"
-        bluetoothctl trust "$MAC"
-        bluetoothctl connect "$MAC"
+        bluetoothctl <<EOF
+power on
+agent on
+default-agent
+pair $MAC
+trust $MAC
+connect $MAC
+EOF
         ;;
     connect)
         [ -z "$MAC" ] && { echo "usage: $0 connect <MAC>"; exit 1; }
-        bluetoothctl connect "$MAC"
+        bluetoothctl <<EOF
+power on
+agent on
+default-agent
+connect $MAC
+EOF
         ;;
     status)
-        bluetoothctl devices Connected
-        ls -l /dev/input/js* 2>/dev/null || echo "no joystick device yet"
+        echo "[bt] paired devices:"
+        bluetoothctl paired-devices
+        echo
+        echo "[bt] kernel input devices:"
+        ls -l /dev/input/js* 2>/dev/null || echo "no joystick device yet; controller not paired or /dev/input not available"
         ;;
     *) echo "usage: $0 [scan|pair <MAC>|connect <MAC>|status]"; exit 1 ;;
 esac

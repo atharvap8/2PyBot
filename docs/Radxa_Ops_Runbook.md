@@ -24,7 +24,7 @@ ESP32: balance PID @200Hz, steppers @20kHz — always standalone-safe
 | Flash ESP32 | `flash_esp32.sh` |
 | ROS shell in container | `ros_shell.sh` |
 | Any ros2 cmd | `ros_shell.sh ros2 topic list` |
-| Joint states live | `joint_states.sh` |
+| Joint states live | `joint_states.sh` (requires `start_stack.sh up`) |
 | EvoFox stream (joy) | `evofox_monitor.sh joy` |
 | EvoFox raw (no ROS) | `evofox_monitor.sh raw` |
 | Pair EvoFox | `pair_evofox.sh scan` then `pair_evofox.sh pair <MAC>` |
@@ -38,6 +38,7 @@ ssh radxa@192.168.10.132
 cd ~/2pybot/scripts/radxa
 
 ./pair_evofox.sh status          # controller connected? js0 present?
+#   if no /dev/input/js0, run ./evofox_monitor.sh raw to verify BT/HID input
 ./pair_evofox.sh connect <MAC>   # if not (pad must be on)
 ./start_stack.sh up              # teleop + micro-ROS agent
 ./start_stack.sh logs 2pybot_microros_agent   # wait for "session established"
@@ -54,7 +55,7 @@ Left stick Y = drive, right stick X = steer.
 ./evofox_monitor.sh cmd    # teleop shaping -> /cmd_vel OK? (press A first)
 ./ros_shell.sh ros2 node list          # /pybot_esp32 = micro-ROS up
 ./ros_shell.sh ros2 topic echo /pybot/pitch    # ESP32 -> ROS telemetry
-./joint_states.sh          # wheel angles live
+./joint_states.sh          # wheel angles live; if silent, ensure /pybot/joint_states is publishing
 ./ros_shell.sh ros2 topic hz /pybot/state      # telemetry rate check
 ```
 
@@ -80,15 +81,40 @@ Firmware config lives in `firmware/BaseLink/config.h`:
 
 See `scripts/radxa/rqt_remote.md` for full copies.
 
-```bash
-# RViz (Arch, docker):
-xhost +local:docker
-docker run -it --rm --net=host -e DISPLAY=$DISPLAY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix osrf/ros:humble-desktop rviz2
+If you have an X server on your laptop and are SSHing into the Radxa with X forwarding:
 
-# rqt graph / plots:
-docker run -it --rm --net=host -e DISPLAY=$DISPLAY \
-  -v /tmp/.X11-unix:/tmp/.X11-unix osrf/ros:humble-desktop rqt
+```bash
+ssh -X radxa@192.168.10.132
+cd ~/2pybot/scripts/radxa
+./ros_shell.sh
+```
+
+Then from the container shell:
+
+```bash
+# launch the generic rqt GUI
+rqt
+# or the rqt graph plugin directly
+ros2 run rqt_graph rqt_graph
+# launch rviz2 on your laptop display
+rviz2
+```
+
+If the display does not forward through the existing container setup, use an explicit GUI container from the Radxa host:
+
+```bash
+xhost +local:docker
+docker run -it --rm --net=host --privileged \
+  -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
+  osrf/ros:humble-desktop rviz2
+```
+
+For `rqt` from the host container the same pattern applies:
+
+```bash
+docker run -it --rm --net=host --privileged \
+  -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
+  osrf/ros:humble-desktop rqt
 ```
 
 RViz displays: Fixed Frame `base_link`; add RobotModel
@@ -113,8 +139,10 @@ cd ~/2pybot/scripts/radxa && ./start_stack.sh restart
 | Symptom | Fix |
 |---|---|
 | `/joy` silent | `pair_evofox.sh status`; re-pair; check `evofox_monitor.sh raw` |
+| `joint_states.sh` prints nothing | stack not running or `/pybot/joint_states` absent; run `start_stack.sh up` and verify topic with `ros_shell.sh ros2 topic list` |
 | No `/pybot_esp32` node | agent logs; replug USB; `flash_esp32.sh` stops/starts agent correctly? |
 | Agent "bind error" | another process owns /dev/ttyUSB0 — `monitor_esp32.sh` left open? |
+| Watch micro-ROS agent startup | `./start_stack.sh logs 2pybot_microros_agent` shows the `Created DataWriter` / `Created DataReader` messages |
 | Robot ignores /cmd_vel | motors enabled? (press A; check `ros2 topic echo /pybot/enable`) |
 | Container restart-loop | `start_stack.sh logs`; usually a launch file error after ws change |
 | No topics on PC | firewall/multicast; use Foxglove fallback |
