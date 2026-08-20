@@ -115,7 +115,7 @@
 // Test: while balancing send K4=+6.0 (LQR) / D=-0.07 (PID). If the robot
 // suddenly balances, flip this sign, restore the gain, reflash.
 // Verify after fix: debug 'w' must be POSITIVE while tilting forward.
-#define RATE_FWD_SIGN        (+1.0f)   // start same as PITCH_FWD_SIGN
+#define RATE_FWD_SIGN        (+1.0f)   // CONFIRMED on hardware 19 Aug (w + when tilting fwd)
 //
 // Static pitch trim (deg, in imu.getPitch() units). Rough value is
 // fine — the velocity-loop integral absorbs the remainder online.
@@ -144,10 +144,36 @@
 // Closed-loop poles: -17.55, -7.75, -1.73 +/- 0.87j, -0.58  (all LHP)
 // Drive mode uses the K2..K4 subset — verified poles: -16.1, -7.2, -6.1
 #define Z_INT_LIM        0.5f   // integral anti-windup clamp (m*s)
+// BALANCE > POSITION safeguards:
+#define EX_CLAMP_M       0.15f  // max position error fed to the LQR (m)
+#define VSAT_BLEED       3.0f   // hold-point bleed rate when vCmd saturates (1/s)
 
 // POSITION reference shaping
 #define V_HOLD_MAX_MS        0.35f    // unused by LQR core, kept for parity
 #define BRAKE_LOOKAHEAD_S    0.30f    // hold-point lead while driving (s)
+
+// ============================================================
+//  EXPRESSION / GAMEPAD FEATURES  (serial: G, H, A commands)
+// ============================================================
+// STIFF HOLD ("H,1"): second LQR gain set, solved offline with
+// heavy position weights Q=diag(200,20,90,1.5,60), R=0.30.
+// Poles -18.6, -7.8, -3.1 +/- 1.4j, -0.56 (stable). The robot
+// fights pushes ~3x harder and returns to the exact spot.
+// Auto-suspended while driving; cleared on disable.
+#define LQR_S1               (-35.5636f)
+#define LQR_S2               (-21.1461f)
+#define LQR_S3               (-65.5197f)
+#define LQR_S4               (-8.1273f)
+#define LQR_S5               (-14.1421f)
+//
+// LOOK ("A,<-1..1>"): sustained head-turn (yaw offset) while
+// station keeping. Physically sustainable, unlike a pitch lean.
+#define TRACK_WIDTH_M        0.155f   // wheel-to-wheel distance (m) -- MEASURE THIS
+#define LOOK_MAX_DEG         18.0f    // full stick = this much turn
+//
+// GESTURES ("G,yes" "G,no" "G,spin" "G,dance" "G,stop"): scripted
+// keyframes fed into the SAME drive inputs as the joystick, so
+// balancing and every safety limit stay in charge throughout.
 
 // ============================================================
 //  SPEED / ACCELERATION LIMITS
@@ -163,7 +189,7 @@
 // ============================================================
 //  DRIVE INPUT SCALING (Radxa 'V' line and ESP-NOW joystick)
 // ============================================================
-#define MAX_DRIVE_VEL_MS     0.80f    // forward = +/-1.0 maps to this speed
+#define MAX_DRIVE_VEL_MS     0.55f    // leaves balance headroom under V_MAX (0.82)
 #define DRIVE_DEADBAND       0.03f    // |forward| below this = position hold
 // ESP-NOW packet carries "pitch offset" -5..+5 deg (old controller fw);
 // convert to normalized forward command (-1..+1), forward-positive:
@@ -178,6 +204,13 @@
 #define STEER_DEADBAND       0.05f
 #define YAW_HOLD_KP          1.5f     // steps/s per count of diff error
 #define YAW_HOLD_KD          0.02f    // steps/s per (count/s) of diff rate
+#define YAW_HOLD_MAX_STEPS   1200.0f  // heading-hold authority cap (steps/s)
+// Wheel slip during a hard recovery shifts the L/R encoder diff by
+// thousands of counts; "unwinding" that spins the robot in circles
+// (~17.5k counts = one full turn on this geometry). Error beyond ~1/8
+// turn is treated as slip and the current heading is re-latched.
+#define YAW_RELATCH_COUNTS   2000.0f
+#define YAW_TILT_SUSPEND_DEG 12.0f    // no heading corrections while tilted
 
 // ============================================================
 //  LINK TIMEOUTS / SAFETY
@@ -235,5 +268,26 @@
 #define SERIAL_BAUD           115200
 #define ODOM_PERIOD_MS        20      // 50 Hz O-stream to the Radxa
 #define DEBUG_PERIOD_MS       100     // 10 Hz human-readable debug ('L')
+
+// ============================================================
+//  LED RING — WS2812 16-LED (NeoPixelBus, RMT hardware — never
+//  disables interrupts, so the 20 kHz stepper ISR is untouched)
+// ============================================================
+#define LED_RING_PIN      15
+#define LED_RING_COUNT    16
+#define LED_FRONT_INDEX    0     // which LED physically faces FORWARD
+#define LED_DIR_CW         1     // 1 if indices go clockwise seen from above, else 0
+#define LED_MAX_BRIGHT    70     // 0..255 power cap (16 LEDs full white = ~1 A!)
+#define LED_FPS           30
+
+// ============================================================
+//  BLUETOOTH GAMEPAD (EVOFOX One S via Bluepad32)
+// ============================================================
+// Emits joyForward in the same -5..+5 "pitch offset" units the old
+// ESP-NOW controller used, so JOY_FWD_SCALE and the arbitration in
+// the .ino are byte-for-byte unchanged.
+#define PAD_FWD_SIGN     (+1.0f)  // flip if stick-up drives backward
+#define PAD_STEER_SIGN   (+1.0f)  // flip if turning is mirrored
+#define PAD_DEADZONE      0.08f
 
 #endif // CONFIG_H

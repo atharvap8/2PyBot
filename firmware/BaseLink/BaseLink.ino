@@ -10,7 +10,7 @@
  *      z = Integral(x - xRef),   u = wheel acceleration
  *      vCmd += u*dt  ->  stepper ISR (steps/s)
  *
- *  Gains were computed offline by solving the continuous-time
+ *  Gains were computed offline by solving the continuous-time 
  *  algebraic Riccati equation (see tools/simulate_controllers.py,
  *  which also regenerates them for different geometry). Validated
  *  in simulation: 0.5 cm RMS station keeping under a 0.35 deg CoG
@@ -26,15 +26,18 @@
  *    L toggle debug stream   R reset controller   ? help
  *    K1=..K5=<v> LQR gains   T=<v> pitch trim (deg)   M=<mA> current
  *
- *  ESP-NOW joystick keeps working as a fallback (Radxa has
- *  authority while its 'V' lines are fresh).
+ *  EVOFOX One S pairs DIRECTLY over Bluetooth (Bluepad32 board
+ *  core; ESP-NOW removed so BT owns the radio). The Radxa keeps
+ *  override authority while its 'V' lines are fresh -- the
+ *  vision guard works unchanged.
  * ============================================================
  */
 
 #include "config.h"
 #include "imu_sensor.h"
 #include "stepper_control.h"
-#include "espnow_comm.h"
+#include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
+#include "led_ring.h"      // WS2812 16-LED expression ring on GPIO 15
 
 IMUSensor imu;
 
@@ -45,10 +48,9 @@ enum RobotState { STATE_IDLE, STATE_BALANCING };
 RobotState state       = STATE_IDLE;
 bool motorsRequested   = false;
 bool DEBUG_STREAM      = false;
-bool RADXA_STREAM      = true;
 
 // Forward-positive measurements (see config.h sign conventions)
-float pitchF = 0.0f, rateF = 0.0f;      // deg, deg/sL
+float pitchF = 0.0f, rateF = 0.0f;      // deg, deg/s
 float posM   = 0.0f, velF  = 0.0f;      // m, m/s (encoder-based)
 int64_t encRawL = 0, encRawR = 0;       // raw signed counts (for O-stream)
 float encDiff = 0.0f, diffRateF = 0.0f; // (R - L) counts, fwd-signed
@@ -60,6 +62,23 @@ float xRef = 0.0f;          // position hold target (m)
 float uOut = 0.0f;          // last acceleration command (m/s^2)
 float steerSteps = 0.0f;    // current differential (steps/s)
 float diffTarget = 0.0f;    // heading-hold encoder diff target
+
+// ---- expression features (gamepad) ----
+bool  stiffHold = false;    // "H,1": high-stiffness hold gain set
+float lookCmd   = 0.0f;     // "A,x": sustained yaw offset, -1..1
+
+// Gesture engine: keyframes of (duration, fwd, steer) fed into the
+// normal drive inputs. Balancer + safety limits stay in charge.
+struct GStep { uint16_t ms; float fwd; float steer; };
+static const GStep GEST_YES[]   = {{350,0.50f,0},{350,-0.50f,0},{350,0.50f,0},{350,-0.50f,0},{200,0,0}};
+static const GStep GEST_NO[]    = {{250,0,0.50f},{250,0,-0.50f},{250,0,0.50f},{250,0,-0.50f},{250,0,0.50f},{250,0,-0.50f},{150,0,0}};
+static const GStep GEST_SPIN[]  = {{2400,0,0.55f},{250,0,0}};
+static const GStep GEST_DANCE[] = {{300,0.50f,0},{300,-0.50f,0},{500,0,0.60f},{500,0,-0.60f},
+                                   {300,0.50f,0},{300,-0.50f,0},{1200,0,0.55f},{1200,0,-0.55f},
+                                   {300,-0.50f,0},{300,0.50f,0},{250,0,0}};
+const GStep* gestSeq = nullptr;
+uint8_t  gestLen = 0, gestIdx = 0;
+uint32_t gestStepStart = 0;
 
 // Live-tunable gains (RAM copies of config defaults)
 float k1 = LQR_K1, k2 = LQR_K2, k3 = LQR_K3, k4 = LQR_K4, k5 = LQR_K5;
@@ -96,7 +115,15 @@ void resetController() {
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
     xRef = posM;
     steerSteps = 0.0f; diffTarget = encDiff;
+    gestSeq = nullptr; stiffHold = false; lookCmd = 0.0f;
 }
+
+void startGesture(const GStep* seq, uint8_t len, const char* name) {
+    if (state != STATE_BALANCING) { Serial.println("[GEST] Not balancing -- ignored"); return; }
+    gestSeq = seq; gestLen = len; gestIdx = 0; gestStepStart = millis();
+    Serial.printf("[GEST] %s\n", name);
+}
+void stopGesture() { gestSeq = nullptr; }
 
 void requestEnable() {
     motorsRequested = true;
@@ -128,6 +155,28 @@ void handleLine(char* line) {
             if (!radxaEn && radxaEnPrev)  requestDisable("Radxa disable");
             radxaEnPrev = radxaEn;
         }
+        return;
+    }
+
+    // ---- expression commands (from the phone app / Radxa) ----
+    if ((line[0] == 'G' || line[0] == 'g') && line[1] == ',') {
+        const char* n = line + 2;
+        if      (!strncmp(n, "yes",   3)) startGesture(GEST_YES,   sizeof(GEST_YES)/sizeof(GStep),   "nod YES");
+        else if (!strncmp(n, "no",    2)) startGesture(GEST_NO,    sizeof(GEST_NO)/sizeof(GStep),    "nod NO");
+        else if (!strncmp(n, "spin",  4)) startGesture(GEST_SPIN,  sizeof(GEST_SPIN)/sizeof(GStep),  "spin");
+        else if (!strncmp(n, "dance", 5)) startGesture(GEST_DANCE, sizeof(GEST_DANCE)/sizeof(GStep), "dance");
+        else if (!strncmp(n, "stop",  4)) { stopGesture(); Serial.println("[GEST] stop"); }
+        else Serial.printf("[GEST] Unknown: %s\n", n);
+        return;
+    }
+    if ((line[0] == 'H' || line[0] == 'h') && line[1] == ',') {
+        stiffHold = atoi(line + 2) != 0;
+        if (stiffHold) { xRef = posM; zInt = 0.0f; }   // hold RIGHT HERE
+        Serial.printf("[HOLD] %s\n", stiffHold ? "STIFF" : "normal");
+        return;
+    }
+    if ((line[0] == 'A' || line[0] == 'a') && line[1] == ',') {
+        lookCmd = clampf(atof(line + 2), -1.0f, 1.0f);
         return;
     }
 
@@ -170,6 +219,7 @@ void handleLine(char* line) {
         case '?':
             Serial.println("\nE enable | X stop | C cal gyro | S settings | L debug | R reset");
             Serial.println("K1=..K5= LQR gains   T= trim (deg)   M= motor current (mA)");
+            Serial.println("G,yes|no|spin|dance|stop   H,0|1 stiff hold   A,<-1..1> look");
             Serial.println("Radxa: V,<fwd -1..1>,<steer -1..1>,<en 0|1>\n");
             break;
         default: break;
@@ -208,14 +258,30 @@ void runController(float dt) {
         zInt = 0.0f;
         uOut = -(k2 * (velF - vIn) + k3 * th + k4 * om);
     } else {
-        // Position hold / go-to: full LQI vector.
-        float ex = posM - xRef;
+        // Position hold / go-to: full LQI vector. Position error is
+        // clamped so a big displacement asks for a gentle walk back,
+        // never a sprint that eats the balance headroom.
+        float ex = clampf(posM - xRef, -EX_CLAMP_M, EX_CLAMP_M);
         zInt = clampf(zInt + ex * dt, -Z_INT_LIM, Z_INT_LIM);
-        uOut = -(k1 * ex + k2 * velF + k3 * th + k4 * om + k5 * zInt);
+        if (stiffHold) {
+            uOut = -(LQR_S1 * ex + LQR_S2 * velF + LQR_S3 * th + LQR_S4 * om + LQR_S5 * zInt);
+        } else {
+            uOut = -(k1 * ex + k2 * velF + k3 * th + k4 * om + k5 * zInt);
+        }
     }
 
     uOut = clampf(uOut, -A_MAX_MS2, A_MAX_MS2);
     vCmd = clampf(vCmd + uOut * dt, -V_MAX_MS, V_MAX_MS);
+
+    // BALANCE > POSITION: if the speed command saturates, the tilt
+    // terms lose their actuator and the robot falls. Give up ground:
+    // bleed the hold point (and integral) toward the robot until
+    // authority returns. It parks a little off-spot instead of falling.
+    if (fabsf(vCmd) > 0.90f * V_MAX_MS) {
+        xRef += (posM - xRef) * clampf(VSAT_BLEED * dt, 0.0f, 1.0f);
+        zInt -= zInt * clampf(2.0f * dt, 0.0f, 1.0f);
+    }
+
     float baseSteps = vCmd * STEPS_PER_M;
 
     // ---- yaw: commanded turn or encoder-differential heading hold ----
@@ -225,9 +291,19 @@ void runController(float dt) {
         steerSteps += clampf(target - steerSteps, -slew, slew);
         diffTarget = encDiff;                       // re-latch heading
     } else {
-        float dErr = diffTarget - encDiff;
+        // Sustained "look": yaw offset in encoder-diff counts.
+        float lookCounts = lookCmd * (LOOK_MAX_DEG * DEG_TO_RAD) * TRACK_WIDTH_M * COUNTS_PER_M;
+        float dErr = (diffTarget + lookCounts) - encDiff;
+        // Big error = wheel slip, not rotation: accept the new heading
+        // instead of unwinding it (that's what caused the 360 spins).
+        // Also re-latch during large tilts: recovery footwork is not
+        // a heading change worth correcting.
+        if (fabsf(dErr) > YAW_RELATCH_COUNTS || fabsf(pitchF) > YAW_TILT_SUSPEND_DEG) {
+            diffTarget = encDiff - lookCounts;
+            dErr = 0.0f;
+        }
         steerSteps = clampf(dErr * YAW_HOLD_KP - diffRateF * YAW_HOLD_KD,
-                            -MAX_STEER_STEPS, MAX_STEER_STEPS);
+                            -YAW_HOLD_MAX_STEPS, YAW_HOLD_MAX_STEPS);
     }
 
     steppers.setSpeeds((int32_t)(baseSteps - steerSteps),
@@ -247,6 +323,8 @@ void setup() {
     Serial.println("     2PyBot BaseLink — Package B: LQR / LQI");
     Serial.println("==================================================");
 
+    leds_begin();   // boot swirl plays while sensors settle below
+
     if (!imu.begin()) {
         Serial.println("[MAIN] FATAL: IMU init failed — halting");
         while (true) delay(1000);
@@ -259,7 +337,7 @@ void setup() {
     delay(STARTUP_SETTLE_MS);
     imu.calibrateGyro();
 
-    espnow_receiver_begin();
+    btgamepad_begin();
 
     Serial.printf("[MAIN] STEPS_PER_M=%.0f  COUNTS_PER_M=%.0f  Vmax=%.2f m/s  Amax=%.2f m/s^2\n",
                   STEPS_PER_M, COUNTS_PER_M, V_MAX_MS, A_MAX_MS2);
@@ -307,8 +385,22 @@ void loop() {
 
     // ---- 2. inputs ----
     pollSerial();
+    btgamepad_update();   // fills joyForward/joySteering/joyEnable (same names as before)
 
-    // ESP-NOW enable edge (works even when Radxa has drive authority)
+    // Gamepad expression buttons -> existing gesture engine (edge-detected in bt_gamepad.h)
+    switch (btgamepad_takeGesture()) {
+        case 1: startGesture(GEST_YES,   sizeof(GEST_YES)/sizeof(GStep),   "nod YES"); break;
+        case 2: startGesture(GEST_NO,    sizeof(GEST_NO)/sizeof(GStep),    "nod NO");  break;
+        case 3: startGesture(GEST_SPIN,  sizeof(GEST_SPIN)/sizeof(GStep),  "spin");    break;
+        case 4: startGesture(GEST_DANCE, sizeof(GEST_DANCE)/sizeof(GStep), "dance");   break;
+        case 5: stiffHold = !stiffHold;
+                if (stiffHold) { xRef = posM; zInt = 0.0f; }
+                Serial.printf("[HOLD] %s (pad)\n", stiffHold ? "STIFF" : "normal");
+                break;
+        default: break;
+    }
+
+    // Gamepad enable edge (works even when Radxa has drive authority)
     uint8_t jEn = joyEnable;
     if (jEn && !joyEnPrev)  requestEnable();
     if (!jEn && joyEnPrev)  requestDisable("joystick disable");
@@ -326,12 +418,26 @@ void loop() {
         cmdFwd = 0.0f; cmdSteer = 0.0f;
     }
 
+    // ---- 2b. gesture playback (operator input always overrides) ----
+    if (gestSeq) {
+        if (fabsf(cmdFwd) > 0.10f || fabsf(cmdSteer) > 0.20f) {
+            stopGesture();                        // human grabbed the stick
+        } else {
+            if (millis() - gestStepStart >= gestSeq[gestIdx].ms) {
+                gestIdx++; gestStepStart = millis();
+                if (gestIdx >= gestLen) stopGesture();
+            }
+            if (gestSeq) { cmdFwd = gestSeq[gestIdx].fwd; cmdSteer = gestSeq[gestIdx].steer; }
+        }
+    }
+
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {
         if (motorsRequested && fabsf(pitchF) < ARM_ANGLE_DEG) {
             resetController();
             steppers.enable();
             state = STATE_BALANCING;
+            leds_event(LED_EV_ARM);
             Serial.println("[MAIN] -> BALANCING");
         }
         if (millis() - lastBlinkMs > 500) {
@@ -340,6 +446,7 @@ void loop() {
         }
     } else { // BALANCING
         if (fabsf(pitchF) > MAX_TILT_ANGLE || fabsf(rateF) > MAX_PITCH_RATE_SAFETY) {
+            leds_event(LED_EV_FALL);
             requestDisable(fabsf(pitchF) > MAX_TILT_ANGLE ? "FELL" : "RATE SPIKE");
         } else {
             runController(dt);
@@ -347,9 +454,26 @@ void loop() {
         }
     }
 
+    // ---- 3b. expression ring (rate-limited internally, non-blocking) ----
+    {
+        LedInputs li;
+        li.balancing    = (state == STATE_BALANCING);
+        li.armRequested = motorsRequested;
+        li.fwd          = cmdFwd;
+        li.steer        = cmdSteer;
+        li.velF         = velF;
+        li.pitchF       = pitchF;
+        li.ex           = posM - xRef;
+        li.stiffHold    = stiffHold;
+        li.gestActive   = (gestSeq != nullptr);
+        li.radxaFresh   = radxaFresh;
+        li.padConnected = btgamepad_connected();
+        leds_update(li);
+    }
+
     // ---- 4. odometry stream to Radxa, 50 Hz, always on ----
     uint32_t nowMs = millis();
-    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM) {
+    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS) {
         lastOdomMs = nowMs;
         Serial.printf("O,%lu,%lld,%lld,%.2f,%.2f\n",
                       (unsigned long)nowMs,

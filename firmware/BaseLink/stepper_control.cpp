@@ -147,10 +147,20 @@ bool StepperControl::begin() {
 
     Serial.println("[STEP] MT6816 encoders initialized (PCNT 4x decode, 4096 CPR)");
 
-    // Timer at 1 MHz base; TIMER_ALARM_COUNT sets the interrupt frequency.
+    // Timer at 1 MHz tick; TIMER_ALARM_COUNT sets the interrupt frequency.
+    // The API changed between Arduino-ESP32 cores: 3.x is frequency-based,
+    // the 2.x core bundled with the Bluepad32 board package is divider-based.
+    // Both paths produce the identical 1 MHz tick and 20 kHz alarm.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
     _timer = timerBegin(1000000);
     timerAttachInterrupt(_timer, &stepperTimerISR);
     timerAlarm(_timer, TIMER_ALARM_COUNT, true, 0);
+#else
+    _timer = timerBegin(0, TIMER_PRESCALER, true);       // 80 MHz / 80 = 1 MHz
+    timerAttachInterrupt(_timer, &stepperTimerISR, true);
+    timerAlarmWrite(_timer, TIMER_ALARM_COUNT, true);    // auto-reload
+    timerAlarmEnable(_timer);
+#endif
 
     Serial.println("[STEP] Timer started");
     return true;
