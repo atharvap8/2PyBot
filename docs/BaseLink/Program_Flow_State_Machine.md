@@ -10,7 +10,7 @@ Upon triggering the ESP32 microcontroller's `setup()` environment, sequential va
 sequenceDiagram
     participant OS as ESP32 Core
     participant IMU as ISM6HG256X (I2C)
-    participant STEP as TMC2208 Steppers
+    participant STEP as TMC2226 Steppers
     participant NET as ESP-NOW & BT
 
     OS->>IMU: Configure High-Performance Registers (400kHz)

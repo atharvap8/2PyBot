@@ -40,8 +40,10 @@ graph TD
 
     subgraph Actuation Layer
         MIX -->|Steps/sec| TIMER[Timer ISR Bresenham 20kHz]:::software
-        TIMER -->|Fast UART| TMC1[Left TMC2208]:::hardware
-        TIMER -->|Fast UART| TMC2[Right TMC2208]:::hardware
+        TIMER -->|Step/Dir Pulses| TMC1[Left TMC2226]:::hardware
+        TIMER -->|Step/Dir Pulses| TMC2[Right TMC2226]:::hardware
+        CFGUART[Boot UART Config: Current, Microsteps, StealthChop, StallGuard4]:::software -.->|Single-wire UART| TMC1
+        CFGUART -.->|Single-wire UART| TMC2
         TMC1 --> M1[Left NEMA17 Stepper]:::hardware
         TMC2 --> M2[Right NEMA17 Stepper]:::hardware
     end
@@ -69,6 +71,7 @@ This layer operates completely detached from the primary logical sequence.
 - The physics engine feeds absolute "Steps Per Second" integers exclusively into volatile memory registers.
 - A background `Interrupt Service Routine` triggers exactly 20,000 times per second, managing Bresenham Accumulators for each wheel.
 - When an accumulator boundary is violated, native silicon overrides trigger the electrical step pin immediately, achieving zero-jitter mechanical pulses.
+- The `TMC2226` drivers receive only STEP/DIR pulses during motion. Each driver has its own hardware UART, used at boot to program the RMS current, the 1/8 microstep resolution, and the StealthChop chopper, and at runtime for current changes and StallGuard4 load readout. Every boot write is verified through the IFCNT register, so a silent UART fault cannot go unnoticed. MS1 and MS2 act as UART address pins on this chip and are strapped LOW on both modules, which selects address 0 and also keeps the standalone fallback at 1/8 microstepping.
 
 ---
 

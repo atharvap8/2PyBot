@@ -61,21 +61,21 @@
 
 | # | Symptom | Constant / variable | Function | Fix |
 |---|---|---|---|---|
-| 41 | `[STEP] RIGHT TMC2208: COMM ERROR` on boot | `RIGHT_UART_TX`, `RIGHT_UART_RX` | `setupDriver()` — `test_connection()` | Check 1 kΩ inline resistor on TX; verify `Serial2` pin assignment (16/17) |
-| 42 | `[STEP] LEFT TMC2208: COMM ERROR` on boot | `LEFT_UART_TX`, `LEFT_UART_RX` | `setupDriver()` — `test_connection()` | Same as above for `Serial1` remapped to pins 18/19 |
-| 43 | Motors do not energize after pressing 'E' | `RIGHT_EN_PIN`, `LEFT_EN_PIN` | `enable()` — `digitalWrite(EN, LOW)` | EN pins wired incorrectly; TMC2208 enables on LOW; verify GPIO 32 and 26 |
+| 41 | `[STEP] RIGHT TMC2226: COMM ERROR (conn=.., IFCNT delta=..)` on boot | `RIGHT_UART_TX`, `RIGHT_UART_RX`, `DRV_UART_ADDR` | `setupDriver()`, `test_connection()` and IFCNT write check | Check the 1 kΩ inline resistor on TX and the PDN_UART routing; MS1/MS2 must be LOW (UART address 0); verify `Serial2` pins (16/17) |
+| 42 | `[STEP] LEFT TMC2226: COMM ERROR (conn=.., IFCNT delta=..)` on boot | `LEFT_UART_TX`, `LEFT_UART_RX`, `DRV_UART_ADDR` | `setupDriver()`, `test_connection()` and IFCNT write check | Same as above for `Serial1` remapped to pins 18/19 |
+| 43 | Motors do not energize after pressing 'E' | `RIGHT_EN_PIN`, `LEFT_EN_PIN` | `enable()`, `digitalWrite(EN, LOW)` | EN pins wired incorrectly; the TMC2226 enables on LOW, same as the TMC2208; verify GPIO 32 and 26 |
 | 44 | Motors spin in wrong direction | `RIGHT_DIR_INVERT`, `LEFT_DIR_INVERT` | `setSpeeds()` — `pinDirL/R` XOR logic | Flip the invert flag for the offending motor in `config.h` |
-| 45 | Motors stall under any load | `MOTOR_CURRENT_MA` | `setupDriver()` — `drv.rms_current()` | Increase current (max ~1400 mA for NEMA17); check Vref wiring |
-| 46 | Motors run hot / driver overheats | `MOTOR_CURRENT_MA` | `setupDriver()` — `drv.rms_current()` | Reduce current; add heatsink to TMC2208; enable `en_spreadCycle` properly |
+| 45 | Motors stall under any load | `MOTOR_CURRENT_MA` | `setupDriver()`, `drv.rms_current()` | Raise `MOTOR_CURRENT_MA` (default 1500; silicon limit 2000 mA RMS, motor rating permitting); UART current control is verified working, Vref only matters if UART is down; rerun the 'z' stall test after any change |
+| 46 | Motors run hot / driver overheats | `MOTOR_CURRENT_MA` | `setupDriver()`, `drv.rms_current()` | Reduce current; add a heatsink to the TMC2226; CoolStep already lowers current with load above `DRV_TCOOLTHRS`, and IHOLD halves it at true standstill when disarmed |
 | 47 | One motor runs, the other does not | GPIO wiring | `begin()` — `pinMode()` and `digitalWrite()` | Confirm STEP/DIR/EN pins match `config.h` for each motor |
 | 48 | Motor speed maxes out immediately | `TIMER_FREQ_HZ`, `PID_OUTPUT_MAX` | `setSpeeds()` clamp check | Output saturated; check PID gains or increase `PID_OUTPUT_MAX` |
 | 49 | Motors jitter at low speeds | `TIMER_FREQ_HZ`, microstep distribution | `tick()` — Bresenham accumulator | Normal at very low steps/s; ensure `MOTOR_ACCEL_LIMIT` is not clamping small changes |
-| 50 | Motor makes grinding noise during balance | `MICROSTEPS` | `setupDriver()` — `drv.microsteps()` | Try increasing microsteps to 32; also check `en_spreadCycle` setting |
+| 50 | Motor makes grinding noise during balance | `MICROSTEPS`, `DRV_STEALTHCHOP` | `setupDriver()`, `drv.microsteps()` | Resolution is programmed over UART at 1/8 with interpolation to 1/256 (`intpol`), so grinding is rarely a microstep problem; check mechanics first, then confirm `DRV_STEALTHCHOP 1`. Raising `MICROSTEPS` changes `STEPS_PER_M` and invalidates tuned gains |
 | 51 | Robot spins in place when commanded forward | `LEFT_DIR_INVERT` / `RIGHT_DIR_INVERT` | `setSpeeds()` XOR | Both invert flags have the same value; one must differ from the other |
 | 52 | `timerBegin()` crashes or returns null | ESP32 Arduino Core version | `begin()` — `timerBegin(1000000)` | Core 3.0+ API used; confirm Board Manager version ≥ 3.0 |
 | 53 | Step pulses stop completely mid-run | ISR crash / stack overflow | `tick()` in IRAM | Confirm `tick()` has `IRAM_ATTR`; avoid heap calls inside ISR |
 | 54 | `disable()` does not stop movement | Mutex not entered | `disable()` — `portENTER_CRITICAL_ISR` | `timerMux` must be unlocked; do not call `disable()` from inside ISR |
-| 55 | `setCurrent()` has no visible effect | TMC2208 UART not responding | `setCurrent()` — `rms_current()` | UART connection must be working at runtime; confirm no COMM ERROR at boot |
+| 55 | `setCurrent()` has no visible effect | TMC2226 UART not responding | `setCurrent()`, `rms_current()` | UART must be working at runtime; confirm the boot log shows `TMC2226: OK` with a 1/8 readback and no COMM ERROR |
 | 56 | `getPositionL()` always returns 0 | PCNT not initialized | `getPositionL()` — `pcnt_get_counter_value()` | Confirm `setupPCNT()` ran without error; check `ENC_LEFT_A/B` pin assignments |
 | 57 | Encoder position counts backwards | `getPositionR()` negation | `getPositionR()` — `return -(...)` | Right encoder negated to match left; flip negation if encoders are swapped |
 | 58 | Position wraps / resets unexpectedly | `PCNT_H_LIM` / `PCNT_L_LIM` | `pcnt_overflow_isr()` | Overflow ISR must be registered; confirm `pcnt_isr_service_install()` succeeded |
@@ -165,6 +165,17 @@
 | 118 | Main loop runs slower than 200 Hz | `LOOP_PERIOD_US` | `if (elapsedUs < LOOP_PERIOD_US) return` | Check for blocking `delay()` calls added in custom code; keep ISR overhead low |
 | 119 | Telemetry output floods Serial at high rate | `LOOP_FREQ_HZ / 5` | Debug print in `loop()` | Output is throttled to 5 Hz; increase divisor (e.g., `/10`) for 2 Hz if needed |
 | 120 | `DEBUG = false` still prints messages | `DEBUG` flag scope | `if (...DEBUG)` telemetry block | Only the periodic telemetry block is gated; `[MAIN]` state messages always print |
+
+## Part 8: TMC2226 StallGuard4, CoolStep and Chopper (`stepper_control.cpp`, `config.h`)
+
+| # | Symptom | Constant / variable | Function | Fix |
+|---|---|---|---|---|
+| 121 | Boot log shows `SGTHRS=0` or StallGuard values look dead | `DRV_STEALTHCHOP` | `setupDriver()` | StallGuard4 and CoolStep only work in StealthChop; set `DRV_STEALTHCHOP 1` |
+| 122 | `[STALL]` lines print during normal driving | `SGTHRS_LEFT` / `SGTHRS_RIGHT` | DIAG check in `loop()` | Thresholds too sensitive; lower them (stall flags when SG_RESULT < 2 x SGTHRS). Tuned values on this hardware are 76 and 77 |
+| 123 | Real stalls never raise a flag | `SGTHRS_LEFT` / `SGTHRS_RIGHT`, `DRV_TCOOLTHRS` | DIAG check in `loop()` | Raise the thresholds, and remember flags are only valid above `DRV_TCOOLTHRS` (about 1250 microsteps per second); slow stalls are invisible to StallGuard |
+| 124 | No `[STALL]` output at all | `USE_DIAG_PINS` | `begin()` DIAG interrupt setup | Reporting is off by default; wire DIAG to GPIO 34 (left) and GPIO 35 (right) and set `USE_DIAG_PINS 1`. Output is report-only and never disables the motors |
+| 125 | Balance feels soft against pushes while driving | `COOLSTEP_ENABLE` | `setupDriver()` CoolStep block | CoolStep can drop current to half of IRUN under light load; set `COOLSTEP_ENABLE 0`. Standstill balance is unaffected because CoolStep is inactive below `DRV_TCOOLTHRS` |
+| 126 | Holding torque weak when disarmed | `drv.ihold(16)` | `setupDriver()` | IHOLD is set to roughly half current at true standstill; raise the value if the robot must hold position on a slope while disarmed |
 
 ---
 

@@ -5,9 +5,27 @@
 #  transmitter) using arduino-cli to catch syntax and type
 #  errors before they reach hardware.
 #
+#  The two sketches build on DIFFERENT board cores, on purpose:
+#
+#  BaseLink builds on esp32-bluepad32:esp32, the Bluepad32 board
+#  package (based on Arduino ESP32 core 2.0.x). It provides
+#  <Bluepad32.h> for the EVOFOX gamepad over Bluetooth Classic.
+#  stepper_control.cpp already handles the 2.x/3.x timer API
+#  split via ESP_ARDUINO_VERSION_MAJOR.
+#
+#  Controller builds on the stock esp32:esp32 core (3.x). Its
+#  ESP-NOW send callback uses wifi_tx_info_t, a type that does
+#  not exist on the 2.0.x core, so it must not be built with
+#  the Bluepad32 package.
+#
+#  The Bluepad32 package resolves its toolchain from the official
+#  espressif index, so BOTH board manager URLs are required.
+#  firmware/EvoFoxController is the old Bluetooth bridge. It is
+#  obsolete on this branch and intentionally not compiled.
+#
 #  BaseLink uses the "huge_app" partition scheme (3 MB flash)
-#  because the sketch + Bluetooth + ESP-NOW + AHRS libraries
-#  exceed the default 1.25 MB application partition.
+#  because the sketch plus the Bluepad32 stack, AHRS, and
+#  NeoPixelBus exceed the default 1.25 MB application partition.
 #
 #  Compiled .bin artifacts are uploaded per run so they can
 #  be inspected or manually flashed without a local toolchain.
@@ -17,7 +35,7 @@ name: Firmware CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'system/**']
     paths:
       - 'firmware/**'
   pull_request:
@@ -37,25 +55,26 @@ jobs:
       - name: Install arduino-cli
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Configure ESP32 board core
+      - name: Configure ESP32 + Bluepad32 board core
         run: |
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls \
-            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json \
+            https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          arduino-cli core install esp32-bluepad32:esp32@4.1.0
 
       - name: Install libraries
         run: |
           arduino-cli lib install "TMCStepper"
           arduino-cli lib install "STM32duino ISM6HG256X"
           arduino-cli lib install "QMC5883LCompass"
-          arduino-cli lib install "FastLED"
+          arduino-cli lib install "NeoPixelBus by Makuna"
 
       - name: Compile BaseLink sketch
         run: |
           arduino-cli compile \
-            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --fqbn esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app \
             --warnings default \
             --output-dir build/BaseLink \
             firmware/BaseLink/BaseLink.ino
