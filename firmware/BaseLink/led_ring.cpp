@@ -139,6 +139,22 @@ void leds_update(const LedInputs& in) {
                 showF(); return;
             }
             eventActive = 0;
+        } else if (eventActive == LED_EV_SPEED_HI) {
+            if (e < 0.45f) {
+                // two fast blue laps racing forward — "sport mode"
+                float sweep = e / 0.45f * 720.0f;
+                arc(sweep, 2.0f, 0.15f, 0.45f, 1.0f);
+                showF(); return;
+            }
+            eventActive = 0;
+        } else if (eventActive == LED_EV_SPEED_LO) {
+            if (e < 0.45f) {
+                // wide green arc calmly contracting to the front — "easy mode"
+                float k = 1.0f - e / 0.45f;
+                arc(0.0f, 1.5f + 6.0f * k, 0.05f + 0.10f * k, 0.60f, 0.15f);
+                showF(); return;
+            }
+            eventActive = 0;
         } else eventActive = 0;
     }
 
@@ -158,6 +174,22 @@ void leds_update(const LedInputs& in) {
     if (in.radxaFresh && in.balancing && !driving && fabsf(in.velF) > 0.10f) {
         float pulse = (sinf(t * 18.0f) > 0.2f) ? 1.0f : 0.15f;
         fillAll(pulse, pulse * 0.12f, 0.0f);
+        showF(); return;
+    }
+
+    // ---------- 3c. climb mode: violet breathing + grip dots ----------
+    // Must sit above "shy": climb-mode tracking lag routinely exceeds
+    // the blush threshold and that's effort, not embarrassment.
+    if (in.balancing && in.climbMode) {
+        float b = 0.30f + 0.25f * sinf(t * 4.0f);
+        fillAll(b * 0.45f, b * 0.08f, b * 0.80f);          // violet base
+        // grip dots crawl the way the ramp reference moves:
+        // back->front climbing forward, front->back descending
+        float m = fmodf(t * 150.0f, 180.0f);
+        float crawl = (in.fwd < -0.02f) ? m : 180.0f - m;
+        arc( crawl, 1.2f, 0.50f, 0.15f, 0.90f);            // mirrored grip
+        arc(-crawl, 1.2f, 0.50f, 0.15f, 0.90f);            // dots "pulling"
+        if (greeting) fillAll(0.0f, 0.15f, 0.03f);
         showF(); return;
     }
 

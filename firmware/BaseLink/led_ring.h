@@ -20,8 +20,10 @@
 #include "config.h"
 
 // One-shot events (overlay animations)
-#define LED_EV_ARM   1   // green wake-up sweep
-#define LED_EV_FALL  2   // red flash + fade ("ouch")
+#define LED_EV_ARM       1   // green wake-up sweep
+#define LED_EV_FALL      2   // red flash + fade ("ouch")
+#define LED_EV_SPEED_HI  3   // RB: fast blue double-lap ("sport")
+#define LED_EV_SPEED_LO  4   // LB: green arc settling at the front ("easy")
 
 struct LedInputs {
     bool  balancing;     // state == STATE_BALANCING
@@ -32,6 +34,7 @@ struct LedInputs {
     float pitchF;        // deg
     float ex;            // posM - xRef (m) -> "I got pushed" detector
     bool  stiffHold;
+    bool  climbMode;     // cliff/climb mode active -> violet grip display
     bool  gestActive;    // any gesture playing -> party mode
     bool  radxaFresh;    // Cubie currently has authority (vision override)
     bool  padConnected;

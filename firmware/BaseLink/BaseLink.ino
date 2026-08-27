@@ -1,11 +1,13 @@
 /*
  * ============================================================
  *  BaseLink_LQR.ino — 2PyBot firmware, Package B (LQR / LQI)
+
+                            LATESTT
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
  *  integral (LQI) that nulls drift from the unknown CoG offset.
- *
+ *  =]`1
  *      u = -( K1*(x-xRef) + K2*v + K3*pitch + K4*pitchRate + K5*z )
  *      z = Integral(x - xRef),   u = wheel acceleration
  *      vCmd += u*dt  ->  stepper ISR (steps/s)
@@ -65,6 +67,7 @@ float diffTarget = 0.0f;    // heading-hold encoder diff target
 
 // ---- expression features (gamepad) ----
 bool  stiffHold = false;    // "H,1": high-stiffness hold gain set
+bool  climbMode = false;    // "H,2" / D-pad DOWN: slope LQI mode
 float lookCmd   = 0.0f;     // "A,x": sustained yaw offset, -1..1
 
 // Gesture engine: keyframes of (duration, fwd, steer) fed into the
@@ -115,11 +118,12 @@ void resetController() {
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
     xRef = posM;
     steerSteps = 0.0f; diffTarget = encDiff;
-    gestSeq = nullptr; stiffHold = false; lookCmd = 0.0f;
+    gestSeq = nullptr; stiffHold = false; climbMode = false; lookCmd = 0.0f;
 }
 
 void startGesture(const GStep* seq, uint8_t len, const char* name) {
     if (state != STATE_BALANCING) { Serial.println("[GEST] Not balancing -- ignored"); return; }
+    if (climbMode) { Serial.println("[GEST] Climb mode -- gestures ignored"); return; }
     gestSeq = seq; gestLen = len; gestIdx = 0; gestStepStart = millis();
     Serial.printf("[GEST] %s\n", name);
 }
@@ -170,9 +174,18 @@ void handleLine(char* line) {
         return;
     }
     if ((line[0] == 'H' || line[0] == 'h') && line[1] == ',') {
-        stiffHold = atoi(line + 2) != 0;
-        if (stiffHold) { xRef = posM; zInt = 0.0f; }   // hold RIGHT HERE
-        Serial.printf("[HOLD] %s\n", stiffHold ? "STIFF" : "normal");
+        int hv = atoi(line + 2);
+        if (hv == 2) {                                  // CLIMB mode
+            climbMode = true; stiffHold = false; stopGesture();
+            xRef = posM;
+            Serial.println("[HOLD] CLIMB");
+        } else {
+            climbMode = false;
+            zInt = clampf(zInt, -Z_INT_LIM, Z_INT_LIM); // re-shrink climb integral
+            stiffHold = hv != 0;
+            if (stiffHold) { xRef = posM; zInt = 0.0f; }   // hold RIGHT HERE
+            Serial.printf("[HOLD] %s\n", stiffHold ? "STIFF" : "normal");
+        }
         return;
     }
     if ((line[0] == 'A' || line[0] == 'a') && line[1] == ',') {
@@ -211,15 +224,17 @@ void handleLine(char* line) {
             Serial.println("\n---- Package B (LQR / LQI) settings ----");
             Serial.printf("  K1=%.4f  K2=%.4f  K3=%.4f\n", k1, k2, k3);
             Serial.printf("  K4=%.4f  K5=%.4f  Trim=%.3f deg\n", k4, k5, pitchTrim);
-            Serial.printf("  Motors: %s  State: %s\n",
+            Serial.printf("  Motors: %s  State: %s  PadSpeed: %s  Hold: %s\n",
                           steppers.isEnabled() ? "ON" : "OFF",
-                          state == STATE_BALANCING ? "BALANCING" : "IDLE");
+                          state == STATE_BALANCING ? "BALANCING" : "IDLE",
+                          joySpeedHigh ? "HIGH" : "LOW",
+                          climbMode ? "CLIMB" : (stiffHold ? "STIFF" : "normal"));
             Serial.println("----------------------------------------\n");
             break;
         case '?':
             Serial.println("\nE enable | X stop | C cal gyro | S settings | L debug | R reset");
             Serial.println("K1=..K5= LQR gains   T= trim (deg)   M= motor current (mA)");
-            Serial.println("G,yes|no|spin|dance|stop   H,0|1 stiff hold   A,<-1..1> look");
+            Serial.println("G,yes|no|spin|dance|stop   H,0|1|2 normal|stiff|CLIMB   A,<-1..1> look");
             Serial.println("Radxa: V,<fwd -1..1>,<steer -1..1>,<en 0|1>\n");
             break;
         default: break;
@@ -250,7 +265,22 @@ void runController(float dt) {
     float vIn = cmdFwd * MAX_DRIVE_VEL_MS;
     bool driving = fabsf(vIn) > (DRIVE_DEADBAND * MAX_DRIVE_VEL_MS);
 
-    if (driving) {
+    if (climbMode) {
+        // CLIMB: the stick ramps the position REFERENCE slowly and the
+        // full 5-state LQI tracks it at all times. The always-on integral
+        // (wider clamp) absorbs the slope's shifted equilibrium pitch and
+        // holding torque, so tracking is zero-error uphill — unlike the
+        // normal driving branch, which zeroes zInt and picks up a large
+        // steady-state velocity error on an incline.
+        xRef += (cmdFwd * CLIMB_VEL_MS) * dt;
+        // Rubber band: the reference may never run further than the error
+        // clamp ahead of the robot — releasing the stick (or stalling on
+        // the slope) stops the target within EX_CLAMP_M, no runaway.
+        xRef = clampf(xRef, posM - EX_CLAMP_M, posM + EX_CLAMP_M);
+        float ex = posM - xRef;                       // already in-clamp
+        zInt = clampf(zInt + ex * dt, -CLIMB_Z_INT_LIM, CLIMB_Z_INT_LIM);
+        uOut = -(LQR_C1 * ex + LQR_C2 * velF + LQR_C3 * th + LQR_C4 * om + LQR_C5 * zInt);
+    } else if (driving) {
         // Velocity-tracking mode: K2..K4 subset (poles verified stable).
         // Hold point is dragged along with a braking lookahead so the
         // robot parks smoothly where it stops.
@@ -285,8 +315,9 @@ void runController(float dt) {
     float baseSteps = vCmd * STEPS_PER_M;
 
     // ---- yaw: commanded turn or encoder-differential heading hold ----
-    if (fabsf(cmdSteer) > STEER_DEADBAND) {
-        float target = cmdSteer * MAX_STEER_STEPS;
+    float steerIn = climbMode ? cmdSteer * CLIMB_STEER_SCALE : cmdSteer;
+    if (fabsf(steerIn) > STEER_DEADBAND) {
+        float target = steerIn * MAX_STEER_STEPS;
         float slew = STEER_SLEW * dt;
         steerSteps += clampf(target - steerSteps, -slew, slew);
         diffTarget = encDiff;                       // re-latch heading
@@ -394,10 +425,22 @@ void loop() {
         case 3: startGesture(GEST_SPIN,  sizeof(GEST_SPIN)/sizeof(GStep),  "spin");    break;
         case 4: startGesture(GEST_DANCE, sizeof(GEST_DANCE)/sizeof(GStep), "dance");   break;
         case 5: stiffHold = !stiffHold;
-                if (stiffHold) { xRef = posM; zInt = 0.0f; }
+                if (stiffHold) { climbMode = false; xRef = posM; zInt = 0.0f; }
                 Serial.printf("[HOLD] %s (pad)\n", stiffHold ? "STIFF" : "normal");
                 break;
+        case 6: climbMode = !climbMode;
+                if (climbMode) { stiffHold = false; stopGesture(); xRef = posM; }
+                else           { zInt = clampf(zInt, -Z_INT_LIM, Z_INT_LIM); }
+                Serial.printf("[HOLD] %s (pad)\n", climbMode ? "CLIMB" : "climb off");
+                break;
         default: break;
+    }
+
+    // Speed-mode edge -> ring cue (blue dash = HIGH, green settle = LOW)
+    static uint8_t spdPrev = SPEED_BOOT_HIGH;
+    if (joySpeedHigh != spdPrev) {
+        spdPrev = joySpeedHigh;
+        leds_event(spdPrev ? LED_EV_SPEED_HI : LED_EV_SPEED_LO);
     }
 
     // Gamepad enable edge (works even when Radxa has drive authority)
@@ -412,8 +455,16 @@ void loop() {
     if (radxaFresh) {
         cmdFwd = radxaFwd;  cmdSteer = radxaSteer;
     } else if (joyFresh) {
-        cmdFwd   = clampf(joyForward * JOY_FWD_SCALE,  -1.0f, 1.0f);
-        cmdSteer = clampf(joySteering * JOY_STEER_SCALE, -1.0f, 1.0f);
+        // Dual speed mode (LB = LOW, RB = HIGH): scales the pad's authority
+        // INSIDE the existing caps. Full stick in LOW mode commands
+        // SPEED_LO_DRIVE_SCALE * MAX_DRIVE_VEL_MS and
+        // SPEED_LO_STEER_SCALE * MAX_STEER_STEPS. Radxa override (above)
+        // and gesture keyframes (below) stay full-scale on purpose, and
+        // the balancer's own limits (V_MAX_MS / A_MAX_MS2) never shrink.
+        float sD = joySpeedHigh ? 1.0f : SPEED_LO_DRIVE_SCALE;
+        float sS = joySpeedHigh ? 1.0f : SPEED_LO_STEER_SCALE;
+        cmdFwd   = clampf(joyForward * JOY_FWD_SCALE,  -1.0f, 1.0f) * sD;
+        cmdSteer = clampf(joySteering * JOY_STEER_SCALE, -1.0f, 1.0f) * sS;
     } else {
         cmdFwd = 0.0f; cmdSteer = 0.0f;
     }
@@ -465,6 +516,7 @@ void loop() {
         li.pitchF       = pitchF;
         li.ex           = posM - xRef;
         li.stiffHold    = stiffHold;
+        li.climbMode    = climbMode;
         li.gestActive   = (gestSeq != nullptr);
         li.radxaFresh   = radxaFresh;
         li.padConnected = btgamepad_connected();

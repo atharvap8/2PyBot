@@ -19,7 +19,8 @@
  *    Left stick Y   drive            Right stick X  steer
  *    START          arm              SELECT         disarm (E-STOP)
  *    Y / B / X / A  nod-yes / nod-no / spin / DANCE
- *    LB             toggle stiff hold
+ *    LB             SPEED LOW        RB             SPEED HIGH
+ *    D-pad UP       toggle stiff hold    D-pad DOWN  toggle CLIMB mode
  * ============================================================
  */
 
@@ -35,20 +36,34 @@ volatile float         joySteering     = 0.0f;   // -1..+1
 volatile uint8_t       joyEnable       = 0;
 volatile unsigned long lastJoyPacketMs = 0;
 
+// Dual speed mode: 0 = LOW (LB), 1 = HIGH (RB). Consumed by the .ino
+// arbitration; sticky across arm/disarm and pad reconnects on purpose
+// (predictable — the mode you left is the mode you get back).
+volatile uint8_t       joySpeedHigh    = SPEED_BOOT_HIGH;
+
 // ---- Bluepad32 bitmasks (verify with the [PAD] debug print) ----
 #define PAD_BTN_A        0x0001
 #define PAD_BTN_B        0x0002
 #define PAD_BTN_X        0x0004
 #define PAD_BTN_Y        0x0008
-#define PAD_BTN_LB       0x0010
+#define PAD_BTN_LB       0x0010   // shoulder L
+#define PAD_BTN_RB       0x0020   // shoulder R
+#define PAD_BTN_LT       0x0040   // trigger L (digital bit)
+#define PAD_BTN_RT       0x0080   // trigger R (digital bit)
 #define PAD_MISC_SELECT  0x0002
 #define PAD_MISC_START   0x0004
+// D-pad comes from _pad->dpad(), a separate bitmask from buttons():
+#define PAD_DPAD_UP      0x01
+#define PAD_DPAD_DOWN    0x02
+#define PAD_DPAD_RIGHT   0x04
+#define PAD_DPAD_LEFT    0x08
 
 static ControllerPtr _pad      = nullptr;
 static bool          _armed    = false;
 static uint16_t      _btnPrev  = 0;
 static uint16_t      _miscPrev = 0;
-static uint8_t       _gestReq  = 0;      // 1 yes, 2 no, 3 spin, 4 dance, 5 stiff-toggle
+static uint8_t       _dpadPrev = 0;
+static uint8_t       _gestReq  = 0;      // 1 yes, 2 no, 3 spin, 4 dance, 5 stiff-toggle, 6 climb-toggle
 
 static void _onPadConnect(ControllerPtr ctl) {
     _pad = ctl;
@@ -97,23 +112,32 @@ inline void btgamepad_update() {
     // ---- button edges ----
     uint16_t btn  = _pad->buttons();
     uint16_t misc = _pad->miscButtons();
+    uint8_t  dpad = _pad->dpad();
     uint16_t bNew = btn  & ~_btnPrev;
     uint16_t mNew = misc & ~_miscPrev;
+    uint8_t  dNew = dpad & ~_dpadPrev;
 
     if (mNew & PAD_MISC_START)  { _armed = true;  Serial.println("[PAD] ARM"); }
     if (mNew & PAD_MISC_SELECT) { _armed = false; Serial.println("[PAD] DISARM (e-stop)"); }
 
-    if (bNew & PAD_BTN_Y)  _gestReq = 1;   // nod yes
-    if (bNew & PAD_BTN_B)  _gestReq = 2;   // nod no
-    if (bNew & PAD_BTN_X)  _gestReq = 3;   // spin
-    if (bNew & PAD_BTN_A)  _gestReq = 4;   // dance!
-    if (bNew & PAD_BTN_LB) _gestReq = 5;   // stiff hold toggle
+    if (bNew & PAD_BTN_Y)    _gestReq = 1;   // nod yes
+    if (bNew & PAD_BTN_B)    _gestReq = 2;   // nod no
+    if (bNew & PAD_BTN_X)    _gestReq = 3;   // spin
+    if (bNew & PAD_BTN_A)    _gestReq = 4;   // dance!
+    if (dNew & PAD_DPAD_UP)   _gestReq = 5;   // stiff hold toggle
+    if (dNew & PAD_DPAD_DOWN) _gestReq = 6;   // cliff/climb mode toggle
 
-    if (btn != _btnPrev || misc != _miscPrev)
-        Serial.printf("[PAD] btn=0x%04X misc=0x%04X\n", btn, misc);  // for remapping
+    // Dual speed mode — LB drops to LOW, RB pops to HIGH. Edge-triggered,
+    // idempotent (holding or re-tapping the same bumper changes nothing).
+    if (bNew & PAD_BTN_LB) { joySpeedHigh = 0; Serial.println("[PAD] SPEED LOW"); }
+    if (bNew & PAD_BTN_RB) { joySpeedHigh = 1; Serial.println("[PAD] SPEED HIGH"); }
+
+    if (btn != _btnPrev || misc != _miscPrev || dpad != _dpadPrev)
+        Serial.printf("[PAD] btn=0x%04X misc=0x%04X dpad=0x%02X\n", btn, misc, dpad);  // for remapping
 
     _btnPrev  = btn;
     _miscPrev = misc;
+    _dpadPrev = dpad;
 
     joyEnable       = _armed ? 1 : 0;
     lastJoyPacketMs = millis();

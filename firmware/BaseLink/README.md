@@ -1,5 +1,7 @@
 # BaseLink_LQR_BT — direct EVOFOX Bluetooth + expression ring
 
+
+
 Your original `BaseLink_LQR` folder is untouched — keep it as the known-good
 fallback. This is a parallel sketch with **ESP-NOW removed** (as you approved),
 which frees the 2.4 GHz radio for Bluetooth, so the EVOFOX One S now pairs
