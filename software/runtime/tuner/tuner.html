@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Balancing Robot PID Tuner</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #ffffff; padding: 20px; }
+        .container { max-width: 800px; margin: auto; }
+        .panel { background: #1e1e1e; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        h1, h2 { margin-top: 0; }
+        button { background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-right: 10px; }
+        button:hover { background: #45a049; }
+        button.stop { background: #f44336; }
+        button.stop:hover { background: #da190b; }
+        .status { margin-top: 10px; font-weight: bold; color: #FFEB3B; }
+        
+        .slider-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input[type=range] { width: 100%; }
+        .val-display { float: right; font-family: monospace; color: #4fc3f7; }
+
+        canvas { background: #000; border-radius: 4px; width: 100%; height: 300px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Robot Live PID Tuner</h1>
+        
+        <div class="panel">
+            <button id="connectBtn">Connect Serial (Make sure Arduino IDE Monitor is CLOSED)</button>
+            <button id="enableBtn" class="stop">Emergency STOP (X)</button>
+            <button id="enableRunBtn">Enable Motors (E)</button>
+            <div id="status" class="status">Disconnected</div>
+        </div>
+
+        <div class="panel">
+            <h2>Live Angle Plot</h2>
+            <canvas id="plot"></canvas>
+            <div style="font-family: monospace; color: #81c784; margin-top: 10px;">Angle: <span id="lblAngle">0.0</span>°</div>
+        </div>
+
+        <div class="panel">
+            <h2>PID Tuning</h2>
+            
+            <div class="slider-group">
+                <label>Kp (Proportional) <span class="val-display" id="valP">450</span></label>
+                <input type="range" id="slideP" min="0" max="1000" step="5" value="450">
+            </div>
+
+            <div class="slider-group">
+                <label>Kd (Derivative) <span class="val-display" id="valD">30</span></label>
+                <input type="range" id="slideD" min="0" max="150" step="0.5" value="30">
+            </div>
+
+            <div class="slider-group">
+                <label>Ki (Integral) <span class="val-display" id="valI">0.0</span></label>
+                <input type="range" id="slideI" min="0" max="20" step="0.1" value="0">
+            </div>
+
+            <div class="slider-group">
+                <label>Target Angle Offset <span class="val-display" id="valT">0.0</span></label>
+                <input type="range" id="slideT" min="-10" max="10" step="0.1" value="0.0">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let port, reader, writer;
+        const connectBtn = document.getElementById('connectBtn');
+        const enableBtn = document.getElementById('enableBtn');
+        const enableRunBtn = document.getElementById('enableRunBtn');
+        const statusEl = document.getElementById('status');
+        const encoder = new TextEncoder();
+        const decoder = new TextDecoder();
+
+        // Canvas for plotting
+        const canvas = document.getElementById('plot');
+        const ctx = canvas.getContext('2d');
+        const plotData = new Array(200).fill(0);
+
+        function drawPlot() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = '#29b6f6';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            const midY = canvas.height / 2;
+            const stepX = canvas.width / plotData.length;
+
+            for(let i=0; i<plotData.length; i++) {
+                // scale angle so +/- 20 degrees fills screen (-20 to 20 = 40 range)
+                let y = midY - (plotData[i] * (canvas.height / 40)); 
+                if(i === 0) ctx.moveTo(0, y);
+                else ctx.lineTo(i * stepX, y);
+            }
+            ctx.stroke();
+
+            // center line
+            ctx.strokeStyle = '#ffffff33';
+            ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(canvas.width, midY); ctx.stroke();
+            requestAnimationFrame(drawPlot);
+        }
+        drawPlot();
+
+        async function connect() {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+                statusEl.innerText = "Connected!";
+                connectBtn.innerText = "Disconnect";
+                writer = port.writable.getWriter();
+                readLoop();
+            } catch (e) {
+                statusEl.innerText = "Error: " + e.message;
+            }
+        }
+
+        async function readLoop() {
+            let buffer = "";
+            reader = port.readable.getReader();
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value);
+                    
+                    let lines = buffer.split('\n');
+                    buffer = lines.pop(); // keep remainder
+
+                    for(let line of lines) {
+                        try {
+                            const parts = line.trim().split('\t');
+                            if(parts.length >= 6) { 
+                                // angle target output P I D
+                                let angle = parseFloat(parts[0]);
+                                if(!isNaN(angle)) {
+                                    document.getElementById('lblAngle').innerText = angle.toFixed(2);
+                                    plotData.push(angle);
+                                    plotData.shift();
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                }
+            } catch (e) {
+                statusEl.innerText = "Read error: " + e.message;
+            } finally {
+                reader.releaseLock();
+            }
+        }
+
+        async function sendCmd(cmd) {
+            if (writer) {
+                await writer.write(encoder.encode(cmd + "\n"));
+            }
+        }
+
+        connectBtn.addEventListener('click', () => {
+            if (!port) connect();
+        });
+
+        enableBtn.addEventListener('click', () => { sendCmd("X"); });
+        enableRunBtn.addEventListener('click', () => { sendCmd("E"); });
+
+        function setupSlider(id, cmdPrefix, valDisplayId) {
+            const el = document.getElementById(id);
+            const valEl = document.getElementById(valDisplayId);
+            el.addEventListener('input', () => {
+                valEl.innerText = el.value;
+            });
+            el.addEventListener('change', () => {
+                sendCmd(cmdPrefix + "=" + el.value);
+            });
+        }
+
+        setupSlider('slideP', 'P', 'valP');
+        setupSlider('slideD', 'D', 'valD');
+        setupSlider('slideI', 'I', 'valI');
+        setupSlider('slideT', 'T', 'valT');
+
+    </script>
+</body>
+</html>
