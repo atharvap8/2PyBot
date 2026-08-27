@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  stepper_control.cpp — Dual TMC2208 implementation
+ *  stepper_control.cpp — Dual TMC2226 implementation
  * ============================================================
  *  Implements high-frequency hardware timer ISR step generation
  *  and asynchronous UART configuration for both stepper motors.
@@ -34,6 +34,13 @@ void IRAM_ATTR stepperTimerISR() {
 volatile int64_t StepperControl::_encOverflowL = 0;
 volatile int64_t StepperControl::_encOverflowR = 0;
 
+#if USE_DIAG_PINS
+volatile uint32_t StepperControl::_stallL = 0;
+volatile uint32_t StepperControl::_stallR = 0;
+static void IRAM_ATTR diagIsrL() { StepperControl::_stallL++; }
+static void IRAM_ATTR diagIsrR() { StepperControl::_stallR++; }
+#endif
+
 // ============================================================
 //  PCNT overflow ISR — extends 16-bit counters to 64-bit
 // ============================================================
@@ -55,8 +62,8 @@ static void IRAM_ATTR pcnt_overflow_isr(void *arg) {
 //  Constructor
 // ============================================================
 StepperControl::StepperControl()
-    : _rightDrv(&Serial2, R_SENSE),
-      _leftDrv (&Serial1, R_SENSE),
+    : _rightDrv(&Serial2, R_SENSE, DRV_UART_ADDR),
+      _leftDrv (&Serial1, R_SENSE, DRV_UART_ADDR),
       _timer(nullptr),
       _absRateL(0), _absRateR(0),
       _dirFwdL(true), _dirFwdR(true),
@@ -132,8 +139,16 @@ bool StepperControl::begin() {
     Serial1.begin(115200, SERIAL_8N1, LEFT_UART_RX,  LEFT_UART_TX);
     delay(100);  // Allow UART lines to settle before transmitting.
 
-    setupDriver(_rightDrv, "RIGHT");
-    setupDriver(_leftDrv,  "LEFT");
+    setupDriver(_rightDrv, "RIGHT", SGTHRS_RIGHT);
+    setupDriver(_leftDrv,  "LEFT",  SGTHRS_LEFT);
+
+#if USE_DIAG_PINS
+    pinMode(DIAG_LEFT_PIN,  INPUT);
+    pinMode(DIAG_RIGHT_PIN, INPUT);
+    attachInterrupt(DIAG_LEFT_PIN,  diagIsrL, RISING);
+    attachInterrupt(DIAG_RIGHT_PIN, diagIsrR, RISING);
+    Serial.println("[STEP] DIAG stall pins armed (GPIO 34/35)");
+#endif
 
     // PCNT_UNIT_0 = Left wheel; PCNT_UNIT_1 = Right wheel.
     setupPCNT(PCNT_UNIT_0, ENC_LEFT_A,  ENC_LEFT_B);
@@ -147,10 +162,20 @@ bool StepperControl::begin() {
 
     Serial.println("[STEP] MT6816 encoders initialized (PCNT 4x decode, 4096 CPR)");
 
-    // Timer at 1 MHz base; TIMER_ALARM_COUNT sets the interrupt frequency.
+    // Timer at 1 MHz tick; TIMER_ALARM_COUNT sets the interrupt frequency.
+    // The API changed between Arduino-ESP32 cores: 3.x is frequency-based,
+    // the 2.x core bundled with the Bluepad32 board package is divider-based.
+    // Both paths produce the identical 1 MHz tick and 20 kHz alarm.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
     _timer = timerBegin(1000000);
     timerAttachInterrupt(_timer, &stepperTimerISR);
     timerAlarm(_timer, TIMER_ALARM_COUNT, true, 0);
+#else
+    _timer = timerBegin(0, TIMER_PRESCALER, true);       // 80 MHz / 80 = 1 MHz
+    timerAttachInterrupt(_timer, &stepperTimerISR, true);
+    timerAlarmWrite(_timer, TIMER_ALARM_COUNT, true);    // auto-reload
+    timerAlarmEnable(_timer);
+#endif
 
     Serial.println("[STEP] Timer started");
     return true;
@@ -159,22 +184,60 @@ bool StepperControl::begin() {
 // ============================================================
 //  setupDriver()
 // ============================================================
-// Writes operational parameters to a TMC2208 via UART.
-void StepperControl::setupDriver(TMC2208Stepper& drv, const char* label) {
+// Full TMC2226 bring-up over UART: current/microsteps from UART,
+// StealthChop with StallGuard4 + CoolStep per config.h, and an
+// IFCNT write-verify so a silent UART failure can't hide.
+void StepperControl::setupDriver(TMC2209Stepper& drv, const char* label, uint8_t sgthrs) {
     drv.begin();
+    drv.GSTAT(0b111);                 // clear reset/error flags
+    drv.pdn_disable(true);            // PDN pin is UART now
+    drv.mstep_reg_select(true);       // microsteps from UART, not MS pins
+    drv.I_scale_analog(false);        // current from UART, not Vref pot
     drv.toff(5);
+    drv.blank_time(24);
     drv.rms_current(MOTOR_CURRENT_MA);
     drv.microsteps(MICROSTEPS);
-    drv.pwm_autoscale(true);
-    drv.en_spreadCycle(true);
+    drv.intpol(true);                 // interpolate 1/8 -> 1/256 internally
+    drv.ihold(16);                    // ~half current at true standstill —
+    drv.iholddelay(8);                //   balancing steps constantly, so this
+    drv.TPOWERDOWN(20);               //   only bites when disarmed
 
-    uint8_t conn = drv.test_connection();
-    if (conn == 0) {
-        Serial.printf("[STEP] %s TMC2208: OK  |  Current=%d mA  µsteps=%d\n",
-                      label, MOTOR_CURRENT_MA, MICROSTEPS);
+#if DRV_STEALTHCHOP
+    drv.en_spreadCycle(false);        // StealthChop: required for SG4/CoolStep
+    drv.pwm_autoscale(true);
+    drv.pwm_autograd(true);
+    drv.TPWMTHRS(0);                  // stealth at all speeds
+    drv.TCOOLTHRS(DRV_TCOOLTHRS);     // SG/CoolStep valid above ~1250 usteps/s
+    drv.SGTHRS(sgthrs);
+#if COOLSTEP_ENABLE
+    drv.semin(COOLSTEP_SEMIN);
+    drv.semax(COOLSTEP_SEMAX);
+    drv.seup(2);
+    drv.sedn(1);
+    drv.seimin(0);                    // CoolStep floor = IRUN/2
+#else
+    drv.semin(0);                     // CoolStep off
+#endif
+#else
+    drv.en_spreadCycle(true);         // legacy mode: SG/CoolStep inactive
+    drv.pwm_autoscale(true);
+#endif
+
+    // ---- verify: connection + a counted UART write ----
+    uint8_t conn = drv.test_connection();          // 0 = OK
+    uint8_t if0  = drv.IFCNT();
+    drv.SGTHRS(sgthrs);                            // one counted re-write
+    uint8_t ifd  = (uint8_t)(drv.IFCNT() - if0);
+    if (conn == 0 && ifd == 1) {
+        Serial.printf("[STEP] %s TMC2226: OK | %d mA, 1/%d usteps (readback 1/%d), "
+                      "%s, SGTHRS=%u, CoolStep %s\n",
+                      label, MOTOR_CURRENT_MA, MICROSTEPS, drv.microsteps(),
+                      DRV_STEALTHCHOP ? "StealthChop" : "SpreadCycle",
+                      sgthrs, (COOLSTEP_ENABLE && DRV_STEALTHCHOP) ? "ON" : "off");
     } else {
-        Serial.printf("[STEP] %s TMC2208: COMM ERROR (code %d) — check UART wiring\n",
-                      label, conn);
+        Serial.printf("[STEP] %s TMC2226: COMM ERROR (conn=%u, IFCNT delta=%u) "
+                      "— check UART wiring / MS1-MS2 address pins\n",
+                      label, conn, ifd);
     }
 }
 

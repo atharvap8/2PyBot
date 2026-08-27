@@ -4,9 +4,9 @@ This sequence defines the identical diagnostic methodologies required immediatel
 
 ## 1. Complete Communication Failures
 
-### Symptom: Serial reads "WARNING: TMC2208 drivers not responding"
-**Analysis:** Identical UART communication procedures fundamentally collapsed entirely. Steppers may still function manually explicitly relying directly on Step/Dir, but logic controlling stealthChop functions inherently crashed.
-- **Resolution:** Verify physical layout configuration matrices. The ESP32 utilizes logic resistors isolating identical UART signals directly. Ensure 1k $\Omega$ resistors are properly installed across defining TX lines avoiding electrical grounding loops entirely. Validate `MOTOR_CURRENT_MA` logic limits.
+### Symptom: Serial reads "WARNING: TMC2226 UART unresponsive"
+**Analysis:** The boot check failed for at least one driver. Each driver must pass two tests: `test_connection()` returning 0, and an IFCNT counter that increments by exactly one after a verification write. The failing driver prints `TMC2226: COMM ERROR (conn=..., IFCNT delta=...)`. The motors can still step on STEP/DIR alone, but the drivers then fall back to their pin strapping (1/8 microsteps with MS1/MS2 LOW) and to Vref for current, and StealthChop tuning, StallGuard4, and CoolStep never reach the chips.
+- **Resolution:** Check the 1 kOhm inline resistor on each TX line and confirm the module's PDN_UART pad is actually routed to the header. On the TMC2226, MS1 and MS2 are the UART address pins; both must be LOW so each chip answers on address 0. Confirm `Serial2` is on pins 16/17 (right) and `Serial1` on pins 18/19 (left). Once the boot log shows `TMC2226: OK` with a microstep readback of 1/8, current and mode settings are reaching the silicon.
 
 ### Symptom: "FATAL: IMU init failed — halting"
 **Analysis:** The main processor cannot resolve structural I2C confirmations executing `0x6A` / `0x6B` identifier protocols cleanly.

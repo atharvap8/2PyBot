@@ -57,6 +57,6 @@ Execute immediate configurations observing exact upper-case syntactical limits:
 |:---:|:---|:---|
 | **`P=X`** | Sets $K_p$ | Immediate reaction strength. |
 | **`D=X`** | Sets $K_d$ | Damping influence and wobble reduction. |
-| **`M=X`** | Sets RMS Limit | Adjusts explicitly the electrical current mapped natively by the TMC2208 drivers. Limits heat saturation. *(Default 1100mA).* |
+| **`M=X`** | Sets RMS Limit | Writes a new RMS current to both TMC2226 drivers over UART, effective immediately. *(Default 1500 mA. The silicon allows up to 2000 mA RMS; never exceed the motor's rated phase current.)* |
 | **`S`** | Output View | Dumps configured memory buffers sequentially displaying active parameters directly back identically mapped through UART protocols. |
 | **`C`** | Calibrate | Completely zeroes drifting Mahony values identically measuring unmoving ambient vibration levels. **(Perform Strictly Stationary)** |

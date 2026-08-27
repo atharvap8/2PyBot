@@ -5,6 +5,13 @@
 #  Compiles both ESP32 sketches, then creates a GitHub Release
 #  and attaches all flashable assets with full release notes.
 #
+#  Board cores (they differ on purpose):
+#    BaseLink   builds on esp32-bluepad32:esp32 (Bluepad32
+#               package, core 2.0.x base) for <Bluepad32.h>.
+#    Controller builds on the stock esp32:esp32 core (3.x).
+#               Its ESP-NOW send callback uses wifi_tx_info_t,
+#               which only exists on core 3.x.
+#
 #  Partition schemes:
 #    BaseLink   — huge_app (3 MB) for large firmware footprint
 #    Controller — default  (1.25 MB) sufficient for transmitter
@@ -36,25 +43,28 @@ jobs:
       - name: Install arduino-cli
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Configure ESP32 board core
+      - name: Configure ESP32 board cores (stock + Bluepad32)
         run: |
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls \
-            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json \
+            https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
+          arduino-cli core install esp32-bluepad32:esp32@4.1.0
 
       - name: Install BaseLink libraries
         run: |
           arduino-cli lib install "TMCStepper"
           arduino-cli lib install "STM32duino ISM6HG256X"
           arduino-cli lib install "QMC5883LCompass"
+          arduino-cli lib install "NeoPixelBus by Makuna"
 
       # ---- Compile BaseLink (Robot Receiver) ----
       - name: Compile BaseLink sketch
         run: |
           arduino-cli compile \
-            --fqbn esp32:esp32:esp32:PartitionScheme=huge_app \
+            --fqbn esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app \
             --warnings default \
             --output-dir build/BaseLink \
             firmware/BaseLink/BaseLink.ino
@@ -85,9 +95,9 @@ jobs:
           body: |
             # 2PyBot — Firmware Release ${{ github.ref_name }}
 
-            > Self-balancing wheeled robot platform built on ESP32, TMC2208 stepper drivers,
-            > and a 6-DOF Mahony AHRS fusion filter. Controlled wirelessly over ESP-NOW with
-            > a custom joystick transmitter. Telemetry and live PID tuning over Bluetooth serial.
+            > Self-balancing wheeled robot platform built on ESP32, TMC2226 stepper drivers,
+            > and a 6-DOF Mahony AHRS fusion filter. LQR/LQI balance control, driven directly
+            > by a Bluetooth gamepad (Bluepad32), with a WS2812 expression ring (NeoPixelBus).
 
             ---
 
@@ -119,8 +129,9 @@ jobs:
             ### BaseLink: Robot Receiver
 
             The BaseLink firmware is compiled with the **`huge_app` partition scheme** (3 MB application
-            partition) to accommodate the combined footprint of Bluetooth Serial, ESP-NOW, Mahony AHRS,
-            TMC2208 UART drivers, and the stepper ISR.
+            partition) to fit the combined footprint of the Bluepad32 Bluetooth stack, Mahony AHRS,
+            the TMC2226 UART drivers, NeoPixelBus, and the stepper ISR. It is built with the
+            **esp32-bluepad32 board package**; a stock-core build will compile without gamepad support.
 
             **You must flash three files** — the bootloader, partition table, and application binary —
             at their correct offsets.
@@ -171,11 +182,16 @@ jobs:
 
             If you prefer not to use `esptool.py`:
 
-            1. Open `firmware/BaseLink/BaseLink.ino` in **Arduino IDE 2.x**.
-            2. Under **Tools → Board**, select `ESP32 Dev Module`.
-            3. Under **Tools → Partition Scheme**, select **Huge APP (3MB No OTA/1MB SPIFFS)**.
-            4. Select your COM port and click **Upload**.
-            5. Repeat for `firmware/Controller/Controller.ino` using the **default** partition scheme.
+            1. In **File → Preferences**, add both board manager URLs: the official ESP32 package and
+               `https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json`.
+               Then install **esp32_bluepad32** from the Boards Manager.
+            2. Open `firmware/BaseLink/BaseLink.ino` in **Arduino IDE 2.x**.
+            3. Under **Tools → Board**, select `ESP32 Dev Module` from the **ESP32 + Bluepad32 Arduino** section.
+            4. Under **Tools → Partition Scheme**, select **Huge APP (3MB No OTA/1MB SPIFFS)**.
+            5. Select your COM port and click **Upload**.
+            6. For `firmware/Controller/Controller.ino`, switch back to the stock esp32 board package.
+               The transmitter uses ESP-NOW APIs from core 3.x that the Bluepad32 core does not have.
+               Use the **default** partition scheme.
 
             ---
 

@@ -24,11 +24,9 @@
 │   │   ├── config.h
 │   │   ├── imu_sensor.h / .cpp
 │   │   ├── stepper_control.h / .cpp
-│   │   ├── pid_controller.h
-│   │   ├── espnow_comm.h
-│   │   ├── serial_tuner.h
-│   │   ├── system_architecture.md  # Inline architecture reference
-│   │   └── tuner.html              # Web Bluetooth PID tuner
+│   │   ├── bt_gamepad.h
+│   │   ├── led_ring.h / .cpp
+│   │   └── system_architecture.md  # Inline architecture reference
 │   └── Controller/             # Joystick transmitter firmware
 │       └── Controller.ino
 ├── gui/                        # Desktop control & telemetry software
@@ -63,7 +61,9 @@ The main control loop runs at **200 Hz** (`dt = 5 ms`). On each tick:
 
 ### Stepper Actuation
 
-Motor stepping is handled entirely in a **20 kHz hardware timer ISR**, independent of the main loop. This produces jitter-free, precise pulses to the TMC2208 stepper drivers without relying on `delay()` or blocking calls. Bresenham-style accumulators are used to generate non-integer step rates accurately.
+Motor stepping is handled entirely in a **20 kHz hardware timer ISR**, independent of the main loop. This produces jitter-free, precise pulses to the TMC2226 stepper drivers without relying on `delay()` or blocking calls. Bresenham-style accumulators are used to generate non-integer step rates accurately.
+
+The TMC2226 drivers run in UART mode. At boot, the firmware programs the RMS current, the 1/8 microstep resolution, and the chopper settings over a dedicated hardware UART per driver, then verifies each write with the chip's IFCNT counter. The drivers operate in StealthChop, which enables two features the previous TMC2208s lacked: StallGuard4 load measurement with hardware stall flags, and CoolStep load-adaptive current scaling. Motion itself is plain STEP/DIR from the ISR; the UART carries only configuration and diagnostics.
 
 ### Wireless Control
 
@@ -86,11 +86,10 @@ The robot streams telemetry packets over Bluetooth serial. Two interfaces are pr
 | `config.h` | All tunable constants: PID gains, pin assignments, motor specs |
 | `imu_sensor.h / .cpp` | IMU initialization, DMP/raw read, Mahony filter integration |
 | `stepper_control.h / .cpp` | ISR-driven step generation, velocity ramping, direction control |
-| `pid_controller.h` | Generic PID template used by balance and heading loops |
-| `espnow_comm.h` | ESP-NOW peer registration, packet parsing, and callback handler |
-| `serial_tuner.h` | Bluetooth serial command parser for live PID adjustment |
+| `bt_gamepad.h` | Bluepad32 gamepad link; pairs the EVOFOX pad directly to the robot |
+| `led_ring.h / .cpp` | WS2812 expression ring driven over the ESP32 RMT peripheral |
 | `gui/robot_controller_ui.py` | Python telemetry dashboard (PySerial + Matplotlib) |
-| `firmware/BaseLink/tuner.html` | Web Bluetooth PID tuner, no installation required |
+| `tools/tuner/tuner.html` | Web Bluetooth tuner, no installation required |
 
 ---
 
@@ -106,6 +105,7 @@ All technical write-ups are in [`docs/`](docs/).
 | [Program Flow & State Machine](docs/BaseLink/Program_Flow_State_Machine.md) | Boot sequence, operational states, and fault handling |
 | [Troubleshooting Guide](docs/BaseLink/Troubleshooting_Guide.md) | Diagnosis of common issues: oscillation, drift, crashes |
 | [Project History](docs/BaseLink/Project_History.md) | Revision log and design evolution |
+| [TMC2226 Migration](docs/BaseLink/TMC2226_Migration.md) | Driver swap from TMC2208 to TMC2226: wiring, firmware, and tuning notes |
 | [Controller Architecture](docs/Controller/System_Architecture.md) | Transmitter packet structure and joystick mapping |
 
 ---
@@ -114,10 +114,11 @@ All technical write-ups are in [`docs/`](docs/).
 
 ### Robot Firmware
 
-1. Open `firmware/BaseLink/BaseLink.ino` in the Arduino IDE.
-2. Review `config.h` and set pin assignments and motor parameters for your hardware.
-3. Install required libraries (see `config.h` header comments for the full list).
-4. Flash to the robot ESP32.
+1. Install the **esp32_bluepad32** board package. The board manager URL and setup steps are in `firmware/BaseLink/README.md`. The robot firmware needs this package for the Bluetooth gamepad and will not compile on the stock ESP32 core.
+2. Open `firmware/BaseLink/BaseLink.ino` in the Arduino IDE and select `ESP32 Dev Module` from the **ESP32 + Bluepad32 Arduino** section, with the **Huge APP (3MB)** partition scheme.
+3. Review `config.h` and set pin assignments and motor parameters for your hardware.
+4. Install the required libraries: TMCStepper, STM32duino ISM6HG256X, QMC5883LCompass, and NeoPixelBus by Makuna.
+5. Flash to the robot ESP32 and confirm the boot log shows `TMC2226: OK` for both drivers.
 
 ### Controller Firmware
 
@@ -144,7 +145,7 @@ PCB design files (KiCad) and the bill of materials are located in [`hardware/`](
 **Key components:**
 
 - ESP32 (×2 — robot and transmitter)
-- TMC2208 stepper motor drivers (×2)
+- TMC2226 stepper motor drivers (×2, 2.0 A RMS, UART mode, StallGuard4 and CoolStep)
 - NEMA 17 stepper motors (×2)
 - ISM6HG256x IMU breakout (Custom PCB)
 - QMC5883L magnetometer
