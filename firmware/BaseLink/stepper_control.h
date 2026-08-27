@@ -1,8 +1,11 @@
 /*
  * ============================================================
- *  stepper_control.h — Dual TMC2208 Stepper Driver
+ *  stepper_control.h — Dual TMC2226 Stepper Driver
  * ============================================================
- *  Controls two NEMA17 steppers via TMC2208 in UART mode.
+ *  Controls two NEMA17 steppers via TMC2226 in UART mode
+ *  (TMC2209 register set -> TMC2209Stepper class; TMCStepper
+ *  has no 2226 class). StealthChop + StallGuard4 + CoolStep
+ *  configured per config.h.
  *
  *  Step generation runs entirely inside a hardware timer ISR,
  *  decoupled from the main loop. A Bresenham accumulator
@@ -31,9 +34,9 @@ public:
 
     StepperControl();
 
-    // Configures GPIO, UART, TMC2208 registers, PCNT quadrature
+    // Configures GPIO, UART, TMC2226 registers, PCNT quadrature
     // decoding, and starts the hardware timer ISR.
-    // Returns false if either TMC2208 does not respond over UART.
+    // Returns false if either TMC2226 does not respond over UART.
     bool begin();
 
     // Sets both motors to the same speed (steps/s, negative = reverse).
@@ -60,12 +63,21 @@ public:
     // ISR tick handler — must be in IRAM for 20 kHz performance.
     void IRAM_ATTR tick();
 
-    // Updates TMC2208 RMS current via UART without a reboot.
+    // Updates TMC2226 RMS current via UART without a reboot.
     void setCurrent(uint16_t mA);
 
+#if USE_DIAG_PINS
+    // Hardware stall flags (DIAG pin edge counters). Info only —
+    // the control loop never acts on these automatically.
+    static volatile uint32_t _stallL;
+    static volatile uint32_t _stallR;
+    uint32_t stallCountL() const { return _stallL; }
+    uint32_t stallCountR() const { return _stallR; }
+#endif
+
 private:
-    TMC2208Stepper _rightDrv;
-    TMC2208Stepper _leftDrv;
+    TMC2209Stepper _rightDrv;
+    TMC2209Stepper _leftDrv;
     hw_timer_t*    _timer;
 
     // Volatile ISR-shared state — compiler must not cache in registers.
@@ -78,7 +90,7 @@ private:
 
     bool _enabled;
 
-    void setupDriver(TMC2208Stepper& drv, const char* label);
+    void setupDriver(TMC2209Stepper& drv, const char* label, uint8_t sgthrs);
     void setupPCNT(pcnt_unit_t unit, int pinA, int pinB);
 };
 

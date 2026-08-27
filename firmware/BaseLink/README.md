@@ -92,6 +92,20 @@ toward orange as tilt effort grows. Armed but lying down: green "lift me up"
 pulse at the front. Asleep: a slow wandering ember with an occasional sleepy
 double-blink. Pad connects: quick green wink.
 
+## TMC2226 branch (tmc2226_implementation)
+
+This branch swaps the drivers to TMC2226 via the `TMC2209Stepper` class
+(register-identical family). Boot now runs an **IFCNT write-verify** per
+driver — the log must show `TMC2226: OK ... readback 1/8`. Operating mode
+is **StealthChop** (required for StallGuard4/CoolStep; stall ceiling
+measured identical to spreadCycle, ~9000 usteps/s @ 1100 mA). Microsteps
+(1/8, all calibration unchanged) and current come over UART; MS1/MS2 are
+the UART address pins on the 2226 — both LOW. Hardware-tuned StallGuard:
+`SGTHRS_LEFT 76` / `SGTHRS_RIGHT 77`. CoolStep runs with a half-current
+floor above ~0.09 m/s (`COOLSTEP_ENABLE 0` if driving ever feels soft).
+Optional: DIAG -> GPIO 34/35 + `USE_DIAG_PINS 1` for report-only `[STALL]`
+lines. `DRV_STEALTHCHOP 0` reverts the chopper mode in one line.
+
 ## Bring-up (wheels off the ground)
 
 1. Flash, pair, press START — arm sweep plays, wheels respond to sticks,

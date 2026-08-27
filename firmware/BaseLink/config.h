@@ -30,14 +30,14 @@
 //  PIN DEFINITIONS — ESP32 38-Pin DevKit  (unchanged)
 // ============================================================
 
-// ---- Right Stepper Motor (TMC2208) ----
+// ---- Right Stepper Motor (TMC2226) ----
 #define RIGHT_STEP_PIN    33
 #define RIGHT_DIR_PIN     25
 #define RIGHT_EN_PIN      32
 #define RIGHT_UART_TX     17    // 1 kOhm inline resistor on TX line.
 #define RIGHT_UART_RX     16
 
-// ---- Left Stepper Motor (TMC2208) ----
+// ---- Left Stepper Motor (TMC2226) ----
 #define LEFT_STEP_PIN     27
 #define LEFT_DIR_PIN      14
 #define LEFT_EN_PIN       26
@@ -63,17 +63,45 @@
 // ============================================================
 //  MOTOR / DRIVER PARAMETERS  (unchanged)
 // ============================================================
-// TMC UART reports COMM ERROR on this robot, so the config value was
-// never reaching the drivers -- they run at the MS1/MS2 pin strapping.
-// Encoder data (18 Aug log) shows the real motion is 2x the 1/16
-// assumption => the drivers are strapped to 1/8. Set to match reality.
-// If you FIX the UART wiring, the firmware will program 1/8 too, so
-// this stays consistent either way. (Verify after any change: while
-// moving gently, debug 'v' must equal vCmd/STEPS_PER_M.)
+// TMC2226 (TMC2209 register set). UART VERIFIED WORKING on both
+// drivers (IFCNT write-check, test sketch) — values below actually
+// reach the chips now. Microstepping is programmed OVER UART to 1/8,
+// same as the old strapping, so STEPS_PER_M and every tuned gain stay
+// valid. NOTE: on the 2226 the MS1/MS2 pins double as the UART
+// ADDRESS — both LOW = 1/8 standalone AND address 0, so the wiring
+// is already consistent. Verify after flashing: while moving gently,
+// debug 'v' must equal vCmd/STEPS_PER_M.
 #define MICROSTEPS           8
+#define DRV_UART_ADDR        0b00    // MS1/MS2 low on both modules
+
+// ---- TMC2226 feature set (StallGuard4 + CoolStep) ----
+// BOTH require StealthChop on this chip family, so the drivers now run
+// stealth (TPWMTHRS 0). Stall ceiling measured IDENTICAL to spreadCycle
+// (~9000 usteps/s at 1100 mA), so no top-end is lost. Set
+// DRV_STEALTHCHOP 0 to revert to spreadCycle (SG/CoolStep go dead).
+#define DRV_STEALTHCHOP      1
+// StallGuard4 — tuned on THIS hardware (test sketch 't' routine).
+// Stall flags when SG_RESULT < 2*SGTHRS.
+#define SGTHRS_LEFT          76
+#define SGTHRS_RIGHT         77
+// SG/CoolStep valid only above a minimum speed: TCOOLTHRS is a TSTEP
+// threshold; 300 ~= active above ~1250 usteps/s (~0.086 m/s).
+#define DRV_TCOOLTHRS        300
+// CoolStep: load-adaptive current, floor = IRUN/2. Inactive below
+// TCOOLTHRS, so standstill balance always has full current. If balance
+// ever feels soft under disturbances WHILE DRIVING, set 0.
+#define COOLSTEP_ENABLE      1
+#define COOLSTEP_SEMIN       5
+#define COOLSTEP_SEMAX       2
+// Optional hardware stall flags: DIAG -> GPIO 34 (LEFT), 35 (RIGHT)
+// (input-only pins, free in this pinmap), then set 1. Report-only:
+// the loop prints [STALL] counts and never auto-disables.
+#define USE_DIAG_PINS        0
+#define DIAG_LEFT_PIN        34
+#define DIAG_RIGHT_PIN       35
 #define STEPS_PER_REV        200
 #define USTEPS_PER_REV       (STEPS_PER_REV * MICROSTEPS)   // 3200
-#define MOTOR_CURRENT_MA     1100
+#define MOTOR_CURRENT_MA     1500
 #define R_SENSE              0.11f
 #define RIGHT_DIR_INVERT     false
 #define LEFT_DIR_INVERT      true
@@ -225,10 +253,13 @@
 // ============================================================
 //  SPEED / ACCELERATION LIMITS
 // ============================================================
-// Your motors STALL above ~9000 pulses/s (encoders proved it: v -> 0
-// while vCmd railed). Cap well below the stall point; raise only after
-// fixing driver current (Vref / UART).
-#define MAX_SPEED_STEPS      7300.0f           // ~0.82 m/s at 1/8 ustep
+// Stall ceiling CONFIRMED ~9000 usteps/s on the TMC2226s at 1100 mA
+// (test sketch 'z'), matching the old encoder-proven number — it is
+// motor/voltage-limited, not driver-limited. UART current control
+// works now: raising MOTOR_CURRENT_MA (motor rating permitting) is
+// the legitimate path to a higher ceiling; re-run 'z' after any
+// current change before raising this cap further.
+#define MAX_SPEED_STEPS      8500.0f           // ~0.82 m/s at 1/8 ustep
 #define MOTOR_ACCEL_LIMIT    20000.0f          // steps/s^2 (~2.75 m/s^2, stall-safe)
 #define V_MAX_MS             (MAX_SPEED_STEPS   / STEPS_PER_M)
 #define A_MAX_MS2            (MOTOR_ACCEL_LIMIT / STEPS_PER_M)

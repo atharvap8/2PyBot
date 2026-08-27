@@ -361,7 +361,7 @@ void setup() {
         while (true) delay(1000);
     }
     if (!steppers.begin()) {
-        Serial.println("[MAIN] WARNING: TMC2208 UART unresponsive");
+        Serial.println("[MAIN] WARNING: TMC2226 UART unresponsive");
     }
 
     Serial.printf("[MAIN] Settling sensors %d ms — keep robot still\n", STARTUP_SETTLE_MS);
@@ -435,6 +435,20 @@ void loop() {
                 break;
         default: break;
     }
+
+#if USE_DIAG_PINS
+    // TMC2226 DIAG stall flags: report only, never auto-act — a false
+    // trip during an aggressive balance recovery must not cut motors.
+    {
+        static uint32_t stallSeenL = 0, stallSeenR = 0, stallMuteMs = 0;
+        uint32_t sl = steppers.stallCountL(), sr = steppers.stallCountR();
+        if ((sl != stallSeenL || sr != stallSeenR) && millis() - stallMuteMs > 250) {
+            Serial.printf("[STALL] wheel stall flags  L=%lu  R=%lu\n",
+                          (unsigned long)sl, (unsigned long)sr);
+            stallSeenL = sl; stallSeenR = sr; stallMuteMs = millis();
+        }
+    }
+#endif
 
     // Speed-mode edge -> ring cue (blue dash = HIGH, green settle = LOW)
     static uint8_t spdPrev = SPEED_BOOT_HIGH;
