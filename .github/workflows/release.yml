@@ -93,7 +93,7 @@ jobs:
         with:
           name: "2PyBot ${{ github.ref_name }}"
           body: |
-            # 2PyBot — Firmware Release ${{ github.ref_name }}
+            # 2PyBot - Firmware Release ${{ github.ref_name }}
 
             > Self-balancing wheeled robot platform built on ESP32, TMC2226 stepper drivers,
             > and a 6-DOF Mahony AHRS fusion filter. LQR/LQI balance control, driven directly

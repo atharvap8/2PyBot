@@ -47,15 +47,13 @@ static void IRAM_ATTR diagIsrR() { StepperControl::_stallR++; }
 // Fires when the PCNT hardware counter hits ±PCNT_H/L_LIM.
 // Accumulates the overflow into 64-bit software trackers.
 static void IRAM_ATTR pcnt_overflow_isr(void *arg) {
+    pcnt_unit_t unit = (pcnt_unit_t)(intptr_t)arg;
     uint32_t status = 0;
-
-    pcnt_get_event_status(PCNT_UNIT_0, &status);
-    if (status & PCNT_EVT_H_LIM) StepperControl::_encOverflowL += PCNT_H_LIM;
-    if (status & PCNT_EVT_L_LIM) StepperControl::_encOverflowL += PCNT_L_LIM;
-
-    pcnt_get_event_status(PCNT_UNIT_1, &status);
-    if (status & PCNT_EVT_H_LIM) StepperControl::_encOverflowR += PCNT_H_LIM;
-    if (status & PCNT_EVT_L_LIM) StepperControl::_encOverflowR += PCNT_L_LIM;
+    pcnt_get_event_status(unit, &status);
+    volatile int64_t& acc = (unit == PCNT_UNIT_0) ? StepperControl::_encOverflowL
+                                                   : StepperControl::_encOverflowR;
+    if (status & PCNT_EVT_H_LIM) acc += PCNT_H_LIM;
+    if (status & PCNT_EVT_L_LIM) acc += PCNT_L_LIM;
 }
 
 // ============================================================
@@ -124,14 +122,12 @@ bool StepperControl::begin() {
     // GPIO setup.
     pinMode(RIGHT_STEP_PIN, OUTPUT);
     pinMode(RIGHT_DIR_PIN,  OUTPUT);
-    pinMode(RIGHT_EN_PIN,   OUTPUT);
     pinMode(LEFT_STEP_PIN,  OUTPUT);
     pinMode(LEFT_DIR_PIN,   OUTPUT);
-    pinMode(LEFT_EN_PIN,    OUTPUT);
+    pinMode(MOTOR_EN_PIN,   OUTPUT);   // one line, both drivers
 
     // Disable motors immediately on boot.
-    digitalWrite(RIGHT_EN_PIN, HIGH);
-    digitalWrite(LEFT_EN_PIN,  HIGH);
+    digitalWrite(MOTOR_EN_PIN, HIGH);
 
     // Serial2 defaults to pins 16/17 (Right driver).
     // Serial1 is remapped to pins 18/19 (Left driver).
@@ -155,8 +151,8 @@ bool StepperControl::begin() {
     setupPCNT(PCNT_UNIT_1, ENC_RIGHT_A, ENC_RIGHT_B);
 
     pcnt_isr_service_install(0);
-    pcnt_isr_handler_add(PCNT_UNIT_0, pcnt_overflow_isr, NULL);
-    pcnt_isr_handler_add(PCNT_UNIT_1, pcnt_overflow_isr, NULL);
+    pcnt_isr_handler_add(PCNT_UNIT_0, pcnt_overflow_isr, (void*)(intptr_t)PCNT_UNIT_0);
+    pcnt_isr_handler_add(PCNT_UNIT_1, pcnt_overflow_isr, (void*)(intptr_t)PCNT_UNIT_1);
     pcnt_intr_enable(PCNT_UNIT_0);
     pcnt_intr_enable(PCNT_UNIT_1);
 
@@ -279,15 +275,21 @@ void StepperControl::setSpeeds(int32_t leftStepsPerSec, int32_t rightStepsPerSec
 //  Encoder position reads (PCNT-based)
 // ============================================================
 int64_t StepperControl::getPositionL() {
-    int16_t hw = 0;
-    pcnt_get_counter_value(PCNT_UNIT_0, &hw);
-    return _encOverflowL + hw;
+    int16_t hw = 0; int64_t ovf;
+    do {
+        ovf = _encOverflowL;
+        pcnt_get_counter_value(PCNT_UNIT_0, &hw);
+    } while (ovf != _encOverflowL);          // overflow hit mid-read: retry
+    return ovf + hw;
 }
 
 int64_t StepperControl::getPositionR() {
-    int16_t hw = 0;
-    pcnt_get_counter_value(PCNT_UNIT_1, &hw);
-    return -(_encOverflowR + hw);  // Inverted to match left encoder's forward direction.
+    int16_t hw = 0; int64_t ovf;
+    do {
+        ovf = _encOverflowR;
+        pcnt_get_counter_value(PCNT_UNIT_1, &hw);
+    } while (ovf != _encOverflowR);
+    return -(ovf + hw);                      // inverted to match left
 }
 
 int64_t StepperControl::getAveragePosition() {
@@ -298,8 +300,7 @@ int64_t StepperControl::getAveragePosition() {
 //  enable() / disable()
 // ============================================================
 void StepperControl::enable() {
-    digitalWrite(RIGHT_EN_PIN, LOW);
-    digitalWrite(LEFT_EN_PIN,  LOW);
+    digitalWrite(MOTOR_EN_PIN, LOW);
     _enabled = true;
     Serial.println("[STEP] Motors ENABLED");
 }
@@ -313,8 +314,7 @@ void StepperControl::disable() {
     _accumL   = 0;
     portEXIT_CRITICAL_ISR(&timerMux);
 
-    digitalWrite(RIGHT_EN_PIN, HIGH);
-    digitalWrite(LEFT_EN_PIN,  HIGH);
+    digitalWrite(MOTOR_EN_PIN, HIGH);
     _enabled = false;
     Serial.println("[STEP] Motors DISABLED");
 }

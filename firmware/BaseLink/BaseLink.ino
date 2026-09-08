@@ -40,6 +40,7 @@
 #include "stepper_control.h"
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
 #include "led_ring.h"      // WS2812 16-LED expression ring on GPIO 15
+#include "payload.h"       // 2x MG90S servo (GPIO 0/12) + torch MOSFET (GPIO 2)
 
 IMUSensor imu;
 
@@ -50,6 +51,7 @@ enum RobotState { STATE_IDLE, STATE_BALANCING };
 RobotState state       = STATE_IDLE;
 bool motorsRequested   = false;
 bool DEBUG_STREAM      = false;
+bool RADXA_STREAM      = true;
 
 // Forward-positive measurements (see config.h sign conventions)
 float pitchF = 0.0f, rateF = 0.0f;      // deg, deg/s
@@ -64,6 +66,10 @@ float xRef = 0.0f;          // position hold target (m)
 float uOut = 0.0f;          // last acceleration command (m/s^2)
 float steerSteps = 0.0f;    // current differential (steps/s)
 float diffTarget = 0.0f;    // heading-hold encoder diff target
+
+// ---- telemetry instrumentation (read-only, no control effect) ----
+uint8_t  satV = 0, satA = 0;     // clamp hit this cycle: velocity cap / accel limit
+uint32_t loopMaxUs = 0;          // worst loop period since last D line
 
 // ---- expression features (gamepad) ----
 bool  stiffHold = false;    // "H,1": high-stiffness hold gain set
@@ -206,6 +212,9 @@ void handleLine(char* line) {
         else if (cmd == 'K' && line[1] == '5') { k5 = val; Serial.printf("[TUNE] K5 = %.4f\n", val); }
         else if (cmd == 'T') { pitchTrim = val; Serial.printf("[TUNE] Trim = %.3f deg\n", val); }
         else if (cmd == 'M') { steppers.setCurrent((uint16_t)val); }
+        else if (cmd == 'B') { payload_torchSetPct((int)val); }
+        else if (cmd == 'P') { payload_setYaw(val);  Serial.printf("[PAY] Pan  -> %.0f deg\n", payload_yaw());  }
+        else if (cmd == 'Z') { payload_setZoom(val); Serial.printf("[PAY] Zoom -> %.0f deg\n", payload_zoom()); }
         else Serial.printf("[TUNE] Unknown: %s\n", line);
         return;
     }
@@ -219,6 +228,8 @@ void handleLine(char* line) {
             Serial.println("[TUNE] Send 'E' to re-arm.");
             break;
         case 'R': resetController(); Serial.println("[TUNE] Controller state reset"); break;
+        case 'F': payload_torchToggle(); break;
+        case 'N': payload_center(); break;
         case 'L': DEBUG_STREAM = !DEBUG_STREAM; break;
         case 'S':
             Serial.println("\n---- Package B (LQR / LQI) settings ----");
@@ -229,11 +240,17 @@ void handleLine(char* line) {
                           state == STATE_BALANCING ? "BALANCING" : "IDLE",
                           joySpeedHigh ? "HIGH" : "LOW",
                           climbMode ? "CLIMB" : (stiffHold ? "STIFF" : "normal"));
+            Serial.printf("  Payload: pan=%.0f deg  zoom=%.0f deg  torch=%s %d%% (cap %d%%)\n",
+                          payload_yaw(), payload_zoom(),
+                          payload_torchIsOn() ? "ON" : "off",
+                          payload_torchPct(), TORCH_MAX_PCT);
             Serial.println("----------------------------------------\n");
             break;
         case '?':
             Serial.println("\nE enable | X stop | C cal gyro | S settings | L debug | R reset");
             Serial.println("K1=..K5= LQR gains   T= trim (deg)   M= motor current (mA)");
+            Serial.printf ("F torch toggle | N centre servos | B=<%d..%d> torch %%%% | P=<deg> pan | Z=<deg> zoom\n",
+                           TORCH_MIN_PCT, TORCH_MAX_PCT);
             Serial.println("G,yes|no|spin|dance|stop   H,0|1|2 normal|stiff|CLIMB   A,<-1..1> look");
             Serial.println("Radxa: V,<fwd -1..1>,<steer -1..1>,<en 0|1>\n");
             break;
@@ -300,8 +317,11 @@ void runController(float dt) {
         }
     }
 
+    satA = (fabsf(uOut) > A_MAX_MS2) ? 1 : 0;
     uOut = clampf(uOut, -A_MAX_MS2, A_MAX_MS2);
-    vCmd = clampf(vCmd + uOut * dt, -V_MAX_MS, V_MAX_MS);
+    float vNext = vCmd + uOut * dt;
+    satV = (fabsf(vNext) > V_MAX_MS) ? 1 : 0;
+    vCmd = clampf(vNext, -V_MAX_MS, V_MAX_MS);
 
     // BALANCE > POSITION: if the speed command saturates, the tilt
     // terms lose their actuator and the robot falls. Give up ground:
@@ -347,8 +367,8 @@ void runController(float dt) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(300);
-    pinMode(ONBOARD_LED, OUTPUT);
-    digitalWrite(ONBOARD_LED, HIGH);
+    // GPIO 2 is the torch MOSFET gate now; payload_begin() claims it
+    // below and drives it low. The WS2812 ring shows status instead.
 
     Serial.println("\n==================================================");
     Serial.println("     2PyBot BaseLink — Package B: LQR / LQI");
@@ -369,12 +389,12 @@ void setup() {
     imu.calibrateGyro();
 
     btgamepad_begin();
+    payload_begin();
 
     Serial.printf("[MAIN] STEPS_PER_M=%.0f  COUNTS_PER_M=%.0f  Vmax=%.2f m/s  Amax=%.2f m/s^2\n",
                   STEPS_PER_M, COUNTS_PER_M, V_MAX_MS, A_MAX_MS2);
     Serial.println("[MAIN] Send 'E' (or Radxa V,..,1 / joystick) to arm. '?' for help.\n");
 
-    digitalWrite(ONBOARD_LED, LOW);
     lastLoopUs = micros();
 }
 
@@ -386,6 +406,7 @@ void loop() {
     unsigned long elapsed = nowUs - lastLoopUs;
     if (elapsed < LOOP_PERIOD_US) return;
     lastLoopUs = nowUs;
+    if (elapsed > loopMaxUs) loopMaxUs = elapsed;
     float dt = elapsed / 1000000.0f;
     if (dt > 0.05f) dt = 0.05f;               // guard after stalls
 
@@ -435,6 +456,17 @@ void loop() {
                 break;
         default: break;
     }
+
+    // ---- 2b. camera payload: right stick pans/zooms, RB torch,
+    //          D-pad LEFT/RIGHT dims. Deliberately OUTSIDE the state
+    //          machine: the camera and light stay usable whether the
+    //          robot is balancing, idle, or lying on its side.
+    if (btgamepad_takeTorchToggle()) payload_torchToggle();
+    {
+        int8_t tStep = btgamepad_takeTorchStep();
+        if (tStep) payload_torchStep(tStep);
+    }
+    payload_update(dt, joyPanX, joyZoomY);
 
 #if USE_DIAG_PINS
     // TMC2226 DIAG stall flags: report only, never auto-act — a false
@@ -505,17 +537,12 @@ void loop() {
             leds_event(LED_EV_ARM);
             Serial.println("[MAIN] -> BALANCING");
         }
-        if (millis() - lastBlinkMs > 500) {
-            lastBlinkMs = millis(); ledState = !ledState;
-            digitalWrite(ONBOARD_LED, ledState);
-        }
     } else { // BALANCING
         if (fabsf(pitchF) > MAX_TILT_ANGLE || fabsf(rateF) > MAX_PITCH_RATE_SAFETY) {
             leds_event(LED_EV_FALL);
             requestDisable(fabsf(pitchF) > MAX_TILT_ANGLE ? "FELL" : "RATE SPIKE");
         } else {
             runController(dt);
-            digitalWrite(ONBOARD_LED, HIGH);
         }
     }
 
@@ -539,7 +566,7 @@ void loop() {
 
     // ---- 4. odometry stream to Radxa, 50 Hz, always on ----
     uint32_t nowMs = millis();
-    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS) {
+    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM) {
         lastOdomMs = nowMs;
         Serial.printf("O,%lu,%lld,%lld,%.2f,%.2f\n",
                       (unsigned long)nowMs,
@@ -548,11 +575,14 @@ void loop() {
     }
 
     // ---- 5. optional human-readable debug, 10 Hz ----
-    if (DEBUG_STREAM && nowMs - lastDbgMs >= DEBUG_PERIOD_MS) {
+     if (DEBUG_STREAM && nowMs - lastDbgMs >= DEBUG_PERIOD_MS) {
         lastDbgMs = nowMs;
-        Serial.printf("D pF=%+6.2f w=%+7.1f u=%+5.2f v=%+5.2f ex=%+6.3f vCmd=%+6.0f st=%s\n",
-                      pitchF, rateF, uOut, velF, posM - xRef,
-                      vCmd * STEPS_PER_M,
-                      state == STATE_BALANCING ? "BAL" : "IDLE");
+        // D,ms,pF,w,u,v,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,state,fwd,str
+        Serial.printf("D,%lu,%.2f,%.1f,%.2f,%.3f,%.3f,%.0f,%.0f,%u,%u,%lu,%u,%u,%.2f,%.2f\n",
+                      (unsigned long)nowMs, pitchF, rateF, uOut, velF, posM - xRef,
+                      vCmd * STEPS_PER_M, steerSteps, satV, satA,
+                      (unsigned long)loopMaxUs, (unsigned)joySpeedHigh,
+                      (unsigned)(state == STATE_BALANCING), cmdFwd, cmdSteer);
+        loopMaxUs = 0;
     }
 }

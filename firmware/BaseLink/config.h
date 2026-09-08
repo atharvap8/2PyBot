@@ -33,14 +33,16 @@
 // ---- Right Stepper Motor (TMC2226) ----
 #define RIGHT_STEP_PIN    33
 #define RIGHT_DIR_PIN     25
-#define RIGHT_EN_PIN      32
+#define MOTOR_EN_PIN      32   // shared: BOTH drivers' EN wired here
 #define RIGHT_UART_TX     17    // 1 kOhm inline resistor on TX line.
 #define RIGHT_UART_RX     16
 
 // ---- Left Stepper Motor (TMC2226) ----
 #define LEFT_STEP_PIN     27
 #define LEFT_DIR_PIN      14
-#define LEFT_EN_PIN       26
+// LEFT_EN_PIN removed — the left driver's EN now joins MOTOR_EN_PIN (32).
+// enable()/disable() always drove both pins to the same level, so the
+// second GPIO bought nothing. GPIO 26 is now free.
 #define LEFT_UART_TX      19    // 1 kOhm inline resistor on TX line.
 #define LEFT_UART_RX      18
 
@@ -48,7 +50,12 @@
 #define I2C_SDA           21
 #define I2C_SCL           22
 #define I2C_CLOCK_HZ      400000
-#define ONBOARD_LED       2
+// #define ONBOARD_LED    2   <-- REPURPOSED as TORCH_PIN (camera payload).
+//                              Deliberately left undefined: the WS2812 ring
+//                              replaced this status LED, and if any old code
+//                              still digitalWrite()s pin 2 it would fight the
+//                              torch PWM. Commenting it out turns that into a
+//                              compile error instead of a flickering light.
 
 // ---- MT6816 ABZ Quadrature Encoders (PCNT hardware decode) ----
 #define ENC_LEFT_A         4
@@ -343,9 +350,9 @@
 // ============================================================
 #define LOOP_FREQ_HZ          200
 #define LOOP_PERIOD_US        (1000000UL / LOOP_FREQ_HZ)
-#define SERIAL_BAUD           115200
+#define SERIAL_BAUD           460800
 #define ODOM_PERIOD_MS        20      // 50 Hz O-stream to the Radxa
-#define DEBUG_PERIOD_MS       100     // 10 Hz human-readable debug ('L')
+#define DEBUG_PERIOD_MS       10     // 10 Hz human-readable debug ('L')
 
 // ============================================================
 //  LED RING — WS2812 16-LED (NeoPixelBus, RMT hardware — never
@@ -355,7 +362,7 @@
 #define LED_RING_COUNT    16
 #define LED_FRONT_INDEX    0     // which LED physically faces FORWARD
 #define LED_DIR_CW         1     // 1 if indices go clockwise seen from above, else 0
-#define LED_MAX_BRIGHT    255     // 0..255 power cap (16 LEDs full white = ~1 A!)
+#define LED_MAX_BRIGHT    200     // 0..255 power cap (16 LEDs full white = ~1 A!)
 #define LED_FPS           50
 
 // ============================================================
@@ -365,7 +372,7 @@
 // ESP-NOW controller used, so JOY_FWD_SCALE and the arbitration in
 // the .ino are byte-for-byte unchanged.
 #define PAD_FWD_SIGN     (+1.0f)  // flip if stick-up drives backward
-#define PAD_STEER_SIGN   (+1.0f)  // flip if turning is mirrored
+#define PAD_STEER_SIGN   (-1.0f)  // flip if turning is mirrored
 #define PAD_DEADZONE      0.08f
 
 // ---- Dual speed mode: LB = LOW, RB = HIGH (pad sticks only) ----
@@ -378,5 +385,73 @@
 #define SPEED_LO_DRIVE_SCALE  0.50f   // LOW: 0.45 * 0.40 = 0.18 m/s full stick
 #define SPEED_LO_STEER_SCALE  0.50f   // LOW: 0.50 * 3000 = 1500 steps/s full stick
 #define SPEED_BOOT_HIGH       0       // 0 = boot in LOW (safe), 1 = boot in HIGH
+
+// ============================================================
+//  CAMERA PAYLOAD — 2x MG90S servo + flashlight LED (payload.h)
+// ============================================================
+//  Pins: GPIO 0 and GPIO 12 were the only output-capable GPIOs
+//  left free; GPIO 2 is reclaimed from the old onboard status LED.
+//  All three are strapping pins, which is fine here:
+//    GPIO 0  servo signal is high-Z into the servo, no pulldown.
+//    GPIO 12 must NOT be pulled up at boot; bare signal wire only.
+//    GPIO 2  the MOSFET's 27k gate pulldown holds it low at reset,
+//            which is exactly what this pin wants.
+// ------------------------------------------------------------
+#define SERVO_YAW_PIN          26      // right stick X
+#define SERVO_ZOOM_PIN        0      // right stick Y
+#define TORCH_PIN              2      // MOSFET gate via 36R, 27k to GND
+
+// LEDC allocation. Channel/2 picks the timer, so 4+5 share timer 2
+// and must run the same freq/resolution; 6 gets timer 3 to itself.
+#define SERVO_YAW_CH           4
+#define SERVO_ZOOM_CH          5
+#define TORCH_CH               6
+#define SERVO_PWM_HZ          50
+#define SERVO_PWM_BITS        16
+#define TORCH_PWM_HZ       20000      // inaudible, and no banding on video
+#define TORCH_PWM_BITS        10      // 0..1023
+
+// ---- Servo travel and feel ----
+// MG90S honours roughly 500..2400 us. Trim these two if either
+// servo buzzes at an end stop, which means it is being commanded
+// past its mechanical limit.
+#define SERVO_US_MIN         500.0f
+#define SERVO_US_MAX        2400.0f
+
+#define SERVO_YAW_MIN_DEG      120     // keep off the hard stops
+#define SERVO_YAW_MAX_DEG     190
+#define SERVO_YAW_HOME_DEG     165
+#define SERVO_ZOOM_MIN_DEG     80     // NARROW THIS FIRST during bring-up:
+#define SERVO_ZOOM_MAX_DEG    140     //   a lens carriage that bottoms out
+#define SERVO_ZOOM_HOME_DEG    120     //   will stall the servo and cook it
+
+// Rate control: full stick deflection = this many degrees per second.
+// Lower = smoother framing, higher = quicker to re-aim.
+#define SERVO_YAW_RATE_DPS    70.0f
+#define SERVO_ZOOM_RATE_DPS   45.0f
+#define SERVO_UPDATE_HZ       50      // one write per servo frame
+
+// Stop pulsing after this long with no stick input so the MG90S
+// stops hunting and buzzing. 0 disables (servo holds actively).
+#define SERVO_IDLE_RELEASE_MS  0
+
+// ---- Torch ----
+// TORCH_MAX_PCT is the safety ceiling and payload.h refuses to
+// compile if it is raised above 50. The LED is direct-driven
+// through a small ballast resistor, so average current scales
+// with duty; 50% is the thermal budget that resistor can take.
+#define TORCH_MAX_PCT         90      // HARD CAP. Do not raise.
+#define TORCH_MIN_PCT          5
+#define TORCH_BOOT_PCT        25      // preset level at power-on
+#define TORCH_STEP_PCT         10      // per D-pad LEFT/RIGHT press
+#define TORCH_OFF_ON_DISARM    0      // 1 = kill the light on e-stop/fall
+
+// ---- Right-stick payload signs ----
+#define PAD_YAW_SIGN     (-1.0f)      // flip if pan goes the wrong way
+#define PAD_ZOOM_SIGN    (+1.0f)      // flip if stick-up zooms out
+
+// D-pad brightness auto-repeat when held
+#define PAD_REPEAT_FIRST_MS  400
+#define PAD_REPEAT_MS        130
 
 #endif // CONFIG_H
