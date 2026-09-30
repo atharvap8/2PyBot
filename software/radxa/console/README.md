@@ -46,7 +46,9 @@ The installed hotspot normally uses `10.42.0.1`. Use your configured hotspot pas
 
 ## Install on the Radxa
 
-Copy this directory to `/home/radxa/2pybot-console`. For an existing working board, keep its installed files until the imported package has been reviewed.
+The current bot uses the repository checkout at `/home/radxa/projects/2PyBot`, with this application under `software/radxa/console`. Use [repo-based deployment](../../../scripts/radxa/README.md) for normal updates and service monitoring.
+
+The standalone installer below is for dependency/hotspot setup on a new board. It is not needed for routine Git updates. Its service templates substitute the application's installation directory.
 
 The installer needs root access and a hotspot password in `PSK`:
 

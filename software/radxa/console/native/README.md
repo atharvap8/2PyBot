@@ -15,7 +15,7 @@ packages `build-essential`, `pkg-config`, `libavcodec-dev`, `libavformat-dev`,
 `libavutil-dev`, and `libswscale-dev`.
 
 ```sh
-make -C /home/radxa/2pybot-console/native
+make -C /home/radxa/projects/2PyBot/software/radxa/console/native
 sudo systemctl restart 2pybot-console.service
 ```
 
@@ -43,3 +43,5 @@ of the local RTSP write; it does not include the phone's network/decoder/display
 `timestamp_fallbacks` counts camera timestamps that could not be used as monotonic
 capture times (normally zero). CPU-decoder errors and hardware failures are
 available in `journalctl -u 2pybot-console.service`.
+
+The deployment timer rebuilds this executable when tracked native source or Makefile changes are pulled. The compiled binary is ignored by Git.

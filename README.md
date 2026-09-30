@@ -92,6 +92,10 @@ The older Radxa brain provides GUARD/FOLLOW modes. It owns the camera and serial
 
 The [Android app](software/android/README.md) has Live, Map, Tune, Auto, Camera, and Setup screens. It defaults to the Radxa hotspot address `10.42.0.1`. Its Tune screen includes all groups reported by firmware, including TERRAIN. APK build instructions and CI artifacts are documented with the app.
 
+## Updating the bot
+
+The console runs from `/home/radxa/projects/2PyBot`. After `git pull --ff-only`, a systemd timer applies relevant committed changes and restarts the affected services. Android, CAD, firmware, and documentation changes do not restart the console. See [repo-based deployment](scripts/radxa/README.md) for installation, status, and retry commands.
+
 ## Hardware defaults
 
 | Component | Configuration |
@@ -120,6 +124,7 @@ The existing simplified STEP model remains in `models/2pybot_simplified.step`; i
 | [Serial protocol](firmware/BaseLink/PROTOCOL.md) | Commands, parameter records, telemetry fields |
 | [Radxa console](software/radxa/console/README.md) | Browser UI, Android API, camera pipeline, deployment |
 | [Android app](software/android/README.md) | Build, host connection, screens, parameter and video transport |
+| [Radxa deployment](scripts/radxa/README.md) | Git updates, selective restarts, systemd timer, health checks |
 | [Enclosure CAD](hardware/cad/enclosure/rev5/README.md) | Revision-5 source, exports, dimensions, and current print status |
 | [System architecture](docs/BaseLink/System_Architecture.md) | Sensors, control, actuation, host links |
 | [LQR/LQI theory](docs/BaseLink/PID_Theory_and_Math.md) | State feedback, control modes, filtering, limits |

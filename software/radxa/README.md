@@ -20,6 +20,8 @@ The running board used MediaMTX **v1.9.3**. The console uses **460800 baud**, re
 
 The [Android app](../android/README.md) consumes the console API and MediaMTX WHEP stream. It builds parameter groups dynamically from the firmware metadata.
 
+The bot runs this package from `/home/radxa/projects/2PyBot/software/radxa/console`. A [commit-aware deployment timer](../../scripts/radxa/README.md) applies relevant changes after a manual `git pull --ff-only`.
+
 The existing [vision controller](../runtime/vision_controller/README_RADXA.md) is a separate older host application. It must not open the same camera or serial port while the console is using them.
 
 ## Import record

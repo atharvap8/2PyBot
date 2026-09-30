@@ -13,6 +13,8 @@ Configuration downloaded from the running `2pybot` board with the console source
 
 These are the installed files, separate from the installer's templates. The camera drop-in is part of the deployed setup and applies natural-color controls before the console starts.
 
+These captures describe the pre-Git standalone deployment. The current console service is rendered from its template for `/home/radxa/projects/2PyBot/software/radxa/console` by [the deployment script](../../../scripts/radxa/README.md). Edits to this captured directory do not trigger handler restarts.
+
 MediaMTX was **v1.9.3**, running from `/usr/local/bin/mediamtx`. Its downloaded executable is retained locally at `bin/mediamtx`, which is ignored by Git. Saved camera profiles from `/var/lib/2pybot` are retained locally under `runtime/`, also ignored.
 
 The live MediaMTX settings enable TCP RTSP on 8554, WebRTC on 8889 with UDP media on 8189, and the administration API on localhost 9997. The `cam` path accepts a publisher. HLS, RTMP, and SRT are disabled.
