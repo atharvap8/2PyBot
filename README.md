@@ -1,3 +1,5 @@
+![2PyBot — The Python-Powered Martian Rover Platform](assets/2pybot.png)
+
 # 2PyBot: Self-Balancing Robot Project
 
 [![Status](https://img.shields.io/badge/status-active-brightgreen)](#)

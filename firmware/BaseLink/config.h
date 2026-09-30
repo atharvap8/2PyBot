@@ -123,7 +123,7 @@
 // ============================================================
 //  GEOMETRY — measure these on YOUR robot!
 // ============================================================
-#define WHEEL_RADIUS_M       0.0350f   // measured on this robot (70 mm wheels)
+#define WHEEL_RADIUS_M       0.0500f   // measured on this robot (70 mm wheels)
 #define STEPS_PER_M          ((float)USTEPS_PER_REV / (2.0f * PI * WHEEL_RADIUS_M))
 #define COUNTS_PER_M         ((float)ENCODER_CPR   / (2.0f * PI * WHEEL_RADIUS_M))
 
@@ -171,11 +171,11 @@
 // Input: u = wheel linear acceleration (m/s^2)
 //
 // Riccati solution (Q = diag(20, 6, 90, 1.5, 6), R = 0.30):
-#define LQR_K1   (-12.7422f)   // per m       (x - xRef)
-#define LQR_K2   (-10.6993f)   // per m/s     (v)
-#define LQR_K3   (-48.2848f)   // per rad     (pitch)
-#define LQR_K4   ( -6.0051f)   // per rad/s   (pitch rate)
-#define LQR_K5   ( -4.4721f)   // per m*s     (position integral)
+#define LQR_K1   (-7.0547f)   // per m       (x - xRef)
+#define LQR_K2   (-6.5334f)   // per m/s     (v)
+#define LQR_K3   (-34.5881f)   // per rad     (pitch)
+#define LQR_K4   (-4.2854f)   // per rad/s   (pitch rate)
+#define LQR_K5   (-2.1082f)   // per m*s     (position integral)
 // Closed-loop poles: -17.55, -7.75, -1.73 +/- 0.87j, -0.58  (all LHP)
 // Drive mode uses the K2..K4 subset — verified poles: -16.1, -7.2, -6.1
 #define Z_INT_LIM        0.5f   // integral anti-windup clamp (m*s)

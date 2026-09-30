@@ -90,11 +90,14 @@ static uint8_t       _torchToggleReq = 0;   // pending RB presses
 static int8_t        _torchStepReq   = 0;   // net D-pad L/R clicks, signed
 static uint32_t      _dpadRepeatMs   = 0;   // next auto-repeat due
 
+
+
 static void _onPadConnect(ControllerPtr ctl) {
     _pad = ctl;
     Serial.printf("[PAD] Connected: %s\n", ctl->getModelName().c_str());
 }
 static void _onPadDisconnect(ControllerPtr ctl) {
+    _calDone = false;
     if (_pad == ctl) _pad = nullptr;
     Serial.println("[PAD] Disconnected — inputs zeroed, balance continues");
 }
@@ -125,6 +128,41 @@ inline int8_t btgamepad_takeTorchStep() {
     int8_t s = _torchStepReq; _torchStepReq = 0; return s;
 }
 
+static inline float _smoothstep(float e0, float e1, float x) {
+    float t = (x - e0) / (e1 - e0);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return t * t * (3.0f - 2.0f * t);
+}
+static inline float _expo(float v, float e) {
+    float a = fabsf(v);
+    return copysignf(e * a * a * a + (1.0f - e) * a, v);
+}
+
+// Radial deadzone + rescale + cardinal snap + expo.
+// x = lateral axis, y = forward axis. Outputs written through pointers.
+// snap != 0 applies the "protect straight ahead" taper to the x output.
+static void _shapeStick(float x, float y, bool snap, float* outY, float* outX) {
+    float r = sqrtf(x * x + y * y);
+    if (r < STICK_DEADZONE) { *outY = 0.0f; *outX = 0.0f; return; }
+
+    // rescale so output starts at 0 exactly at the deadzone edge (no jump)
+    float k = ((r - STICK_DEADZONE) / (1.0f - STICK_DEADZONE)) / r;
+    x *= k; y *= k;
+    if (x >  1.0f) x =  1.0f;  if (x < -1.0f) x = -1.0f;
+    if (y >  1.0f) y =  1.0f;  if (y < -1.0f) y = -1.0f;
+
+    float w = 1.0f;
+    if (snap) {
+        // angle away from the pure fwd/back axis: 0 = straight, pi/2 = pure turn
+        float ang = atan2f(fabsf(x), fabsf(y));
+        w = _smoothstep(SNAP_IN_DEG * (float)DEG_TO_RAD,
+                        SNAP_OUT_DEG * (float)DEG_TO_RAD, ang);
+    }
+    *outY = _expo(y, EXPO_DRIVE);
+    *outX = _expo(x * w, EXPO_STEER);
+}
+
 // Call once per control loop. Cheap: drains the BT event queue and maps.
 inline void btgamepad_update() {
     BP32.update();
@@ -140,16 +178,47 @@ inline void btgamepad_update() {
         return;
     }
 
-    // Axes: Bluepad32 range -511..512, stick UP = negative Y.
-    float fwdNorm   = _dz(-(float)_pad->axisY() / 512.0f) * PAD_FWD_SIGN;
-#if PAD_STEER_ON_LEFT_STICK
-    float steerNorm = _dz( (float)_pad->axisX()  / 512.0f) * PAD_STEER_SIGN;
-    joyPanX         = _dz( (float)_pad->axisRX() / 512.0f) * PAD_YAW_SIGN;
-#else
-    float steerNorm = _dz( (float)_pad->axisRX() / 512.0f) * PAD_STEER_SIGN;
-    joyPanX         = 0.0f;          // right stick X is steering in this mode
+        // raw, centre-corrected, normalised. Bluepad32 is -511..512, up = -Y.
+    float rawX  =  (float)_pad->axisX()  / 512.0f - _cx;
+    float rawY  = -(float)_pad->axisY()  / 512.0f - _cy;
+    float rawRX =  (float)_pad->axisRX() / 512.0f - _crx;
+    float rawRY = -(float)_pad->axisRY() / 512.0f - _cry;
+
+#if STICK_AUTOCAL
+    // One-shot centre capture, only if the sticks are plausibly at rest.
+    if (!_calDone) {
+        if (fabsf(rawX) < 0.25f && fabsf(rawY) < 0.25f &&
+            fabsf(rawRX) < 0.25f && fabsf(rawRY) < 0.25f) {
+            _cx += rawX;  _cy += rawY;  _crx += rawRX; _cry += rawRY;
+            _calDone = true;
+            Serial.printf("[PAD] centre cal: L(%.3f,%.3f) R(%.3f,%.3f)\n",
+                          _cx, _cy, _crx, _cry);
+        }
+        return;    // skip one frame; next loop uses the corrected centre
+    }
 #endif
-    joyZoomY        = _dz(-(float)_pad->axisRY() / 512.0f) * PAD_ZOOM_SIGN;
+
+    float fwdNorm = 0.0f, steerNorm = 0.0f, panNorm = 0.0f, zoomNorm = 0.0f;
+
+#if PAD_STEER_ON_LEFT_STICK
+    // LEFT stick does both -> snap protects straight ahead
+    _shapeStick(rawX, rawY, true, &fwdNorm, &steerNorm);
+    // RIGHT stick is the camera; snap keeps a pure pan from creeping the zoom
+    _shapeStick(rawRX, rawRY, true, &zoomNorm, &panNorm);
+    joyPanX  = panNorm  * PAD_YAW_SIGN;
+    joyZoomY = zoomNorm * PAD_ZOOM_SIGN;
+#else
+    // legacy: drive on left Y, steer on right X — separate sticks, no snap needed
+    float dummy;
+    _shapeStick(0.0f, rawY, false, &fwdNorm, &dummy);
+    _shapeStick(rawRX, 0.0f, false, &dummy, &steerNorm);
+    joyPanX  = 0.0f;
+    _shapeStick(0.0f, rawRY, false, &zoomNorm, &dummy);
+    joyZoomY = zoomNorm * PAD_ZOOM_SIGN;
+#endif
+
+    fwdNorm   *= PAD_FWD_SIGN;
+    steerNorm *= PAD_STEER_SIGN;
 
     joyForward  = -5.0f * fwdNorm;   // legacy units; .ino scales by -0.2
     joySteering = steerNorm;
