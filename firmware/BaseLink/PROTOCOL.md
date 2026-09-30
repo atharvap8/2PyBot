@@ -1,56 +1,146 @@
-# 2PyBot serial protocol (ESP32 <-> Radxa), v2
+# BaseLink USB Serial Protocol
 
-115200 8N1 over USB, newline-terminated ASCII. Everything the GUI and the
-Android app need flows over this one link.
+Reference: `BaseLink.ino::handleLine()`, `params.cpp`, and `autotune.h`.
 
-## ESP32 -> host (unsolicited streams)
+## Transport
 
-| line | rate | meaning |
-|---|---|---|
-| `O,<ms>,<encL>,<encR>,<pitchDeg>,<yawDeg>` | 50 Hz | odometry, always on |
-| `D,...` | on `L` toggle | human/machine debug stream |
-| `[...]` | as they happen | free-text log lines (boot, faults) |
+- USB `Serial`, **460800 baud**, 8N1.
+- Newline-terminated text. The parser accepts LF or CR as a terminator.
+- Receive buffer: 96 bytes, including the final null terminator. Keep commands within 95 characters.
+- Use the uppercase command forms below. Parameter keys and auto-tune routine names are case-insensitive.
+- There is no `$` prefix, Bluetooth serial command service, or ESP-NOW receive path.
 
-## Parameters — the GUI builds itself from these
+The current [Radxa console](../../software/radxa/console/README.md) uses 460800 baud. The legacy desktop GUI and older Radxa brain still open at 115200; those host settings must be changed before they can communicate with this firmware.
 
-| command | reply | meaning |
-|---|---|---|
-| `P?` | `P#,<n>` then n x `P,...` then `PR,...` then `P.` | dump everything |
-| `P,<key>,<value>` | `P!,<key>,<value>` or `PE,<reason>` | set one, bounds-checked |
-| `PS` | `PS!,saved` | persist all to NVS |
-| `PL` | `PL!,...` | reload from NVS |
-| `PD` | `PD!,defaults restored (not saved)` | compiled defaults |
+## Unsolicited streams
 
-Dump row format:
+| Record | Default rate | Meaning |
+| :--- | :--- | :--- |
+| `O` | 50 Hz | Encoder odometry and IMU orientation; emitted in both states |
+| `D` | Nominal 100 Hz | Controller and terrain debug; enabled at boot, toggled by `L` |
+| `[TAG] ...` | On events | Boot, state, gamepad, driver, and tuning logs |
+| `A,...` | During auto-tune | Progress, completion, abort, or status |
 
-```
-P,<key>,<value>,<min>,<max>,<group>,<description>
-PR,<key>,<value>            # derived, read-only
-P.                          # end of dump
+### Odometry
+
+```text
+O,ms,encL,encR,pitchDeg,yawDeg
 ```
 
-`group` is one of BALANCE, STEPPER, DRIVE, YAW, SAFETY, IMU, CLIMB, LED,
-PAYLOAD — **the GUI tabs come straight from this field**, so adding a
-parameter in firmware makes it appear in the GUI with no GUI change.
+`encL` and `encR` are signed 64-bit encoder counts from `StepperControl`; the right getter already negates its hardware count. They do not include `P.encSign`. Pitch is filtered `imu.getPitch()`, before balance trim/sign correction. Yaw is tilt-compensated compass heading in degrees.
 
-Derived read-only values reported after every dump: `STEPSM`, `COUNTSM`,
-`VMAX`, `AMAX`. Change `WHEELR` and all four update — the GUI should re-dump
-after any set to show the consequences.
+### Debug
 
-63 parameters at present: BALANCE 15, DRIVE 11, YAW 10, PAYLOAD 7, IMU 6,
-SAFETY 5, STEPPER 4, CLIMB 3, LED 2.
+```text
+D,ms,pitchF,rateF,uOut,velF,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,balancing,cmdFwd,cmdSteer,accelMag,rough,soften,terrainState,drops
+```
 
-## Host -> ESP32 (existing commands, unchanged)
+| Field | Units / meaning |
+| :--- | :--- |
+| `ms` | Milliseconds since boot |
+| `pitchF`, `rateF` | Forward-positive degrees and degrees/s |
+| `uOut`, `velF` | Acceleration in m/s², filtered velocity in m/s |
+| `ex` | Unclamped `posM-xRef`, metres |
+| `vCmdSteps`, `steerSteps` | Common and differential step rates, microsteps/s |
+| `satV`, `satA` | Velocity/acceleration clamp flags |
+| `loopMaxUs` | Largest measured loop interval since the previous debug record |
+| `speedHi`, `balancing` | HIGH-speed flag and balance-state flag, 0 or 1 |
+| `cmdFwd`, `cmdSteer` | Inputs after authority selection and gesture playback |
+| `accelMag` | Acceleration magnitude in g |
+| `rough`, `soften` | Roughness estimate and pitch-gain multiplier |
+| `terrainState` | 0 flat, 1 rough, 2 airborne, 3 landing |
+| `drops` | Confirmed airborne events since boot |
 
-`V,<fwd>,<steer>,<en>` drive authority · `E` enable · `X` e-stop ·
-`C` cal gyro · `S` settings · `L` debug toggle · `R` reset ·
-`G,<yes|no|spin|dance|stop>` gesture · `H,<0|1>` stiff hold ·
-`A,<-1..1>` look · `K1=`..`K5=`, `T=`, `M=` legacy tuners (still work).
+Parse comma-separated fields. Do not use the legacy tab-separated PID telemetry layout.
 
-## Safety invariants the protocol preserves
+## Parameter commands
 
-1. Every `P,` write is range-checked in firmware. A bad value is refused with
-   `PE,` and nothing changes. The GUI cannot push the robot outside its bounds.
-2. `TORCH_MAX_PCT` is a compile-time hard cap in `payload.h` and is **not**
-   exposed as a parameter.
-3. A remote link may STOP the robot but never START it (see the arming fix).
+| Command | Reply | Action |
+| :--- | :--- | :--- |
+| `P?` | `P#,n`, parameter rows, derived rows, `P.` | Dump all settings |
+| `P,key,value` | `P!,key,value` or `PE,reason` | Set one parameter within its bounds |
+| `PS` | `PS!,saved` | Save the current parameter store to NVS |
+| `PL` | `PL!,loaded from NVS` or `PL!,no NVS, using defaults` | Load NVS when present |
+| `PD` | `PD!,defaults restored (not saved)` | Restore compiled defaults in RAM |
+
+Other hardware/log records can appear before a parameter-command reply.
+
+```text
+P#,106
+P,key,value,min,max,group,description
+PR,STEPSM,value
+PR,COUNTSM,value
+PR,VMAX,value
+PR,AMAX,value
+P.
+```
+
+Split a parameter row at its first six commas; descriptions may contain commas. Derived fields are read-only. Changes to `WHEELR`, `MAXSPD`, or `MAXACC` recompute the conversion and limit chain.
+
+| Group | Parameters |
+| :--- | :--- |
+| BALANCE | 15 |
+| STEPPER | 9 |
+| DRIVE | 17 |
+| YAW | 10 |
+| SAFETY | 5 |
+| IMU | 14 |
+| CLIMB | 8 |
+| LED | 3 |
+| PAYLOAD | 17 |
+| TERRAIN | 8 |
+| **Total** | **106** |
+
+`params.h` is the complete key/bounds reference. The current Radxa console builds parameter rows from this metadata. It has tabs for nine parameter groups; TERRAIN parameters are exposed by the API but do not yet have a tab. The legacy desktop GUI does not implement this protocol.
+
+The [Android app](../../software/android/README.md) receives parameters through the console API and derives its group list dynamically, including TERRAIN.
+
+Writes reject unknown keys and out-of-range values. Numeric text is parsed with `atof`, so malformed text may become zero. Bounds are per parameter and do not enforce relationships between settings. `TORCH_MAX_PCT` remains a compile-time cap, not a runtime parameter.
+
+## Drive, state, and expression commands
+
+| Command | Action |
+| :--- | :--- |
+| `V,fwd,steer,en` | Update host drive input and timestamp; fwd/steer clamped to -1 through 1 |
+| `E` | Request arming when upright |
+| `X` | Stop balancing |
+| `C` | Stop balancing and run blocking gyro-bias calibration |
+| `R` | Reset controller reference, integral, velocity, steering, gestures, and hold modes; does not disarm |
+| `S` | Print gains, state, speed/hold mode, and payload status |
+| `L` | Toggle periodic debug records |
+| `?` | Print command help |
+| `G,yes` / `G,no` / `G,spin` / `G,dance` | Start a gesture while balancing and outside climb mode |
+| `G,stop` | Stop gesture playback |
+| `H,0` / `H,1` / `H,2` | Normal hold / stiff hold / climb mode |
+| `A,value` | Heading look offset, clamped to -1 through 1 |
+| `F` | Toggle torch |
+| `N` | Center camera servos |
+| `B=value` | Set torch brightness preset, clamped to runtime minimum and compile-time cap |
+| `P=value` | Set requested pan angle |
+| `Z=value` | Set requested zoom angle |
+
+Fresh `V` messages override gamepad drive regardless of `en`. The enable field only triggers a balancing stop on a 1-to-0 transition. It never arms. A first `V,0,0,0` is therefore not an unconditional stop.
+
+## Legacy tuning forms
+
+`K1=value` through `K5=value` and `T=value` write the gain/trim fields directly. They bypass parameter bounds but share the same storage saved by `PS`. Prefer `P,K1,value` and `P,TRIM,value`.
+
+`M=value` writes driver current directly without updating `P.motorMa`, bounds checking, or persistence. Use `P,CURRENT,value` for a parameter-store update.
+
+`P=value` controls camera pan. It does not set a balance proportional gain. `I=value`, `D=value`, `$KP=...`, and keyboard `#` drive commands are not current balance commands.
+
+## Auto-tune commands
+
+| Command | Behavior |
+| :--- | :--- |
+| `AT,wobble` | Measure pitch RMS and reduce K3/K4 in bounded iterations; requires balancing |
+| `AT,trim` | Average corrected pitch and adjust TRIM; requires balancing |
+| `AT,radius` | Begin a wheel-radius measurement |
+| `AT,done` | Intended radius completion; currently blocked by the busy guard during a radius run |
+| `AT,stall` | Ramp raw wheel speed from idle and compare measured velocity |
+| `AT,stop` | Abort the active routine and restore its saved gain/trim/speed values |
+| `AT,?` | Report routine and step |
+
+Routines time out after 45 seconds and do not save to NVS. Use `PS` to save a reviewed result. Wobble and trim abort when balancing stops or drive input exceeds 0.05. Radius and stall have different stop conditions.
+
+Stall tuning drives motors while the balance state is idle. `X` and SELECT do not cancel it in the current code; `AT,stop` is its implemented abort command. See the [tuning guide](../../docs/BaseLink/Config_and_Tuning_Guide.md) for the remaining implementation limits.

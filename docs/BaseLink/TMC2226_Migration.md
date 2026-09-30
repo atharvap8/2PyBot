@@ -1,81 +1,84 @@
-# TMC2226 Driver Migration
+# TMC2226 Driver Migration and Current Setup
 
-The BaseLink actuation layer moved from TMC2208 to TMC2226 stepper drivers. This document records why the swap happened, what changed in the wiring and the firmware, how the drivers are configured now, and how to verify a board after flashing.
+Reference: [stepper_control.cpp](../../firmware/BaseLink/stepper_control.cpp) and [config.h](../../firmware/BaseLink/config.h).
 
-## 1. Why the swap
+## Migration background
 
-Two problems drove the change.
+Earlier TMC2208 modules ran with an unreliable UART link, leaving current and microstep settings dependent on Vref and pin straps. Historical encoder tests showed 1/8 microsteps and a motor speed ceiling near 9000 microsteps/s at 1100 mA.
 
-First, the TMC2208 UART never worked on this robot. Every configured value (current, microsteps, chopper mode) silently failed to reach the chips, and the drivers ran on their MS1/MS2 pin strapping and the Vref potentiometer instead. Encoder logs from 18 August proved the real microstepping was 1/8, not the 1/16 the firmware assumed.
+The migration repaired UART communication and moved to TMC2226, a TMC2209-register-compatible driver with StallGuard4 and CoolStep. Historical tests recorded similar speed ceilings in StealthChop and spreadCycle. Those measurements describe that hardware setup, not a guaranteed limit for another motor or supply.
 
-Second, the motors stalled above roughly 9000 pulses per second at 1100 mA, which forced a conservative speed cap of 6000 steps per second. The TMC2208 offered no way to observe stall onset and little current headroom to push the ceiling higher.
+## Current wiring
 
-The TMC2226 addresses both. It is a TMC2209 family chip in a better thermal package, rated for 2.0 A RMS continuous, with StallGuard4 load measurement and CoolStep adaptive current. The UART link was repaired as part of the migration and is now verified on every boot.
+| Signal | Right | Left |
+| :--- | :--- | :--- |
+| STEP | GPIO 33 | GPIO 27 |
+| DIR | GPIO 25 | GPIO 14 |
+| EN | GPIO 32, shared active LOW | GPIO 32, shared active LOW |
+| UART | Serial2 | Serial1 |
+| UART RX / TX | GPIO 16 / 17 | GPIO 18 / 19 |
+| Optional DIAG | GPIO 35 | GPIO 34 |
 
-| Property | TMC2208 (old) | TMC2226 (new) |
-|:---|:---|:---|
-| Continuous drive current | about 1.4 A RMS | 2.0 A RMS |
-| Stall and load telemetry | none | StallGuard4 (SG_RESULT register, DIAG pin) |
-| Adaptive current scaling | none | CoolStep |
-| UART node addressing | single fixed address | 2 bit address on MS1/MS2, up to 4 chips per bus |
-| Standalone microstep strapping, both pins LOW | 1/8 | 1/8 (identical, so the fallback behavior is unchanged) |
-| Maximum motor supply | 36 V | 29 V (irrelevant on the 3S pack, but it rules out a future 24 V upgrade with spikes) |
-| TMCStepper class | `TMC2208Stepper` | `TMC2209Stepper` (register compatible) |
+Both drivers use UART address 0 with MS1/MS2 LOW. Each TX line uses a 1 kOhm series resistor for the single-wire UART connection. `R_SENSE` is 0.11 ohm. The old separate left enable on GPIO 26 is no longer present; GPIO 26 is camera pan.
 
-## 2. What stayed the same
+## Boot configuration
 
-- The STEP, DIR, and EN pin map in `config.h` is unchanged. Enable is still active LOW.
-- The 20 kHz timer ISR and the Bresenham step generation are untouched.
-- One dedicated hardware UART per driver: `Serial2` on pins 16/17 for the right motor, `Serial1` on pins 18/19 for the left, each with a 1 kOhm inline resistor on the TX line.
-- `R_SENSE` stays 0.11 ohm.
-- Microstepping stays at 1/8, so `STEPS_PER_M`, the encoder calibration, and every tuned LQR gain carried over without change.
-- MT6816 encoder odometry, the safety limits, and the control law are untouched.
+`setupDriver()` uses `TMC2209Stepper` for both TMC2226s. It:
 
-## 3. What changed in the firmware
+1. Clears status flags and selects UART configuration for current and microsteps.
+2. Applies loaded `P.motorMa`, default 1500 mA.
+3. Programs 1/8 microsteps with internal interpolation enabled.
+4. Sets standstill-current and power-down registers.
+5. Selects StealthChop at all speeds by default.
+6. Programs compile-time StallGuard and CoolStep settings.
+7. Checks `test_connection()==0` and an IFCNT increment of one after a verification write.
 
-### 3.1 Driver bindings
-`stepper_control.h` now declares the drivers as `TMC2209Stepper` (TMCStepper drives the TMC2226 through its TMC2209 support) and constructs them with `DRV_UART_ADDR` (0b00). MS1 and MS2 are the UART address pins on this chip. Both modules strap them LOW, which selects address 0 and also keeps the standalone fallback at 1/8 microstepping, so no rewiring was needed.
+Example at compiled defaults:
 
-### 3.2 Boot sequence with write verification
-`setupDriver()` performs a full bring-up over UART: it disables the PDN function on the UART pin, switches microstep selection from the MS pins to the MRES register, switches current control from Vref to the IRUN/IHOLD registers, and programs current, microsteps, interpolation, and the chopper. It then runs two checks per driver: `test_connection()` must return 0, and the IFCNT transmission counter must advance by exactly one after a counted verification write. A healthy boot prints:
-
-```
+```text
 [STEP] RIGHT TMC2226: OK | 1500 mA, 1/8 usteps (readback 1/8), StealthChop, SGTHRS=77, CoolStep ON
 ```
 
-A failure prints `TMC2226: COMM ERROR (conn=..., IFCNT delta=...)` and `BaseLink.ino` follows with `[MAIN] WARNING: TMC2226 UART unresponsive`.
+`COMM ERROR` reports a failed connection/write check. It does not verify every configuration register and does not halt the sketch. `StepperControl::begin()` currently returns true even when a driver check fails.
 
-### 3.3 Operating mode: StealthChop
-The drivers now run StealthChop at all speeds (`TPWMTHRS 0`) because StallGuard4 and CoolStep require it on this chip family. The stall ceiling was measured in both chopper modes and came out identical, about 9000 microsteps per second at 1100 mA, so no top speed was lost. Setting `DRV_STEALTHCHOP 0` reverts to spreadCycle in one line, at the cost of StallGuard and CoolStep going dead.
+## Compile-time and runtime settings
 
-### 3.4 StallGuard4
-Thresholds were tuned on this hardware with the test sketch: `SGTHRS_LEFT 76` and `SGTHRS_RIGHT 77`. A stall flags when SG_RESULT drops below twice the threshold. Readings are only valid above `DRV_TCOOLTHRS` (300, which corresponds to roughly 1250 microsteps per second), so slow stalls are invisible to StallGuard by design. Optionally, the DIAG outputs can be wired to GPIO 34 (left) and GPIO 35 (right) and enabled with `USE_DIAG_PINS 1`. The main loop then prints report-only `[STALL]` counts. It never disables the motors automatically, because a false positive during a balance recovery would drop the robot.
+| Compiled setting | Default | Runtime key |
+| :--- | :--- | :--- |
+| `DRV_UART_ADDR` | 0 | None |
+| `DRV_STEALTHCHOP` | 1 | None |
+| `MICROSTEPS` | 8 | None |
+| `MOTOR_CURRENT_MA` | 1500 mA | `CURRENT` |
+| `SGTHRS_LEFT` / `SGTHRS_RIGHT` | 76 / 77 | `SGTHRSL` / `SGTHRSR` |
+| `DRV_TCOOLTHRS` | 300 | `TCOOL` |
+| `COOLSTEP_ENABLE` | 1 | Runtime disable through `CSSEMIN=0` |
+| `COOLSTEP_SEMIN` / `COOLSTEP_SEMAX` | 5 / 2 | `CSSEMIN` / `CSSEMAX` |
+| `USE_DIAG_PINS` | 0 | None |
+| `MAX_SPEED_STEPS` | 8500 microsteps/s | `MAXSPD` |
+| `MOTOR_ACCEL_LIMIT` | 20000 microsteps/s² | `MAXACC` |
 
-### 3.5 CoolStep
-CoolStep is enabled (`SEMIN 5`, `SEMAX 2`) with a current floor of half of IRUN. It is inactive below `DRV_TCOOLTHRS`, so standstill balancing always has full current. If balance ever feels soft against pushes while driving, set `COOLSTEP_ENABLE 0`.
+`applyTuning()` writes SGTHRS, TCOOLTHRS, SEMIN, and SEMAX to both drivers after parameter commands. `CURRENT` also writes RMS current. The first hardware callback is skipped at boot, and initial driver tuning still uses compiled values. Send `PL` after initialization to apply saved StallGuard/CoolStep settings.
 
-### 3.6 Current and speed limits
-Run current rose from 1100 mA to 1500 mA (`MOTOR_CURRENT_MA`), and the `M=` serial command still changes it live over UART. IHOLD is set to roughly half current at true standstill, which only takes effect when the robot is disarmed, since balancing steps continuously. The stall test confirmed the roughly 9000 microsteps per second ceiling is set by the motor and supply voltage, not the driver, so `MAX_SPEED_STEPS` was raised from 6000 to 8500 and `MAX_DRIVE_VEL_MS` from 0.55 to 0.70. Rerun the stall test after any current change before raising the cap further.
+Use `P,CURRENT,1500` for a persistent parameter-store change. Legacy `M=1500` only changes hardware current; `S` does not report current. `P?` reports the stored current setting, not driver readback.
 
-## 4. Configuration reference
+## StallGuard and CoolStep
 
-| Constant | Value | Meaning |
-|:---|:---|:---|
-| `DRV_UART_ADDR` | `0b00` | UART address, MS1/MS2 LOW on both modules |
-| `DRV_STEALTHCHOP` | 1 | StealthChop on; 0 reverts to spreadCycle |
-| `SGTHRS_LEFT` / `SGTHRS_RIGHT` | 76 / 77 | StallGuard4 thresholds, tuned on this hardware |
-| `DRV_TCOOLTHRS` | 300 | TSTEP threshold; StallGuard and CoolStep active above about 1250 usteps/s |
-| `COOLSTEP_ENABLE` | 1 | CoolStep on, floor is IRUN/2 |
-| `COOLSTEP_SEMIN` / `COOLSTEP_SEMAX` | 5 / 2 | CoolStep hysteresis window |
-| `USE_DIAG_PINS` | 0 | Set 1 after wiring DIAG to GPIO 34/35 for `[STALL]` reporting |
-| `MOTOR_CURRENT_MA` | 1500 | Run current; silicon limit 2000 mA RMS, bounded by the motor rating |
-| `MICROSTEPS` | 8 | Programmed over UART, interpolated internally to 1/256 |
-| `MAX_SPEED_STEPS` | 8500 | Raised from 6000 after the stall ceiling was confirmed |
+Both features require StealthChop on this driver family. StallGuard compares load measurements against SGTHRS and is speed-dependent through TCOOLTHRS. CoolStep adjusts current with a configured floor of half IRUN when active.
 
-## 5. Verification checklist after flashing
+Optional DIAG interrupts count events. The main loop prints changes at most every 250 ms. DIAG is report-only; it does not stop the balance controller. When disarmed, the shared enable line is HIGH and the drivers are disabled, so standstill-current registers do not provide a disarmed hold mode.
 
-1. The boot log must show `TMC2226: OK` for both drivers, with a microstep readback of 1/8. This proves the UART writes land.
-2. Send `M=1500`, then `S`. The reported current must reflect the change.
-3. With the wheels off the ground, drive gently and confirm the debug value `v` equals `vCmd / STEPS_PER_M`. This catches any microstep or address mismatch.
-4. Direction conventions are unchanged, but verify the sign checks in the `config.h` sign conventions section after any rewiring.
-5. Run the stall test before raising `MOTOR_CURRENT_MA` or `MAX_SPEED_STEPS`, and give the drivers a thermal soak at balancing load after any current increase.
+## Motion and odometry
+
+The driver UART configures the chips; it does not command wheel motion. A 20 kHz timer ISR emits STEP pulses from signed wheel rates. Motor direction inversion is set in `config.h`.
+
+MT6816 encoders provide actual wheel counts through PCNT. Geometry conversion uses runtime `WHEELR`, now default 0.050 m. Microstep resolution changes require rebuilding and checking the conversion/control assumptions.
+
+## Verification
+
+1. Read each driver's boot result and 1/8 microstep readback.
+2. Confirm both enable inputs share GPIO 32 and both motor directions agree on forward motion.
+3. Inspect `P?`, then `PL` if saved runtime driver tuning should be applied.
+4. Compare measured `velF` with common commanded speed in debug telemetry under steady motion.
+5. Check current, speed, and acceleration against the actual motor/supply setup before raising limits.
+
+The current `AT,stall` routine has an independent motor-control path and is not cancelled by `X` or SELECT. Its implemented abort is `AT,stop`; see [Configuration and Tuning](Config_and_Tuning_Guide.md).

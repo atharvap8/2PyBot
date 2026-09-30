@@ -1,8 +1,17 @@
+# Use the platform default unless a rule below overrides it
+*       text=auto
+
 # Normalize line endings for CI compatibility
 # Python and YAML files must use LF (ruff and GitHub Actions require it on Linux runners)
 *.py    text eol=lf
 *.yml   text eol=lf
 *.yaml  text eol=lf
 
-# Keep all other text files using the platform default
-*       text=auto
+# Deployment and Gradle launchers
+*.sh    text eol=lf
+gradlew text eol=lf
+*.bat   text eol=crlf
+
+# Preserve imported mesh and wrapper archives byte-for-byte
+*.stl   binary
+*.jar   binary

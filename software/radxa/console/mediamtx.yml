@@ -1,0 +1,26 @@
+# MediaMTX for 2PyBot. RTSP in from ffmpeg, WebRTC (WHEP) out to the GUI
+# and the Android app. LAN only — the robot's hotspot is the perimeter.
+logLevel: warn
+readTimeout: 10s
+writeTimeout: 10s
+
+rtsp: yes
+rtspAddress: :8554
+protocols: [tcp]
+
+webrtc: yes
+webrtcAddress: :8889
+# No STUN/TURN: phone and robot are on the same hotspot, host candidates
+# resolve immediately. Adding a public STUN server here only adds latency.
+webrtcICEServers2: []
+webrtcLocalUDPAddress: :8189
+
+hls: no
+rtmp: no
+srt: no
+api: yes
+apiAddress: 127.0.0.1:9997
+
+paths:
+  cam:
+    source: publisher

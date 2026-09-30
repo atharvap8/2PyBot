@@ -1,0 +1,13 @@
+[Unit]
+Description=2PyBot MediaMTX (WebRTC relay)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mediamtx /etc/2pybot/mediamtx.yml
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

@@ -1,69 +1,49 @@
-# System Architecture: ESP-NOW Joystick Transmitter
+# Legacy ESP-NOW Joystick Transmitter
 
-This document delineates the logical construction of the wireless joystick remote controller, designed specifically to operate completely independently of the robotic platform it governs. 
+Reference: [Controller.ino](../../firmware/Controller/Controller.ino). This sketch remains in the repository for the older ESP-NOW control path. Current BaseLink uses a direct Bluepad32 gamepad and has no ESP-NOW receiver.
 
-## High-Level Topology
+## Hardware and build
 
-The system operates across three core domains: analog peripheral sampling, signal normalization, and wireless payload compilation.
+| Signal | GPIO |
+| :--- | :--- |
+| Joystick X | 34, ADC1 |
+| Joystick Y | 35, ADC1 |
+| Joystick switch | 32, pull-up, active LOW |
+| Status LED | 2 |
 
-```mermaid
-graph TD
-    classDef hardware fill:#0b1d30,stroke:#2a5275,stroke-width:2px,color:#ffffff
-    classDef software fill:#16322b,stroke:#2a5f51,stroke-width:2px,color:#ffffff
-    classDef process fill:#2d4263,stroke:#1e3c50,stroke-width:2px,color:#d8e2dc
+Power the joystick at 3.3 V with common ground. ADC1 is used because Wi-Fi occupies ADC2 resources. The sketch uses the stock ESP32 Arduino 3.x core and the `wifi_tx_info_t` send-callback signature. Serial diagnostics run at 115200 baud.
 
-    subgraph Sensory Environment
-        POT_Y[Y-Axis Potentiometer]:::hardware -->|Analog voltage| ADC_Y[ESP32 ADC1 CH7]:::software
-        POT_X[X-Axis Potentiometer]:::hardware -->|Analog voltage| ADC_X[ESP32 ADC1 CH6]:::software
-        BTN[Tactile Switch]:::hardware --> INT[Interrupt Pullup]:::software
-    end
+Set `receiverMAC[]` to the intended legacy receiver's STA address. The transmitter configures an unencrypted peer on channel 0.
 
-    subgraph Filtration & Normalization
-        ADC_Y --> OVS[Multi-Sampling Average]:::process
-        ADC_X --> OVS
-        OVS --> EMA[EMA Noise Filter]:::process
-        EMA --> CALC[Deadzone Removal]:::process
-    end
+## Sampling and processing
 
-    subgraph Synthesis & Transmission
-        CALC -->|Y -1 to +1| SCL_Y[Scale to MAX_TARGET_ANGLE]:::process
-        CALC -->|X -1 to +1| SCL_X[Scale to MAX_STEERING]:::process
-        SCL_Y --> PKT[JoystickPacket Struct]:::software
-        SCL_X --> PKT
-        INT --> PKT
-        PKT --> TX[ESP-NOW Protocol Stack]:::software
-        TX -->|Hardware MAC Vector| RADIO((WiFi Radio)):::hardware
-    end
+1. On boot, average 64 samples per axis at 5 ms spacing to capture the resting center.
+2. Every 20 ms, average four ADC readings per axis.
+3. Subtract the calibrated center and divide by `JOY_RANGE=2048`.
+4. Apply an EMA with `JOY_SMOOTH=0.7`.
+5. Apply a 0.10 deadzone and rescale the remaining range.
+6. Clamp to -1 through 1, then scale forward by 5.0 and steering by 1.0.
+7. Poll the switch. A press edge toggles the enable flag; no explicit debounce interval is implemented.
+8. Send the packed packet when the peer was added successfully.
+
+## Packet
+
+```cpp
+typedef struct __attribute__((packed)) {
+    float forward;
+    float steering;
+    uint8_t enable;
+} JoystickPacket;
 ```
 
----
+The packed payload is 9 bytes: two 32-bit floats and one enable byte. Forward uses the legacy -5 through +5 target-offset units; steering is -1 through +1. The receiver must agree on layout, scaling, and radio channel.
 
-## 1. Subsystem Descriptions
+## Diagnostics
 
-### Analog Acquisition (ADC1 Only)
-The ESP32 platform restricts access to ADC2 structures the moment the RF radio engages. Therefore, the architectural hardware interface is strictly limited to ADC1 pins (`GPIO 34`, `GPIO 35`).
-- The 12-bit ADC generates inputs ranging linearly between 0 and 4095.
-- Mechanical resting center discrepancies observed amongst cheap physical potentiometers are eliminated via an initial 64-sample resting state integration executed strictly during the boot procedure.
+- Boot prints the local STA MAC, target MAC, center calibration, and peer status.
+- ESP-NOW initialization failure halts the sketch.
+- Peer-add failure leaves it running without transmission.
+- Failed sends toggle the status LED.
+- Every 200 ms, serial prints forward, steering, and enable values.
 
-### Signal Processing
-Voltages harvested from physical manipulation undergo significant mathematical normalization before broadcast.
-1. **Oversampling:** 4 distinct sequential analog queries are aggregated and averaged to aggressively negate immediate instantaneous micro-spikes originating within the electrical rails.
-2. **Exponential Smoothing (EMA):** Applied dynamically to generate a mathematically clean transitional curve eliminating rigid mechanical jitter outputted by the potentiometers.
-3. **Deadzone Exclusion:** Fractional signal discrepancies occupying the centralized logical region near 0.0 mathematically default to zero, preventing aggressive robotic drifting when thumbs are removed securely from the stick.
-
-### Target Constraints Integration
-Previously, the Joystick forwarded raw `-1.0` to `1.0` scalar factors, assuming the robot constrained physical behavior rules.
-In current iterations:
-- The joystick asserts architectural dominance over scaling logic.
-- Input vectors are mathematically expanded explicitly out to arbitrary constants, specifically matching the definitions declared in `$MAX_TARGET_ANGLE` (5.0 degrees) and `$MAX_STEERING` (1.0 scalar multiplier).
-
-### Asynchronous Broadcasting
-Transmissions follow a draconian temporal throttling executing exclusively at precisely **50 Hz** ($dt = 20ms$). 
-- Operating via the `ESPNOW` architectural standard sidesteps the debilitating 3-way handshake delays typically required to initiate TCP/IP connections. 
-- Packets act directly as User Datagram constraints broadcast cleanly towards the exact physical Receiver MAC address, drastically curbing transmission and processing latencies.
-
----
-
-## 2. RQT Control Structure Graph
-
-![Transmitter Control Architecture Graph](file:///C:/Users/athar/.gemini/antigravity/brain/d352c9d8-8d63-4a38-986c-dd8a13bb8bf4/transmitter_control_rqt_graph_1776442989160.png)
+For the active gamepad mapping and pairing instructions, see [BaseLink README](../../firmware/BaseLink/README.md).

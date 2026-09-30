@@ -1,0 +1,19 @@
+<!doctype html><html lang=en><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>2PyBot Console</title><link rel=stylesheet href=/ui/style.css>
+</head><body>
+<header>
+  <div class=brand><span class=dot id=dot></span><b>2PyBot</b><small id=sub>console</small></div>
+  <div class=chips>
+    <span class=chip id=cState>—</span>
+    <span class=chip id=cPitch>pitch —</span>
+    <span class=chip id=cVel>0.00 m/s</span>
+    <span class=chip id=cRx>— Hz</span>
+  </div>
+  <button class=estop onclick="window.API.estop()">■ E-STOP</button>
+</header>
+<nav id=tabs></nav>
+<main id=view></main>
+<footer><span id=msg>starting…</span><span id=dirty></span></footer>
+<script src=/ui/app.js type=module></script>
+</body></html>
