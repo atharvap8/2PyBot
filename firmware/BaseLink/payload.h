@@ -34,6 +34,7 @@
 #include <Arduino.h>
 #include "driver/gpio.h"
 #include "config.h"
+#include "params.h"
 
 #if TORCH_MAX_PCT > 90
 #error "TORCH_MAX_PCT above 90 WILL COOK THE LED"
@@ -78,7 +79,7 @@ static bool     _servoLive   = false;
 static void _servoWriteDeg(uint8_t pin, uint8_t ch, float deg) {
     if (deg < 0.0f)   deg = 0.0f;
     if (deg > 180.0f) deg = 180.0f;
-    float us = SERVO_US_MIN + (SERVO_US_MAX - SERVO_US_MIN) * (deg / 180.0f);
+    float us = P.servoUsMin + (P.servoUsMax - P.servoUsMin) * (deg / 180.0f);
     const float countsPerUs = (float)(1UL << SERVO_PWM_BITS) / (1000000.0f / SERVO_PWM_HZ);
     _pwmWrite(pin, ch, (uint32_t)(us * countsPerUs + 0.5f));
 }
@@ -120,8 +121,8 @@ inline void payload_begin() {
 
     _pwmAttach(SERVO_YAW_PIN,  SERVO_YAW_CH,  SERVO_PWM_HZ, SERVO_PWM_BITS);
     _pwmAttach(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, SERVO_PWM_HZ, SERVO_PWM_BITS);
-    _yawDeg  = SERVO_YAW_HOME_DEG;
-    _zoomDeg = SERVO_ZOOM_HOME_DEG;
+    _yawDeg  = P.svYawHome;
+    _zoomDeg = P.svZoomHome;
     _servoWriteDeg(SERVO_YAW_PIN,  SERVO_YAW_CH,  _yawDeg);
     _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
     _servoLive  = true;
@@ -129,9 +130,9 @@ inline void payload_begin() {
 
     Serial.printf("[PAY] Servos yaw GPIO%d / zoom GPIO%d homed to %.0f / %.0f deg\n",
                   SERVO_YAW_PIN, SERVO_ZOOM_PIN,
-                  (float)SERVO_YAW_HOME_DEG, (float)SERVO_ZOOM_HOME_DEG);
+                  (float)P.svYawHome, (float)P.svZoomHome);
     Serial.printf("[PAY] Torch GPIO%d off, %d%% preset, HARD CAP %d%% duty @ %d kHz\n",
-                  TORCH_PIN, TORCH_BOOT_PCT, TORCH_MAX_PCT, TORCH_PWM_HZ / 1000);
+                  TORCH_PIN, P.torchBoot, TORCH_MAX_PCT, TORCH_PWM_HZ / 1000);
 
     // Diagnostic: sample the zoom pin as an input before LEDC took it.
     // GPIO 12 must read LOW at reset or the chip picks the wrong flash
@@ -159,11 +160,11 @@ inline void payload_torchOff() {
     Serial.println("[PAY] Torch off");
 }
 
-// steps of TORCH_STEP_PCT, clamped into TORCH_MIN_PCT..TORCH_MAX_PCT.
+// steps of P.torchStep, clamped into P.torchMin..TORCH_MAX_PCT.
 // Dimming while the torch is off just moves the preset silently.
 inline void payload_torchStep(int8_t steps) {
-    int v = (int)_torchPct + (int)steps * TORCH_STEP_PCT;
-    if (v < TORCH_MIN_PCT) v = TORCH_MIN_PCT;
+    int v = (int)_torchPct + (int)steps * (int)P.torchStep;
+    if (v < P.torchMin) v = P.torchMin;
     if (v > TORCH_MAX_PCT) v = TORCH_MAX_PCT;
     if ((uint8_t)v == _torchPct) return;
     _torchPct = (uint8_t)v;
@@ -173,19 +174,19 @@ inline void payload_torchStep(int8_t steps) {
 }
 
 inline void payload_torchSetPct(int pct) {
-    if (pct < TORCH_MIN_PCT) pct = TORCH_MIN_PCT;
+    if (pct < P.torchMin) pct = P.torchMin;
     if (pct > TORCH_MAX_PCT) pct = TORCH_MAX_PCT;
     _torchPct = (uint8_t)pct;
     _torchApply();
     Serial.printf("[PAY] Torch %d%% (%s)\n", _torchPct, _torchOn ? "on" : "off");
 }
 
-inline void payload_setYaw(float deg)  { _yawDeg  = constrain(deg, (float)SERVO_YAW_MIN_DEG,  (float)SERVO_YAW_MAX_DEG);  _lastMoveMs = millis(); }
-inline void payload_setZoom(float deg) { _zoomDeg = constrain(deg, (float)SERVO_ZOOM_MIN_DEG, (float)SERVO_ZOOM_MAX_DEG); _lastMoveMs = millis(); }
+inline void payload_setYaw(float deg)  { _yawDeg  = constrain(deg, (float)P.svYawMin,  (float)P.svYawMax);  _lastMoveMs = millis(); }
+inline void payload_setZoom(float deg) { _zoomDeg = constrain(deg, (float)P.svZoomMin, (float)P.svZoomMax); _lastMoveMs = millis(); }
 
 inline void payload_center() {
-    payload_setYaw(SERVO_YAW_HOME_DEG);
-    payload_setZoom(SERVO_ZOOM_HOME_DEG);
+    payload_setYaw(P.svYawHome);
+    payload_setZoom(P.svZoomHome);
     Serial.println("[PAY] Servos re-centred");
 }
 
@@ -204,21 +205,21 @@ inline void payload_update(float dt, float yawStick, float zoomStick) {
     bool moving = (yawStick != 0.0f) || (zoomStick != 0.0f);
 
     if (moving) {
-        _yawDeg  += yawStick  * SERVO_YAW_RATE_DPS  * dt;
-        _zoomDeg += zoomStick * SERVO_ZOOM_RATE_DPS * dt;
-        _yawDeg  = constrain(_yawDeg,  (float)SERVO_YAW_MIN_DEG,  (float)SERVO_YAW_MAX_DEG);
-        _zoomDeg = constrain(_zoomDeg, (float)SERVO_ZOOM_MIN_DEG, (float)SERVO_ZOOM_MAX_DEG);
+        _yawDeg  += yawStick  * P.servoYawR  * dt;
+        _zoomDeg += zoomStick * P.servoZoomR * dt;
+        _yawDeg  = constrain(_yawDeg,  (float)P.svYawMin,  (float)P.svYawMax);
+        _zoomDeg = constrain(_zoomDeg, (float)P.svZoomMin, (float)P.svZoomMax);
         _lastMoveMs = millis();
     }
 
     uint32_t now = millis();
-    if (now - _lastServoMs < (1000UL / SERVO_UPDATE_HZ)) return;   // one servo frame
+    if (now - _lastServoMs < (uint32_t)(1000.0f / (P.svRate < 1 ? 1 : P.svRate))) return;   // one servo frame
     _lastServoMs = now;
 
-#if SERVO_IDLE_RELEASE_MS > 0
-    // Stop pulsing after a spell of no input so the MG90S stops
-    // hunting and buzzing. It holds position on its own gearing.
-    if (!moving && (now - _lastMoveMs) > SERVO_IDLE_RELEASE_MS) {
+    // Stop pulsing after a spell of no input so the MG90S stops hunting and
+    // buzzing; it holds position on its own gearing. Runtime-gated now
+    // (SVIDLE = 0 disables), so it can be toggled from the app.
+    if (P.svIdleMs > 0 && !moving && (now - _lastMoveMs) > (uint32_t)P.svIdleMs) {
         if (_servoLive) {
             _pwmWrite(SERVO_YAW_PIN,  SERVO_YAW_CH,  0);
             _pwmWrite(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, 0);
@@ -226,7 +227,6 @@ inline void payload_update(float dt, float yawStick, float zoomStick) {
         }
         return;
     }
-#endif
 
     _servoLive = true;
     _servoWriteDeg(SERVO_YAW_PIN,  SERVO_YAW_CH,  _yawDeg);

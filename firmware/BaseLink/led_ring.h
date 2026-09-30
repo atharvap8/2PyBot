@@ -18,6 +18,7 @@
 
 #include <Arduino.h>
 #include "config.h"
+#include "params.h"
 
 // One-shot events (overlay animations)
 #define LED_EV_ARM       1   // green wake-up sweep

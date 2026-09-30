@@ -43,6 +43,7 @@
 
 #include <Bluepad32.h>
 #include "config.h"
+#include "params.h"
 
 // 1 = steer on LEFT stick X (right stick free for the camera).
 // 0 = legacy: steer on RIGHT stick X, and servo yaw goes dead.
@@ -90,14 +91,22 @@ static uint8_t       _torchToggleReq = 0;   // pending RB presses
 static int8_t        _torchStepReq   = 0;   // net D-pad L/R clicks, signed
 static uint32_t      _dpadRepeatMs   = 0;   // next auto-repeat due
 
+// ---- stick centre calibration + first-frame guard ----
+static float        _cx = 0.0f, _cy = 0.0f;    // left-stick centre offsets
+static float        _crx = 0.0f, _cry = 0.0f;  // right-stick centre offsets
+static bool         _calDone     = false;
+static bool         _freshConnect = true;      // swallow edges on frame 1
+
 
 
 static void _onPadConnect(ControllerPtr ctl) {
     _pad = ctl;
+    _freshConnect = true;
     Serial.printf("[PAD] Connected: %s\n", ctl->getModelName().c_str());
 }
 static void _onPadDisconnect(ControllerPtr ctl) {
     _calDone = false;
+    _freshConnect = true;
     if (_pad == ctl) _pad = nullptr;
     Serial.println("[PAD] Disconnected — inputs zeroed, balance continues");
 }
@@ -110,9 +119,16 @@ inline void btgamepad_begin() {
     Serial.println("[PAD] Bluepad32 ready — put the EVOFOX One S in pairing mode (Home+B)");
 }
 
-static inline float _dz(float v) { return (fabsf(v) < PAD_DEADZONE) ? 0.0f : v; }
+static inline float _dz(float v) { return (fabsf(v) < P.padDz) ? 0.0f : v; }
 
 // Returns the pending gesture request once, then clears it.
+// +1 = START pressed, -1 = SELECT pressed, 0 = nothing. Clears on read.
+// The .ino acts on these EVENTS, so SELECT e-stops even if START was
+// never pressed (the old level-edge logic could not do that).
+static int8_t _enableEvent = 0;
+inline int8_t btgamepad_takeEnableEvent() { int8_t e=_enableEvent; _enableEvent=0; return e; }
+inline void   btgamepad_syncArmed(bool a) { _armed = a; }
+
 inline uint8_t btgamepad_takeGesture() {
     uint8_t g = _gestReq; _gestReq = 0; return g;
 }
@@ -144,10 +160,10 @@ static inline float _expo(float v, float e) {
 // snap != 0 applies the "protect straight ahead" taper to the x output.
 static void _shapeStick(float x, float y, bool snap, float* outY, float* outX) {
     float r = sqrtf(x * x + y * y);
-    if (r < STICK_DEADZONE) { *outY = 0.0f; *outX = 0.0f; return; }
+    if (r < P.stickDz) { *outY = 0.0f; *outX = 0.0f; return; }
 
     // rescale so output starts at 0 exactly at the deadzone edge (no jump)
-    float k = ((r - STICK_DEADZONE) / (1.0f - STICK_DEADZONE)) / r;
+    float k = ((r - P.stickDz) / (1.0f - P.stickDz)) / r;
     x *= k; y *= k;
     if (x >  1.0f) x =  1.0f;  if (x < -1.0f) x = -1.0f;
     if (y >  1.0f) y =  1.0f;  if (y < -1.0f) y = -1.0f;
@@ -156,11 +172,11 @@ static void _shapeStick(float x, float y, bool snap, float* outY, float* outX) {
     if (snap) {
         // angle away from the pure fwd/back axis: 0 = straight, pi/2 = pure turn
         float ang = atan2f(fabsf(x), fabsf(y));
-        w = _smoothstep(SNAP_IN_DEG * (float)DEG_TO_RAD,
-                        SNAP_OUT_DEG * (float)DEG_TO_RAD, ang);
+        w = _smoothstep(P.snapIn * (float)DEG_TO_RAD,
+                        P.snapOut * (float)DEG_TO_RAD, ang);
     }
-    *outY = _expo(y, EXPO_DRIVE);
-    *outX = _expo(x * w, EXPO_STEER);
+    *outY = _expo(y, P.expoDrive);
+    *outX = _expo(x * w, P.expoSteer);
 }
 
 // Call once per control loop. Cheap: drains the BT event queue and maps.
@@ -205,8 +221,8 @@ inline void btgamepad_update() {
     _shapeStick(rawX, rawY, true, &fwdNorm, &steerNorm);
     // RIGHT stick is the camera; snap keeps a pure pan from creeping the zoom
     _shapeStick(rawRX, rawRY, true, &zoomNorm, &panNorm);
-    joyPanX  = panNorm  * PAD_YAW_SIGN;
-    joyZoomY = zoomNorm * PAD_ZOOM_SIGN;
+    joyPanX  = panNorm  * P.padYawSgn;
+    joyZoomY = zoomNorm * P.padZoomSgn;
 #else
     // legacy: drive on left Y, steer on right X — separate sticks, no snap needed
     float dummy;
@@ -214,11 +230,11 @@ inline void btgamepad_update() {
     _shapeStick(rawRX, 0.0f, false, &dummy, &steerNorm);
     joyPanX  = 0.0f;
     _shapeStick(0.0f, rawRY, false, &zoomNorm, &dummy);
-    joyZoomY = zoomNorm * PAD_ZOOM_SIGN;
+    joyZoomY = zoomNorm * P.padZoomSgn;
 #endif
 
-    fwdNorm   *= PAD_FWD_SIGN;
-    steerNorm *= PAD_STEER_SIGN;
+    fwdNorm   *= P.padFwdSgn;
+    steerNorm *= P.padStrSgn;
 
     joyForward  = -5.0f * fwdNorm;   // legacy units; .ino scales by -0.2
     joySteering = steerNorm;
@@ -227,12 +243,21 @@ inline void btgamepad_update() {
     uint16_t btn  = _pad->buttons();
     uint16_t misc = _pad->miscButtons();
     uint8_t  dpad = _pad->dpad();
+    if (_freshConnect) {
+        // Adopt whatever is held at connect instead of treating it as a press.
+        // Without this, connecting with Home held can ARM the robot by itself.
+        _btnPrev = btn; _miscPrev = misc; _dpadPrev = dpad;
+        _freshConnect = false;
+        Serial.printf("[PAD] connect state adopted: btn=0x%04X misc=0x%04X dpad=0x%02X\n",
+                      btn, misc, dpad);
+        return;
+    }
     uint16_t bNew = btn  & ~_btnPrev;
     uint16_t mNew = misc & ~_miscPrev;
     uint8_t  dNew = dpad & ~_dpadPrev;
 
-    if (mNew & PAD_MISC_START)  { _armed = true;  Serial.println("[PAD] ARM"); }
-    if (mNew & PAD_MISC_SELECT) { _armed = false; Serial.println("[PAD] DISARM (e-stop)"); }
+    if (mNew & PAD_MISC_START)  { _armed = true;  _enableEvent = +1; Serial.println("[PAD] ARM"); }
+    if (mNew & PAD_MISC_SELECT) { _armed = false; _enableEvent = -1; Serial.println("[PAD] DISARM (e-stop)"); }
 
     if (bNew & PAD_BTN_Y)    _gestReq = 1;   // nod yes
     if (bNew & PAD_BTN_B)    _gestReq = 2;   // nod no
@@ -254,12 +279,12 @@ inline void btgamepad_update() {
     // D-pad LEFT/RIGHT trim torch brightness, with auto-repeat so you
     // can hold to sweep instead of tapping fifteen times.
     uint32_t nowMs = millis();
-    if (dNew & PAD_DPAD_RIGHT) { _torchStepReq++; _dpadRepeatMs = nowMs + PAD_REPEAT_FIRST_MS; }
-    if (dNew & PAD_DPAD_LEFT)  { _torchStepReq--; _dpadRepeatMs = nowMs + PAD_REPEAT_FIRST_MS; }
+    if (dNew & PAD_DPAD_RIGHT) { _torchStepReq++; _dpadRepeatMs = nowMs + P.padRpt1; }
+    if (dNew & PAD_DPAD_LEFT)  { _torchStepReq--; _dpadRepeatMs = nowMs + P.padRpt1; }
     if (dpad & (PAD_DPAD_LEFT | PAD_DPAD_RIGHT)) {
         if ((int32_t)(nowMs - _dpadRepeatMs) >= 0) {
             _torchStepReq += (dpad & PAD_DPAD_RIGHT) ? 1 : -1;
-            _dpadRepeatMs  = nowMs + PAD_REPEAT_MS;
+            _dpadRepeatMs  = nowMs + P.padRpt;
         }
     }
 

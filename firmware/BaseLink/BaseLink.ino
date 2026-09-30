@@ -36,6 +36,9 @@
  */
 
 #include "config.h"
+#include "params.h"
+#include "autotune.h"
+#include "terrain.h"
 #include "imu_sensor.h"
 #include "stepper_control.h"
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
@@ -50,7 +53,7 @@ IMUSensor imu;
 enum RobotState { STATE_IDLE, STATE_BALANCING };
 RobotState state       = STATE_IDLE;
 bool motorsRequested   = false;
-bool DEBUG_STREAM      = false;
+bool DEBUG_STREAM      = true;
 bool RADXA_STREAM      = true;
 
 // Forward-positive measurements (see config.h sign conventions)
@@ -89,9 +92,17 @@ const GStep* gestSeq = nullptr;
 uint8_t  gestLen = 0, gestIdx = 0;
 uint32_t gestStepStart = 0;
 
-// Live-tunable gains (RAM copies of config defaults)
-float k1 = LQR_K1, k2 = LQR_K2, k3 = LQR_K3, k4 = LQR_K4, k5 = LQR_K5;
-float pitchTrim = PITCH_TRIM_DEG;
+// Gains and trim live in the parameter store (params.h) so the GUI, the app
+// and the legacy K1=/T= serial tuners all write the SAME memory. These
+// aliases keep the controller code below reading exactly as it always did.
+// (Without them the sliders write P.* while the loop reads a private copy --
+//  the tuning appears to do nothing at all.)
+#define k1        P.k1
+#define k2        P.k2
+#define k3        P.k3
+#define k4        P.k4
+#define k5        P.k5
+#define pitchTrim P.pitchTrim
 
 // Drive inputs after link arbitration
 float cmdFwd = 0.0f, cmdSteer = 0.0f;
@@ -101,8 +112,6 @@ uint32_t radxaLastRx = 0;
 float    radxaFwd = 0.0f, radxaSteer = 0.0f;
 uint8_t  radxaEn = 0, radxaEnPrev = 0;
 
-// ESP-NOW edge tracking
-uint8_t joyEnPrev = 0;
 
 // Serial line buffer
 char  rxBuf[96];
@@ -112,6 +121,32 @@ uint8_t rxLen = 0;
 unsigned long lastLoopUs = 0;
 uint32_t lastOdomMs = 0, lastDbgMs = 0, lastBlinkMs = 0;
 bool ledState = false;
+
+// ============================================================
+//  Hooks the auto-tune routines need from the sketch
+// ============================================================
+bool at_isBalancing() { return state == STATE_BALANCING; }
+void at_motorsOff()   { steppers.setSpeeds(0, 0); steppers.disable(); }
+void at_setWheelSpeed(float stepsPerSec) {
+    // Raw drive, used only by the stall search with the wheels off the ground.
+    if (!steppers.isEnabled()) steppers.enable();
+    int32_t v = (int32_t)stepsPerSec;
+    steppers.setSpeeds(v, v);
+}
+
+// ============================================================
+//  params_applyHardware() — called by params.h on every write.
+//  Keeps hardware in step with the parameter store. Anything that
+//  is read fresh each loop (gains, limits, deadbands) needs nothing
+//  here; only latched hardware settings do.
+// ============================================================
+void params_applyHardware(bool currentChanged) {
+    static bool ready = false;          // ignore calls before begin()
+    if (!ready) { ready = true; return; }
+    imu.setFilterCutoff(P.imuCutoff);
+    steppers.applyTuning();                 // SGTHRS / TCOOLTHRS / CoolStep
+    if (currentChanged) steppers.setCurrent((uint16_t)P.motorMa);
+}
 
 // ============================================================
 //  HELPERS
@@ -142,6 +177,10 @@ void requestEnable() {
 
 void requestDisable(const char* why) {
     motorsRequested = false;
+    // Push the state back into the pad module. Without this, an AUTOMATIC
+    // disable (FELL / RATE SPIKE) left the pad still believing it was armed,
+    // so the next START press produced no edge and appeared to do nothing.
+    btgamepad_syncArmed(false);
     if (state == STATE_BALANCING) {
         steppers.setSpeed(0);
         steppers.disable();
@@ -154,6 +193,10 @@ void requestDisable(const char* why) {
 //  SERIAL PARSER — Radxa 'V' lines + tuner commands, one reader
 // ============================================================
 void handleLine(char* line) {
+    // P-commands (parameter get/set/save) are handled first.
+    if (at_handleLine(line)) return;      // AT,<routine>
+    if (params_handleLine(line)) return;
+
     if (line[0] == 'V' && line[1] == ',') {
         float f = 0, s = 0; int en = 0;
         if (sscanf(line + 2, "%f,%f,%d", &f, &s, &en) == 3) {
@@ -161,7 +204,10 @@ void handleLine(char* line) {
             radxaSteer = clampf(s, -1.0f, 1.0f);
             radxaEn    = en ? 1 : 0;
             radxaLastRx = millis();
-            if (radxaEn && !radxaEnPrev)  requestEnable();
+            // A remote link may always STOP the robot; it may never START it.
+            // Arming stays a deliberate local action (pad START, or 'E' on
+            // USB serial). Without this, the Cubie's very first V-line --
+            // including the vision guard's own "V,0,0,1" -- armed the robot.
             if (!radxaEn && radxaEnPrev)  requestDisable("Radxa disable");
             radxaEnPrev = radxaEn;
         }
@@ -187,7 +233,7 @@ void handleLine(char* line) {
             Serial.println("[HOLD] CLIMB");
         } else {
             climbMode = false;
-            zInt = clampf(zInt, -Z_INT_LIM, Z_INT_LIM); // re-shrink climb integral
+            zInt = clampf(zInt, -P.zIntLim, P.zIntLim); // re-shrink climb integral
             stiffHold = hv != 0;
             if (stiffHold) { xRef = posM; zInt = 0.0f; }   // hold RIGHT HERE
             Serial.printf("[HOLD] %s\n", stiffHold ? "STIFF" : "normal");
@@ -279,8 +325,15 @@ void runController(float dt) {
     float th = pitchF * DEG_TO_RAD;      // rad
     float om = rateF  * DEG_TO_RAD;      // rad/s
 
-    float vIn = cmdFwd * MAX_DRIVE_VEL_MS;
-    bool driving = fabsf(vIn) > (DRIVE_DEADBAND * MAX_DRIVE_VEL_MS);
+    // Terrain adaptation: on broken ground (or mid-drop) a stiff angle/rate
+    // pair fights every bump. Soften BOTH, bounded by TERRSOFT, and never
+    // touch the slow position/velocity terms -- those still hold the spot.
+    const float sf = terrain_soften();
+    const float k3t = k3 * sf, k4t = k4 * sf;
+    const bool  airborne = terrain_airborne() && P.airFreeze > 0.5f;
+
+    float vIn = cmdFwd * P.maxDriveV;
+    bool driving = fabsf(vIn) > (P.driveDb * P.maxDriveV);
 
     if (climbMode) {
         // CLIMB: the stick ramps the position REFERENCE slowly and the
@@ -289,72 +342,72 @@ void runController(float dt) {
         // holding torque, so tracking is zero-error uphill — unlike the
         // normal driving branch, which zeroes zInt and picks up a large
         // steady-state velocity error on an incline.
-        xRef += (cmdFwd * CLIMB_VEL_MS) * dt;
+        xRef += (cmdFwd * P.climbVel) * dt;
         // Rubber band: the reference may never run further than the error
         // clamp ahead of the robot — releasing the stick (or stalling on
-        // the slope) stops the target within EX_CLAMP_M, no runaway.
-        xRef = clampf(xRef, posM - EX_CLAMP_M, posM + EX_CLAMP_M);
+        // the slope) stops the target within P.exClamp, no runaway.
+        xRef = clampf(xRef, posM - P.exClamp, posM + P.exClamp);
         float ex = posM - xRef;                       // already in-clamp
-        zInt = clampf(zInt + ex * dt, -CLIMB_Z_INT_LIM, CLIMB_Z_INT_LIM);
-        uOut = -(LQR_C1 * ex + LQR_C2 * velF + LQR_C3 * th + LQR_C4 * om + LQR_C5 * zInt);
+        if (!airborne) zInt = clampf(zInt + ex * dt, -P.climbZLim, P.climbZLim);
+        uOut = -(P.c1 * ex + P.c2 * velF + (P.c3*sf) * th + (P.c4*sf) * om + P.c5 * zInt);
     } else if (driving) {
         // Velocity-tracking mode: K2..K4 subset (poles verified stable).
         // Hold point is dragged along with a braking lookahead so the
         // robot parks smoothly where it stops.
-        xRef = posM + velF * BRAKE_LOOKAHEAD_S;
+        xRef = posM + velF * P.brakeLook;
         zInt = 0.0f;
-        uOut = -(k2 * (velF - vIn) + k3 * th + k4 * om);
+        uOut = -(k2 * (velF - vIn) + k3t * th + k4t * om);
     } else {
         // Position hold / go-to: full LQI vector. Position error is
         // clamped so a big displacement asks for a gentle walk back,
         // never a sprint that eats the balance headroom.
-        float ex = clampf(posM - xRef, -EX_CLAMP_M, EX_CLAMP_M);
-        zInt = clampf(zInt + ex * dt, -Z_INT_LIM, Z_INT_LIM);
+        float ex = clampf(posM - xRef, -P.exClamp, P.exClamp);
+        if (!airborne) zInt = clampf(zInt + ex * dt, -P.zIntLim, P.zIntLim);
         if (stiffHold) {
-            uOut = -(LQR_S1 * ex + LQR_S2 * velF + LQR_S3 * th + LQR_S4 * om + LQR_S5 * zInt);
+            uOut = -(P.s1 * ex + P.s2 * velF + P.s3 * th + P.s4 * om + P.s5 * zInt);
         } else {
-            uOut = -(k1 * ex + k2 * velF + k3 * th + k4 * om + k5 * zInt);
+            uOut = -(k1 * ex + k2 * velF + k3t * th + k4t * om + k5 * zInt);
         }
     }
 
-    satA = (fabsf(uOut) > A_MAX_MS2) ? 1 : 0;
-    uOut = clampf(uOut, -A_MAX_MS2, A_MAX_MS2);
+    satA = (fabsf(uOut) > P.aMax) ? 1 : 0;
+    uOut = clampf(uOut, -P.aMax, P.aMax);
     float vNext = vCmd + uOut * dt;
-    satV = (fabsf(vNext) > V_MAX_MS) ? 1 : 0;
-    vCmd = clampf(vNext, -V_MAX_MS, V_MAX_MS);
+    satV = (fabsf(vNext) > P.vMax) ? 1 : 0;
+    vCmd = clampf(vNext, -P.vMax, P.vMax);
 
     // BALANCE > POSITION: if the speed command saturates, the tilt
     // terms lose their actuator and the robot falls. Give up ground:
     // bleed the hold point (and integral) toward the robot until
     // authority returns. It parks a little off-spot instead of falling.
-    if (fabsf(vCmd) > 0.90f * V_MAX_MS) {
-        xRef += (posM - xRef) * clampf(VSAT_BLEED * dt, 0.0f, 1.0f);
+    if (fabsf(vCmd) > 0.90f * P.vMax) {
+        xRef += (posM - xRef) * clampf(P.vsatBleed * dt, 0.0f, 1.0f);
         zInt -= zInt * clampf(2.0f * dt, 0.0f, 1.0f);
     }
 
-    float baseSteps = vCmd * STEPS_PER_M;
+    float baseSteps = vCmd * P.stepsPerM;
 
     // ---- yaw: commanded turn or encoder-differential heading hold ----
-    float steerIn = climbMode ? cmdSteer * CLIMB_STEER_SCALE : cmdSteer;
-    if (fabsf(steerIn) > STEER_DEADBAND) {
-        float target = steerIn * MAX_STEER_STEPS;
-        float slew = STEER_SLEW * dt;
+    float steerIn = climbMode ? cmdSteer * P.climbStr : cmdSteer;
+    if (fabsf(steerIn) > P.steerDb) {
+        float target = steerIn * P.maxSteerSt;
+        float slew = P.steerSlew * dt;
         steerSteps += clampf(target - steerSteps, -slew, slew);
         diffTarget = encDiff;                       // re-latch heading
     } else {
         // Sustained "look": yaw offset in encoder-diff counts.
-        float lookCounts = lookCmd * (LOOK_MAX_DEG * DEG_TO_RAD) * TRACK_WIDTH_M * COUNTS_PER_M;
+        float lookCounts = lookCmd * (P.lookMaxDeg * DEG_TO_RAD) * P.trackW * P.countsPerM;
         float dErr = (diffTarget + lookCounts) - encDiff;
         // Big error = wheel slip, not rotation: accept the new heading
         // instead of unwinding it (that's what caused the 360 spins).
         // Also re-latch during large tilts: recovery footwork is not
         // a heading change worth correcting.
-        if (fabsf(dErr) > YAW_RELATCH_COUNTS || fabsf(pitchF) > YAW_TILT_SUSPEND_DEG) {
+        if (fabsf(dErr) > P.yawRelatch || fabsf(pitchF) > P.yawTiltSus) {
             diffTarget = encDiff - lookCounts;
             dErr = 0.0f;
         }
-        steerSteps = clampf(dErr * YAW_HOLD_KP - diffRateF * YAW_HOLD_KD,
-                            -YAW_HOLD_MAX_STEPS, YAW_HOLD_MAX_STEPS);
+        steerSteps = clampf(dErr * P.yawKp - diffRateF * P.yawKd,
+                            -P.yawMaxSt, P.yawMaxSt);
     }
 
     steppers.setSpeeds((int32_t)(baseSteps - steerSteps),
@@ -374,6 +427,8 @@ void setup() {
     Serial.println("     2PyBot BaseLink — Package B: LQR / LQI");
     Serial.println("==================================================");
 
+    params_begin();
+    joySpeedHigh = (P.bootHigh > 0.5f) ? 1 : 0;     // NVS or compiled defaults, before any consumer
     leds_begin();   // boot swirl plays while sensors settle below
 
     if (!imu.begin()) {
@@ -391,8 +446,8 @@ void setup() {
     btgamepad_begin();
     payload_begin();
 
-    Serial.printf("[MAIN] STEPS_PER_M=%.0f  COUNTS_PER_M=%.0f  Vmax=%.2f m/s  Amax=%.2f m/s^2\n",
-                  STEPS_PER_M, COUNTS_PER_M, V_MAX_MS, A_MAX_MS2);
+    Serial.printf("[MAIN] P.stepsPerM=%.0f  P.countsPerM=%.0f  Vmax=%.2f m/s  Amax=%.2f m/s^2\n",
+                  P.stepsPerM, P.countsPerM, P.vMax, P.aMax);
     Serial.println("[MAIN] Send 'E' (or Radxa V,..,1 / joystick) to arm. '?' for help.\n");
 
     lastLoopUs = micros();
@@ -412,16 +467,19 @@ void loop() {
 
     // ---- 1. sensors ----
     imu.update(dt);
-    pitchF = PITCH_FWD_SIGN * (imu.getPitch() - pitchTrim);
-    rateF  = RATE_FWD_SIGN  *  imu.getPitchRate();
+    pitchF = P.pitchSign * (imu.getPitch() - pitchTrim);
+    // road-condition estimate: |accel| deviation from 1 g + rate spikes
+    terrain_update(sqrtf(imu.getAx()*imu.getAx() + imu.getAy()*imu.getAy() +
+                         imu.getAz()*imu.getAz()), rateF, dt);
+    rateF  = P.rateSign  *  imu.getPitchRate();
 
     encRawL = steppers.getPositionL();
     encRawR = steppers.getPositionR();
-    float posL = ENC_FWD_SIGN * (float)encRawL;
-    float posR = ENC_FWD_SIGN * (float)encRawR;
+    float posL = P.encSign * (float)encRawL;
+    float posR = P.encSign * (float)encRawR;
 
     static float posPrev = 0.0f; static bool posInit = false;
-    posM = 0.5f * (posL + posR) / COUNTS_PER_M;
+    posM = 0.5f * (posL + posR) / P.countsPerM;
     if (!posInit) { posPrev = posM; posInit = true; }
     float vRaw = (posM - posPrev) / dt;
     posPrev = posM;
@@ -451,7 +509,7 @@ void loop() {
                 break;
         case 6: climbMode = !climbMode;
                 if (climbMode) { stiffHold = false; stopGesture(); xRef = posM; }
-                else           { zInt = clampf(zInt, -Z_INT_LIM, Z_INT_LIM); }
+                else           { zInt = clampf(zInt, -P.zIntLim, P.zIntLim); }
                 Serial.printf("[HOLD] %s (pad)\n", climbMode ? "CLIMB" : "climb off");
                 break;
         default: break;
@@ -490,27 +548,29 @@ void loop() {
     }
 
     // Gamepad enable edge (works even when Radxa has drive authority)
-    uint8_t jEn = joyEnable;
-    if (jEn && !joyEnPrev)  requestEnable();
-    if (!jEn && joyEnPrev)  requestDisable("joystick disable");
-    joyEnPrev = jEn;
+    // Enable/disable on real button PRESSES, not on level transitions.
+    // joyEnable boots at 0, so the old "falling edge" test could never fire
+    // before START had been pressed once -- SELECT was a no-op from boot.
+    int8_t enEv = btgamepad_takeEnableEvent();
+    if (enEv > 0) requestEnable();
+    if (enEv < 0) requestDisable("joystick e-stop");
 
     // Drive-authority arbitration: Radxa fresh > joystick fresh > zero
-    bool radxaFresh = (millis() - radxaLastRx) < RADXA_TIMEOUT_MS && radxaLastRx != 0;
-    bool joyFresh   = (millis() - lastJoyPacketMs) < JOY_TIMEOUT_MS_CFG && lastJoyPacketMs != 0;
+    bool radxaFresh = (millis() - radxaLastRx) < P.radxaTmo && radxaLastRx != 0;
+    bool joyFresh   = (millis() - lastJoyPacketMs) < P.joyTmo && lastJoyPacketMs != 0;
     if (radxaFresh) {
         cmdFwd = radxaFwd;  cmdSteer = radxaSteer;
     } else if (joyFresh) {
         // Dual speed mode (LB = LOW, RB = HIGH): scales the pad's authority
         // INSIDE the existing caps. Full stick in LOW mode commands
-        // SPEED_LO_DRIVE_SCALE * MAX_DRIVE_VEL_MS and
-        // SPEED_LO_STEER_SCALE * MAX_STEER_STEPS. Radxa override (above)
+        // P.spdLoDrv * P.maxDriveV and
+        // P.spdLoStr * P.maxSteerSt. Radxa override (above)
         // and gesture keyframes (below) stay full-scale on purpose, and
-        // the balancer's own limits (V_MAX_MS / A_MAX_MS2) never shrink.
-        float sD = joySpeedHigh ? 1.0f : SPEED_LO_DRIVE_SCALE;
-        float sS = joySpeedHigh ? 1.0f : SPEED_LO_STEER_SCALE;
-        cmdFwd   = clampf(joyForward * JOY_FWD_SCALE,  -1.0f, 1.0f) * sD;
-        cmdSteer = clampf(joySteering * JOY_STEER_SCALE, -1.0f, 1.0f) * sS;
+        // the balancer's own limits (P.vMax / P.aMax) never shrink.
+        float sD = joySpeedHigh ? 1.0f : P.spdLoDrv;
+        float sS = joySpeedHigh ? 1.0f : P.spdLoStr;
+        cmdFwd   = clampf(joyForward * P.joyFwdSc,  -1.0f, 1.0f) * sD;
+        cmdSteer = clampf(joySteering * P.joyStrSc, -1.0f, 1.0f) * sS;
     } else {
         cmdFwd = 0.0f; cmdSteer = 0.0f;
     }
@@ -530,7 +590,7 @@ void loop() {
 
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {
-        if (motorsRequested && fabsf(pitchF) < ARM_ANGLE_DEG) {
+        if (motorsRequested && fabsf(pitchF) < P.armAngle) {
             resetController();
             steppers.enable();
             state = STATE_BALANCING;
@@ -538,13 +598,15 @@ void loop() {
             Serial.println("[MAIN] -> BALANCING");
         }
     } else { // BALANCING
-        if (fabsf(pitchF) > MAX_TILT_ANGLE || fabsf(rateF) > MAX_PITCH_RATE_SAFETY) {
+        if (fabsf(pitchF) > P.maxTilt || fabsf(rateF) > P.maxRate) {
             leds_event(LED_EV_FALL);
-            requestDisable(fabsf(pitchF) > MAX_TILT_ANGLE ? "FELL" : "RATE SPIKE");
+            requestDisable(fabsf(pitchF) > P.maxTilt ? "FELL" : "RATE SPIKE");
         } else {
             runController(dt);
         }
     }
+
+    at_update(dt);          // auto-tune state machine (no-op when idle)
 
     // ---- 3b. expression ring (rate-limited internally, non-blocking) ----
     {
@@ -578,11 +640,14 @@ void loop() {
      if (DEBUG_STREAM && nowMs - lastDbgMs >= DEBUG_PERIOD_MS) {
         lastDbgMs = nowMs;
         // D,ms,pF,w,u,v,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,state,fwd,str
-        Serial.printf("D,%lu,%.2f,%.1f,%.2f,%.3f,%.3f,%.0f,%.0f,%u,%u,%lu,%u,%u,%.2f,%.2f\n",
+        Serial.printf("D,%lu,%.2f,%.1f,%.2f,%.3f,%.3f,%.0f,%.0f,%u,%u,%lu,%u,%u,%.2f,%.2f,"
+                      "%.3f,%.3f,%.2f,%u,%lu\n",
                       (unsigned long)nowMs, pitchF, rateF, uOut, velF, posM - xRef,
-                      vCmd * STEPS_PER_M, steerSteps, satV, satA,
+                      vCmd * P.stepsPerM, steerSteps, satV, satA,
                       (unsigned long)loopMaxUs, (unsigned)joySpeedHigh,
-                      (unsigned)(state == STATE_BALANCING), cmdFwd, cmdSteer);
+                      (unsigned)(state == STATE_BALANCING), cmdFwd, cmdSteer,
+                      TERR.accelMag, TERR.rough, TERR.soften,
+                      (unsigned)TERR.state, (unsigned long)TERR.drops);
         loopMaxUs = 0;
     }
 }

@@ -49,7 +49,7 @@ static inline void addF(int i, float r, float g, float b) {
 static inline float angToLed(float deg) {
     float per = 360.0f / LED_RING_COUNT;
     float ofs = deg / per;
-    return LED_FRONT_INDEX + (LED_DIR_CW ? ofs : -ofs);
+    return P.ledFront + (LED_DIR_CW ? ofs : -ofs);
 }
 // gaussian-ish arc centered on 'centerDeg', half-width in LEDs
 static void arc(float centerDeg, float halfLeds, float r, float g, float b) {
@@ -67,7 +67,7 @@ static void fillAll(float r, float g, float b) {
     for (int i = 0; i < LED_RING_COUNT; i++) addF(i, r, g, b);
 }
 static void showF() {
-    float cap = LED_MAX_BRIGHT;
+    float cap = P.ledBright;
     for (int i = 0; i < LED_RING_COUNT; i++) {
         ring.SetPixelColor(i, RgbColor(
             (uint8_t)fminf(fr[i] * cap, cap),
@@ -110,7 +110,7 @@ void leds_event(uint8_t ev) { eventActive = ev; eventT0 = millis(); }
 
 void leds_update(const LedInputs& in) {
     uint32_t now = millis();
-    if (now - lastFrameMs < (1000 / LED_FPS)) return;
+    if (now - lastFrameMs < (uint32_t)(1000.0f / (P.ledFps < 1 ? 1 : P.ledFps))) return;
     lastFrameMs = now;
     float t = now / 1000.0f;
     clearF();
@@ -168,7 +168,7 @@ void leds_update(const LedInputs& in) {
         showF(); return;
     }
 
-    bool driving = fabsf(in.fwd) > DRIVE_DEADBAND || fabsf(in.steer) > STEER_DEADBAND;
+    bool driving = fabsf(in.fwd) > P.driveDb || fabsf(in.steer) > P.steerDb;
 
     // ---------- 3. vision brake (Cubie override while rolling) ----------
     if (in.radxaFresh && in.balancing && !driving && fabsf(in.velF) > 0.10f) {
@@ -195,7 +195,7 @@ void leds_update(const LedInputs& in) {
 
     // ---------- 4. shy (pushed off the hold point) ----------
     if (in.balancing && !driving && fabsf(in.ex) > 0.045f) {
-        float howFar = fminf(fabsf(in.ex) / EX_CLAMP_M, 1.0f);
+        float howFar = fminf(fabsf(in.ex) / P.exClamp, 1.0f);
         float blush = 0.35f + 0.65f * (0.5f + 0.5f * sinf(t * 9.0f));
         float wiggle = sinf(t * 5.0f) * 25.0f;                 // averted "eyes"
         arc( 90.0f + wiggle, 2.2f, blush * howFar, blush * 0.18f * howFar, blush * 0.28f * howFar);
@@ -210,7 +210,7 @@ void leds_update(const LedInputs& in) {
         float mag = fminf(sqrtf(in.fwd * in.fwd + in.steer * in.steer), 1.0f);
         float headDeg = atan2f(in.steer, in.fwd) * 180.0f / PI;  // 0 front, +90 right
         float width = 1.6f + 3.0f * mag;
-        bool reversing = in.fwd < -DRIVE_DEADBAND;
+        bool reversing = in.fwd < -P.driveDb;
         float bri = 0.25f + 0.75f * mag;
         if (reversing) arc(headDeg, width, bri, bri * 0.25f, 0.0f);        // amber tail
         else           arc(headDeg, width, bri * 0.15f, bri * 0.75f, bri); // cyan-white beam

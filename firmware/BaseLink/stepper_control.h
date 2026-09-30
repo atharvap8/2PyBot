@@ -24,6 +24,7 @@
 #include <TMCStepper.h>
 #include "driver/pcnt.h"
 #include "config.h"
+#include "params.h"
 
 class StepperControl {
 public:
@@ -65,6 +66,9 @@ public:
 
     // Updates TMC2226 RMS current via UART without a reboot.
     void setCurrent(uint16_t mA);
+
+    // Re-push StallGuard/CoolStep settings from the parameter store.
+    void applyTuning();
 
 #if USE_DIAG_PINS
     // Hardware stall flags (DIAG pin edge counters). Info only —
