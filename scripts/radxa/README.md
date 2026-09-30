@@ -52,6 +52,8 @@ This uses the console service templates with the checkout path and a dedicated P
 
 State is updated only after commands and service health checks succeed. If video was running before a relevant update, its recovery is also checked. ESP32 serial connection is not required for deployment health.
 
+The monitor runs installation commands as root but reads Git as the checkout owner. This supports the board's Git 2.30 without global ownership exceptions. The console service disables bytecode writes in the source checkout.
+
 ## Inspect or retry
 
 ```bash

@@ -10,6 +10,7 @@ WorkingDirectory=__DIR__
 Environment=BOT_SERIAL=/dev/ttyUSB0
 Environment=BOT_PORT=8080
 Environment=BOT_CAM=/dev/video0
+Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStartPre=/bin/sleep 6
 ExecStart=/usr/bin/python3 -m console.server
 Restart=always

@@ -77,10 +77,17 @@ class Deployment:
         self.environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 
     def git(self, *arguments, check=True):
-        return subprocess.run(
-            ["git", "-c", "safe.directory=" + str(self.repo), *arguments],
-            cwd=self.repo, capture_output=True, text=True, check=check,
+        command = ["git", "-c", "safe.directory=" + str(self.repo), *arguments]
+        # Debian's older Git ignores command-line safe.directory exceptions.
+        # Reading the checkout as its owner also keeps Git configuration user-scoped.
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            command = ["runuser", "-u", self.user, "--", *command]
+        result = subprocess.run(
+            command, cwd=self.repo, capture_output=True, text=True, check=False,
         )
+        if check and result.returncode:
+            raise RuntimeError("Git failed: " + (result.stderr.strip() or str(result.returncode)))
+        return result
 
     def run(self, command, user=False, cwd=None):
         if user:

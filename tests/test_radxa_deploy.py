@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "scripts/radxa/deploy.py"
@@ -166,6 +167,22 @@ class DeploymentTests(unittest.TestCase):
         backup = instance.state_dir / "backups" / instance.commit / "etc/2pybot/mediamtx.yml"
         self.assertEqual(backup.read_bytes(), b"original")
         self.assertEqual(target.read_bytes(), b"second replacement")
+
+    def test_root_monitor_reads_git_as_checkout_owner(self):
+        instance = deploy.Deployment(self.temporary.name, "radxa", Path(self.temporary.name) / "state", "http://localhost")
+        completed = subprocess.CompletedProcess([], 0, "commit\n", "")
+        with patch.object(deploy.os, "geteuid", return_value=0, create=True), patch.object(deploy.subprocess, "run", return_value=completed) as run:
+            self.assertEqual(instance.git("rev-parse", "HEAD").stdout, "commit\n")
+        self.assertEqual(run.call_args.args[0][:4], ["runuser", "-u", "radxa", "--"])
+        self.assertIn("git", run.call_args.args[0])
+
+    def test_git_errors_include_the_original_diagnostic(self):
+        instance = deploy.Deployment(self.temporary.name, "radxa", Path(self.temporary.name) / "state", "http://localhost")
+        completed = subprocess.CompletedProcess([], 128, "", "fatal: detected dubious ownership\n")
+        with patch.object(deploy.subprocess, "run", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "dubious ownership"):
+                instance.git("rev-parse", "HEAD")
+            self.assertEqual(instance.git("cat-file", "-e", "missing", check=False).returncode, 128)
 
 
 if __name__ == "__main__":
