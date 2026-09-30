@@ -1,0 +1,4 @@
+# Hardware encoder access for the console's unprivileged video-group user.
+KERNEL=="cedar_dev", GROUP="video", MODE="0660"
+KERNEL=="cedar_dev_ve2", GROUP="video", MODE="0660"
+SUBSYSTEM=="dma_heap", KERNEL=="system", GROUP="video", MODE="0660"

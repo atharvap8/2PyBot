@@ -191,7 +191,7 @@ void StepperControl::setupDriver(TMC2209Stepper& drv, const char* label, uint8_t
     drv.I_scale_analog(false);        // current from UART, not Vref pot
     drv.toff(5);
     drv.blank_time(24);
-    drv.rms_current(MOTOR_CURRENT_MA);
+    drv.rms_current((uint16_t)P.motorMa);
     drv.microsteps(MICROSTEPS);
     drv.intpol(true);                 // interpolate 1/8 -> 1/256 internally
     drv.ihold(16);                    // ~half current at true standstill —
@@ -227,7 +227,7 @@ void StepperControl::setupDriver(TMC2209Stepper& drv, const char* label, uint8_t
     if (conn == 0 && ifd == 1) {
         Serial.printf("[STEP] %s TMC2226: OK | %d mA, 1/%d usteps (readback 1/%d), "
                       "%s, SGTHRS=%u, CoolStep %s\n",
-                      label, MOTOR_CURRENT_MA, MICROSTEPS, drv.microsteps(),
+                      label, (int)P.motorMa, MICROSTEPS, drv.microsteps(),
                       DRV_STEALTHCHOP ? "StealthChop" : "SpreadCycle",
                       sgthrs, (COOLSTEP_ENABLE && DRV_STEALTHCHOP) ? "ON" : "off");
     } else {
@@ -326,6 +326,18 @@ void StepperControl::setCurrent(uint16_t mA) {
     _rightDrv.rms_current(mA);
     _leftDrv.rms_current(mA);
     Serial.printf("[STEP] Motor current set to %d mA\n", mA);
+}
+
+// Push the live StallGuard / CoolStep parameters into both drivers. Called
+// from params_applyHardware() whenever one of them is edited, so the GUI can
+// tune stall detection without a reflash.
+void StepperControl::applyTuning() {
+    _leftDrv.SGTHRS((uint8_t)P.sgthrsL);
+    _rightDrv.SGTHRS((uint8_t)P.sgthrsR);
+    _leftDrv.TCOOLTHRS((uint32_t)P.tcoolthrs);
+    _rightDrv.TCOOLTHRS((uint32_t)P.tcoolthrs);
+    _leftDrv.semin((uint8_t)P.csSemin);   _rightDrv.semin((uint8_t)P.csSemin);
+    _leftDrv.semax((uint8_t)P.csSemax);   _rightDrv.semax((uint8_t)P.csSemax);
 }
 
 // ============================================================

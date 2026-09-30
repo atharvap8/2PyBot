@@ -1,0 +1,11 @@
+[Unit]
+Description=Check 2PyBot checkout for a new commit
+
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=10s
+AccuracySec=2s
+Unit=2pybot-deploy.service
+
+[Install]
+WantedBy=timers.target

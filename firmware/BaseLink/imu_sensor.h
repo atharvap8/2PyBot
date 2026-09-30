@@ -22,6 +22,7 @@
 #include <ISM6HG256XSensor.h>
 #include <QMC5883LCompass.h>
 #include "config.h"
+#include "params.h"
 
 class IMUSensor {
 public:
@@ -39,6 +40,9 @@ public:
     // Reads raw sensor data, runs Mahony AHRS, applies the cascaded
     // EMA filter, and updates all output values. Call once per loop.
     void update(float dt);
+
+    // Recompute the EMA coefficient after P.imuCutoff changes.
+    void setFilterCutoff(float hz);
 
     // --- Processed output accessors ---
     float getPitch()     const { return _pitch;      }  // Filtered pitch angle (degrees).

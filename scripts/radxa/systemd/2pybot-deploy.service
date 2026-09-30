@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply committed 2PyBot application changes
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__REPO__
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 "__REPO__/scripts/radxa/deploy.py" --repo "__REPO__" --user __USER__ --state-dir "__STATE_DIR__" --health-url "__HEALTH_URL__"
+TimeoutStartSec=600

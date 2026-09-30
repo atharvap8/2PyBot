@@ -1,0 +1,3 @@
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", SYMLINK+="2pybot"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", SYMLINK+="2pybot"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", SYMLINK+="2pybot"

@@ -85,11 +85,19 @@ bool IMUSensor::begin() {
 
     // Precompute filter alpha from the RC low-pass discretization formula.
     // Done once here to avoid repeated division inside the 200 Hz loop.
-    _filtAlpha = 1.0f - expf(-2.0f * M_PI * IMU_FILTER_CUTOFF_HZ / LOOP_FREQ_HZ);
+    _filtAlpha = 1.0f - expf(-2.0f * M_PI * P.imuCutoff / LOOP_FREQ_HZ);
     Serial.printf("[IMU] Pitch filter: %.1f Hz cutoff, alpha=%.4f\n",
-                  IMU_FILTER_CUTOFF_HZ, _filtAlpha);
+                  P.imuCutoff, _filtAlpha);
 
     return true;
+}
+
+// ============================================================
+//  setFilterCutoff() — called when the GUI changes P.imuCutoff
+// ============================================================
+void IMUSensor::setFilterCutoff(float hz) {
+    if (hz < 1.0f) hz = 1.0f;
+    _filtAlpha = 1.0f - expf(-2.0f * M_PI * hz / LOOP_FREQ_HZ);
 }
 
 // ============================================================
@@ -152,7 +160,7 @@ void IMUSensor::update(float dt) {
     // Crude atan2 tilt estimate — valid only when stationary.
     float aPri = axisValue(accelRaw, PITCH_ACCEL_PRIMARY)   / 1000.0f;
     float aSec = axisValue(accelRaw, PITCH_ACCEL_SECONDARY) / 1000.0f;
-    _accelAngle = atan2f(aPri, aSec) * RAD_TO_DEG * PITCH_ACCEL_SIGN;
+    _accelAngle = atan2f(aPri, aSec) * RAD_TO_DEG * P.accelSign;
 
     // Pitch rate on the configured gyro axis.
     float gyroPitch = axisValue(gyroRaw, PITCH_GYRO_AXIS);
@@ -161,13 +169,13 @@ void IMUSensor::update(float dt) {
         case 'Y': gyroPitch -= _gyroOffY; break;
         case 'Z': gyroPitch -= _gyroOffZ; break;
     }
-    _pitchRate = (gyroPitch / 1000.0f) * PITCH_GYRO_SIGN;
+    _pitchRate = (gyroPitch / 1000.0f) * P.gyroSign;
 
     // Magnetometer reading with hard-iron correction.
     _compass.read();
-    _mx = (_compass.getX() - MAG_OFFSET_X) * MAG_SIGN_X;
-    _my = (_compass.getY() - MAG_OFFSET_Y) * MAG_SIGN_Y;
-    _mz = (_compass.getZ() - MAG_OFFSET_Z) * MAG_SIGN_Z;
+    _mx = (_compass.getX() - P.magOffX) * P.magSignX;
+    _my = (_compass.getY() - P.magOffY) * P.magSignY;
+    _mz = (_compass.getZ() - P.magOffZ) * P.magSignZ;
 
     // ---- Mahony AHRS ----
     float ax = _ax, ay = _ay, az = _az;
@@ -207,16 +215,16 @@ void IMUSensor::update(float dt) {
         // Vibration rejection: if linear acceleration deviates from 1 G by
         // more than 0.2 G, lower Mahony Kp to trust the gyro over the accel.
         float accelMagGs = sqrtf(_ax*_ax + _ay*_ay + _az*_az);
-        float currentKp = MAHONY_KP;
+        float currentKp = P.mahonyKp;
         if (fabsf(accelMagGs - 1.0f) > 0.2f) {
             currentKp = 0.1f;
         }
 
         // Integral correction for long-term gyro drift.
-        if (MAHONY_KI > 0.0f) {
-            eInt_x += MAHONY_KI * halfex * dt;
-            eInt_y += MAHONY_KI * halfey * dt;
-            eInt_z += MAHONY_KI * halfez * dt;
+        if (P.mahonyKi > 0.0f) {
+            eInt_x += P.mahonyKi * halfex * dt;
+            eInt_y += P.mahonyKi * halfey * dt;
+            eInt_z += P.mahonyKi * halfez * dt;
             gx += eInt_x;
             gy += eInt_y;
             gz += eInt_z;
@@ -256,9 +264,9 @@ void IMUSensor::update(float dt) {
 
     // Select which AHRS axis maps to balance pitch per config.h mapping.
     if (PITCH_GYRO_AXIS == 'X' || PITCH_GYRO_AXIS == 'x') {
-        _pitch = roll_ahrs * (PITCH_GYRO_SIGN * PITCH_ACCEL_SIGN > 0 ? 1 : -1);
+        _pitch = roll_ahrs * (P.gyroSign * P.accelSign > 0 ? 1 : -1);
     } else if (PITCH_GYRO_AXIS == 'Y' || PITCH_GYRO_AXIS == 'y') {
-        _pitch = pitch_ahrs * (PITCH_GYRO_SIGN * PITCH_ACCEL_SIGN > 0 ? 1 : -1);
+        _pitch = pitch_ahrs * (P.gyroSign * P.accelSign > 0 ? 1 : -1);
     } else {
         _pitch = _accelAngle;  // Fallback if axis mapping is misconfigured.
     }

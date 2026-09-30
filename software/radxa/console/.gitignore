@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.bak*
+*.swp
+native/2pybot_hwstream
+native/2pybot_hwstream.new
+native/venc_probe
+native/*.h264

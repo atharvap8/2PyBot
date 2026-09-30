@@ -1,80 +1,30 @@
-# System Architecture: Self-Balancing Robot
+# BaseLink Module Map
 
-This document maps out the total physical and software ecosystem of the Self-Balancing Robot, explaining exactly how data flows from sensors down to the wheel movement.
+The full [system architecture](../../docs/BaseLink/System_Architecture.md) describes control flow and timing. This file maps the current sketch modules.
 
-## System Tree Map
+| File | Responsibility |
+| :--- | :--- |
+| `BaseLink.ino` | Boot, 200 Hz loop, two-state balance machine, LQR/LQI, steering, serial parsing, drive arbitration, telemetry |
+| `config.h` | Pin assignments, sensor mapping, PWM/timer settings, compiled parameter defaults |
+| `params.h` | Parameter fields, bounds, keys, groups, metadata, declarations |
+| `params.cpp` | Shared `P` instance, NVS persistence, parameter commands, derived conversions |
+| `autotune.h` | Wobble, trim, radius, and stall-search state machine |
+| `terrain.h` | Roughness filter, airborne/landing states, gain multiplier |
+| `imu_sensor.h` / `imu_sensor.cpp` | ISM6HG256X reads, gyro calibration, six-axis Mahony, filtered pitch, compass yaw |
+| `stepper_control.h` / `stepper_control.cpp` | TMC2226 UART setup, live driver tuning, PCNT encoder reads, 20 kHz STEP/DIR ISR |
+| `bt_gamepad.h` | Bluepad32 pairing, stick shaping/calibration, button events, payload input |
+| `led_ring.h` / `led_ring.cpp` | RMT-driven WS2812 status patterns |
+| `payload.h` | LEDC pan/zoom servo pulses and torch brightness |
+| `PROTOCOL.md` | USB command, parameter, and telemetry reference |
 
-```mermaid
-graph TD
-    UI[Python UI: robot_controller_ui.py] -- Bluetooth Serial --> BT[ESP32 Bluetooth Parser]
-    
-    subgraph ESP32 Firmware core
-        INO[BaseLink.ino]
-        CFG[config.h]
-        
-        subgraph Sensors
-            IMU[imu_sensor.cpp/h]
-            MAH[Mahony Filter 6-DOF]
-            MAG[Magnetometer Tilt-Compensated Yaw]
-            
-            IMU --> MAH
-            IMU --> MAG
-        end
-        
-        subgraph Subsystem Controllers
-            BAL[Balance PID]
-            POS[Position PID]
-            YAW[Yaw Steering PID]
-        end
-        
-        subgraph Stepper Hardware
-            STEP[stepper_control.cpp/h]
-            ISR[Hardware Timer Interrupt]
-        end
-        
-        BT --> INO
-        CFG -.-> INO
-        CFG -.-> IMU
-        CFG -.-> STEP
-        
-        MAH -- Pitch Angle --> BAL
-        MAG -- Heading --> YAW
-        
-        POS -- Angle Target Offset --> BAL
-        BAL -- Base Speed --> INO
-        YAW -- Speed Differential --> INO
-        
-        INO -- Left/Right Speeds --> STEP
-        STEP --> ISR
-    end
-    
-    ISR -- Step/Dir Pulses --> TMC[TMC2208 Motor Drivers]
-    TMC --> WH[Nema Stepper Wheels]
-```
+## Interfaces
 
-## Directory & File Overview
+- `IMUSensor` supplies pitch, gyro pitch rate, acceleration, and yaw.
+- `StepperControl` supplies encoder counts and accepts signed left/right step rates.
+- `P` supplies the live settings used by control and peripheral code.
+- `btgamepad_takeEnableEvent()` supplies START/SELECT events independently of drive priority.
+- `terrain_soften()` supplies the pitch-gain multiplier; `terrain_airborne()` gates integral accumulation.
+- USB `V` messages supply normalized forward and steering requests. They do not arm the robot.
+- [The Radxa console](../../software/radxa/console/README.md) reads parameter/telemetry records and exposes tuning, camera, and stream APIs to browser and Android clients. Its command whitelist does not include `V` or `E`.
 
-### `BaseLink.ino`
-- **Purpose:** The "Main Logic Loop". It dictates the master state machine (`STATE_IDLE`, `STATE_BALANCING`), calculates timestamps (`dt`), and pieces together the cascading PID outputs.
-- **Controls:** Links the target position offset to the balance PID, and splits the final calculated motor speeds between the Left and Right wheels. Parses Bluetooth command payloads.
-
-### `config.h`
-- **Purpose:** The global dictionary. Every pin assignment, math ceiling limits (`MAX_SPEED_TILT`), initial PID parameters, and sensor mounting axis flags are isolated here so you don't have to hunt them down.
-
-### `pid_controller.cpp / pid_controller.h`
-- **Purpose:** Mathematical control laws. It takes `calculate Output = (Kp * Error) + (Ki * IntegralError) + (Kd * DerivativeError)`. 
-- **Features:** It includes limits that cap maximum motor actions to prevent the robot from violently breaking hardware limits, and adaptive gains that boost `Kp` automatically if a crash goes beyond the `adaptiveThreshold`.
-
-### `imu_sensor.cpp / imu_sensor.h`
-- **Purpose:** Spatial awareness. It constantly reads the raw I2C Gyroscope, Accelerometer, and Magnetometer.
-- **Features:** Runs a strict Mathematical 6-DOF integration that determines Pitch and Roll immune to magnetic interference, and combines the Magnetometer *afterward* to figure out North/South Yaw rotation. Also features an internal "vibration rejection" algorithm that ignores the Accelerometer during physical impacts.
-
-### `stepper_control.cpp / stepper_control.h`
-- **Purpose:** Wheel pulsing. Replaces `delay()` based movements entirely. 
-- **Features:** It creates a rigid 20,000 Hz hardware timer that ticks inside a background Interrupt (ISR). It decides mathematically precisely when each DIR/STEP pin should flip High/Low thousands of times per second, guaranteeing flawlessly smooth wheel acceleration regardless of what the main `.ino` file is doing.
-
-### `serial_tuner.h`
-- **Purpose:** A legacy parser for handling direct USB serial inputs character by character. Largely replaced by the modern Python UI, but remains active as a reliable backup debugging suite.
-
-### `robot_controller_ui.py`
-- **Purpose:** The control center. It generates a Python-based physical window to decode the telemetric packets that the ESP32 broadcasts. It graphs the pitch live on a visualization canvas and allows mapping of the configuration sliders to immediately transmit parameter updates directly into the running ESP32 RAM over Bluetooth.
+There are no active `pid_controller`, `serial_tuner`, `espnow_comm`, or Bluetooth serial modules in this sketch. The legacy desktop GUI and PID browser tuner need protocol changes to support current BaseLink.

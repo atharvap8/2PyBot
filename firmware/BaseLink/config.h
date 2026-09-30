@@ -375,6 +375,18 @@
 #define PAD_STEER_SIGN   (-1.0f)  // flip if turning is mirrored
 #define PAD_DEADZONE      0.08f
 
+// ============================================================
+//  STICK SHAPING — one stick drives AND steers, so the shaping
+//  must protect the cardinal directions. (Defaults; live-tunable
+//  at runtime via params.h / the GUI.)
+// ============================================================
+#define STICK_DEADZONE     0.10f   // RADIAL (circular), with rescale
+#define SNAP_IN_DEG        10.0f   // within this of straight: zero steer
+#define SNAP_OUT_DEG       26.0f   // beyond this: full steer, smooth between
+#define EXPO_STEER         0.65f   // 0 = linear, 1 = fully cubic
+#define EXPO_DRIVE         0.35f   // gentler on drive
+#define STICK_AUTOCAL      1       // zero the stick centre at pad connect
+
 // ---- Dual speed mode: LB = LOW, RB = HIGH (pad sticks only) ----
 // Scales the pad's drive/steer authority INSIDE the existing caps:
 // MAX_DRIVE_VEL_MS and MAX_STEER_STEPS stay the hard ceilings, and the
