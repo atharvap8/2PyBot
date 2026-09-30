@@ -1,26 +1,3 @@
-# ============================================================
-#  Release — Firmware Build & GitHub Release Publisher
-# ============================================================
-#  Triggered by a version tag (e.g. v1.0.0) pushed to main.
-#  Compiles both ESP32 sketches, then creates a GitHub Release
-#  and attaches all flashable assets with full release notes.
-#
-#  Board cores (they differ on purpose):
-#    BaseLink   builds on esp32-bluepad32:esp32 (Bluepad32
-#               package, core 2.0.x base) for <Bluepad32.h>.
-#    Controller builds on the stock esp32:esp32 core (3.x).
-#               Its ESP-NOW send callback uses wifi_tx_info_t,
-#               which only exists on core 3.x.
-#
-#  Partition schemes:
-#    BaseLink   — huge_app (3 MB) for large firmware footprint
-#    Controller — default  (1.25 MB) sufficient for transmitter
-#
-#  To cut a release:
-#    git tag v1.0.0 -m "Initial release"
-#    git push origin v1.0.0
-# ============================================================
-
 name: Release
 
 on:
@@ -29,21 +6,20 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write   # required to create GitHub Releases
+  contents: write
 
 jobs:
   build-and-release:
-    name: Build Firmware & Publish Release
+    name: Build Firmware and Publish Tagged Outputs
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout tagged source
         uses: actions/checkout@v4
 
       - name: Install arduino-cli
         uses: arduino/setup-arduino-cli@v2
 
-      - name: Configure ESP32 board cores (stock + Bluepad32)
+      - name: Install ESP32 board cores
         run: |
           arduino-cli config init
           arduino-cli config add board_manager.additional_urls \
@@ -55,13 +31,12 @@ jobs:
 
       - name: Install BaseLink libraries
         run: |
-          arduino-cli lib install "TMCStepper"
-          arduino-cli lib install "STM32duino ISM6HG256X"
-          arduino-cli lib install "QMC5883LCompass"
-          arduino-cli lib install "NeoPixelBus by Makuna"
+          arduino-cli lib install "TMCStepper@0.7.3"
+          arduino-cli lib install "STM32duino ISM6HG256X@2.1.0"
+          arduino-cli lib install "QMC5883LCompass@1.2.3"
+          arduino-cli lib install "NeoPixelBus by Makuna@2.8.4"
 
-      # ---- Compile BaseLink (Robot Receiver) ----
-      - name: Compile BaseLink sketch
+      - name: Build BaseLink
         run: |
           arduino-cli compile \
             --fqbn esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app \
@@ -69,8 +44,7 @@ jobs:
             --output-dir build/BaseLink \
             firmware/BaseLink/BaseLink.ino
 
-      # ---- Compile Controller (Joystick Transmitter) ----
-      - name: Compile Controller sketch
+      - name: Build legacy Controller
         run: |
           arduino-cli compile \
             --fqbn esp32:esp32:esp32 \
@@ -78,196 +52,89 @@ jobs:
             --output-dir build/Controller \
             firmware/Controller/Controller.ino
 
-      # ---- Stage release assets with descriptive names ----
-      - name: Stage release assets
+      - name: Name outputs with the build tag
+        env:
+          BUILD_TAG: ${{ github.ref_name }}
         run: |
           mkdir -p release
-          cp build/BaseLink/BaseLink.ino.bin              release/BaseLink-${{ github.ref_name }}.bin
-          cp build/BaseLink/BaseLink.ino.bootloader.bin   release/BaseLink-${{ github.ref_name }}.bootloader.bin
-          cp build/BaseLink/BaseLink.ino.partitions.bin   release/BaseLink-${{ github.ref_name }}.partitions.bin
-          cp build/Controller/Controller.ino.bin          release/Controller-${{ github.ref_name }}.bin
+          cp build/BaseLink/BaseLink.ino.bin "release/BaseLink-${BUILD_TAG}.bin"
+          cp build/BaseLink/BaseLink.ino.bootloader.bin "release/BaseLink-${BUILD_TAG}.bootloader.bin"
+          cp build/BaseLink/BaseLink.ino.partitions.bin "release/BaseLink-${BUILD_TAG}.partitions.bin"
+          cp build/BaseLink/BaseLink.ino.elf "release/BaseLink-${BUILD_TAG}.elf"
+          cp build/Controller/Controller.ino.bin "release/Controller-${BUILD_TAG}.bin"
+          arduino-cli core list --format json > "release/core-versions-${BUILD_TAG}.json"
+          arduino-cli lib list --format json > "release/library-versions-${BUILD_TAG}.json"
 
-      # ---- Create GitHub Release with full release notes ----
-      - name: Create GitHub Release
+      - name: Record tag, commit, and checksums
+        env:
+          BUILD_TAG: ${{ github.ref_name }}
+          BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          directory = Path('release')
+          tag = os.environ['BUILD_TAG']
+          manifest = {
+              'tag': tag,
+              'commit': os.environ['BUILD_COMMIT'],
+              'baselink_fqbn': 'esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app',
+              'controller_fqbn': 'esp32:esp32:esp32',
+          }
+          (directory / f'build-info-{tag}.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          checksums = ''.join(
+              f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n'
+              for path in sorted(directory.iterdir())
+              if path.is_file() and not path.name.startswith('SHA256SUMS-')
+          )
+          (directory / f'SHA256SUMS-{tag}.txt').write_text(checksums)
+          PY
+
+      - name: Upload tagged workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2PyBot-firmware-${{ github.ref_name }}
+          path: release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           name: "2PyBot ${{ github.ref_name }}"
-          body: |
-            # 2PyBot - Firmware Release ${{ github.ref_name }}
-
-            > Self-balancing wheeled robot platform built on ESP32, TMC2226 stepper drivers,
-            > and a 6-DOF Mahony AHRS fusion filter. LQR/LQI balance control, driven directly
-            > by a Bluetooth gamepad (Bluepad32), with a WS2812 expression ring (NeoPixelBus).
-
-            ---
-
-            ## Release Assets
-
-            | File | Board | Description |
-            | :--- | :--- | :--- |
-            | `BaseLink-${{ github.ref_name }}.bin` | Robot (BaseLink) | Main application binary |
-            | `BaseLink-${{ github.ref_name }}.bootloader.bin` | Robot (BaseLink) | ESP32 bootloader |
-            | `BaseLink-${{ github.ref_name }}.partitions.bin` | Robot (BaseLink) | Partition table (huge_app, 3 MB) |
-            | `Controller-${{ github.ref_name }}.bin` | Transmitter (Controller) | Joystick transmitter binary |
-
-            ---
-
-            ## Flashing Instructions
-
-            ### Prerequisites
-
-            Install `esptool.py` via pip:
-
-            ```bash
-            pip install esptool
-            ```
-
-            Alternatively, use the **ESP32 Flash Download Tool** (Windows GUI) available from Espressif.
-
-            ---
-
-            ### BaseLink: Robot Receiver
-
-            The BaseLink firmware is compiled with the **`huge_app` partition scheme** (3 MB application
-            partition) to fit the combined footprint of the Bluepad32 Bluetooth stack, Mahony AHRS,
-            the TMC2226 UART drivers, NeoPixelBus, and the stepper ISR. It is built with the
-            **esp32-bluepad32 board package**; a stock-core build will compile without gamepad support.
-
-            **You must flash three files** — the bootloader, partition table, and application binary —
-            at their correct offsets.
-
-            ```bash
-            esptool.py \
-              --chip esp32 \
-              --port /dev/ttyUSB0 \
-              --baud 921600 \
-              --before default_reset \
-              --after hard_reset \
-              write_flash \
-              0x1000  BaseLink-${{ github.ref_name }}.bootloader.bin \
-              0x8000  BaseLink-${{ github.ref_name }}.partitions.bin \
-              0x10000 BaseLink-${{ github.ref_name }}.bin
-            ```
-
-            > **Windows users:** replace `/dev/ttyUSB0` with your COM port, e.g. `--port COM3`
-
-            **Flash address summary:**
-
-            | Offset | File |
-            | :--- | :--- |
-            | `0x1000` | Bootloader |
-            | `0x8000` | Partition table |
-            | `0x10000` | Application firmware |
-
-            ---
-
-            ### Controller: Joystick Transmitter
-
-            The Controller firmware only requires flashing the single application binary.
-
-            ```bash
-            esptool.py \
-              --chip esp32 \
-              --port /dev/ttyUSB0 \
-              --baud 921600 \
-              --before default_reset \
-              --after hard_reset \
-              write_flash \
-              0x10000 Controller-${{ github.ref_name }}.bin
-            ```
-
-            ---
-
-            ### Arduino IDE Alternative
-
-            If you prefer not to use `esptool.py`:
-
-            1. In **File → Preferences**, add both board manager URLs: the official ESP32 package and
-               `https://raw.githubusercontent.com/ricardoquesada/esp32-arduino-lib-builder/master/bluepad32_files/package_esp32_bluepad32_index.json`.
-               Then install **esp32_bluepad32** from the Boards Manager.
-            2. Open `firmware/BaseLink/BaseLink.ino` in **Arduino IDE 2.x**.
-            3. Under **Tools → Board**, select `ESP32 Dev Module` from the **ESP32 + Bluepad32 Arduino** section.
-            4. Under **Tools → Partition Scheme**, select **Huge APP (3MB No OTA/1MB SPIFFS)**.
-            5. Select your COM port and click **Upload**.
-            6. For `firmware/Controller/Controller.ino`, switch back to the stock esp32 board package.
-               The transmitter uses ESP-NOW APIs from core 3.x that the Bluepad32 core does not have.
-               Use the **default** partition scheme.
-
-            ---
-
-            ## First-Time Configuration
-
-            ### 1. Set the Receiver MAC Address
-
-            Before flashing the Controller, update the receiver MAC address in `firmware/Controller/Controller.ino`:
-
-            ```cpp
-            uint8_t receiverMAC[] = {0xEC, 0x62, 0x60, 0x99, 0x97, 0xE0};  // ← replace with your robot's MAC
-            ```
-
-            The robot prints its own MAC address over USB Serial at 115200 baud on boot.
-
-            ### 2. Calibrate the Balance Angle
-
-            After mounting the robot upright, connect via Bluetooth or USB and tune the target angle:
-
-            ```
-            T=-1.469   ← set the equilibrium angle offset (degrees)
-            ```
-
-            Adjust until the robot stands level with zero motor output.
-
-            ### 3. Enable the Motors
-
-            Send `E` over Bluetooth or USB Serial to enable the drive loop. Send `X` to kill immediately.
-
-            ---
-
-            ## Python Dashboard
-
-            ```bash
-            cd gui
-            pip install pyserial customtkinter
-            python robot_controller_ui.py
-            ```
-
-            Pair the robot's Bluetooth device (`Self_Balancing_Robot`) before launching.
-            Select the correct COM port in the dashboard and click **Connect**.
-
-            ---
-
-            ## Hardware
-
-            | Component | Qty | Notes |
-            | :--- | :---: | :--- |
-            | ESP32 DevKit (38-pin) | 2 | One per board |
-            | TMC2208 Stepper Driver | 2 | UART mode; 1 kΩ resistor on TX line |
-            | NEMA 17 Stepper Motor | 2 | 1.8° / 200 steps per revolution |
-            | ISM6HG256X IMU | 1 | Custom breakout; I2C on GPIO 21/22 |
-            | QMC5883L Magnetometer | 1 | Same I2C bus |
-            | MP1584 Buck Converter | 1 | 12 V → 5 V regulation |
-            | 3S Li-Ion Battery Pack | 1 | ~11.1 V nominal |
-            | 2-Axis Analog Joystick | 1 | ADC1 pins (GPIO 34/35) |
-
-            ---
-
-            ## Documentation
-
-            Full technical documentation is available in [`docs/`](../../tree/main/docs):
-
-            - [System Architecture](../../blob/main/docs/BaseLink/System_Architecture.md)
-            - [PID Theory and Math](../../blob/main/docs/BaseLink/PID_Theory_and_Math.md)
-            - [Config and Tuning Guide](../../blob/main/docs/BaseLink/Config_and_Tuning_Guide.md)
-            - [Program Flow & State Machine](../../blob/main/docs/BaseLink/Program_Flow_State_Machine.md)
-            - [Troubleshooting Guide](../../blob/main/docs/BaseLink/Troubleshooting_Guide.md)
-
-            ---
-
-            *Built with Arduino ESP32 Core 3.x / IDF 5.x — compiled and verified by GitHub Actions.*
-          files: |
-            release/BaseLink-${{ github.ref_name }}.bin
-            release/BaseLink-${{ github.ref_name }}.bootloader.bin
-            release/BaseLink-${{ github.ref_name }}.partitions.bin
-            release/Controller-${{ github.ref_name }}.bin
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: release/*
+          body: |
+            ## 2PyBot ${{ github.ref_name }}
+
+            Tagged source: `${{ github.sha }}`.
+
+            BaseLink uses ESP32 LQR/LQI control, direct Bluepad32 gamepad input,
+            TMC2226 drivers, runtime parameters, terrain adaptation, and camera payload controls.
+
+            ### Firmware outputs
+
+            | File | Purpose |
+            | :--- | :--- |
+            | `BaseLink-${{ github.ref_name }}.bin` | Robot application |
+            | `BaseLink-${{ github.ref_name }}.bootloader.bin` | Robot bootloader, address 0x1000 |
+            | `BaseLink-${{ github.ref_name }}.partitions.bin` | Huge APP partition table, address 0x8000 |
+            | `BaseLink-${{ github.ref_name }}.elf` | Robot debug symbols |
+            | `Controller-${{ github.ref_name }}.bin` | Retained legacy ESP-NOW transmitter |
+            | `build-info-${{ github.ref_name }}.json` | Build tag, source commit, and board targets |
+            | `core-versions-${{ github.ref_name }}.json` | Installed board-core versions |
+            | `library-versions-${{ github.ref_name }}.json` | Installed library versions |
+            | `SHA256SUMS-${{ github.ref_name }}.txt` | Checksums for release files |
+
+            BaseLink's application address is 0x10000. The Controller binary is for the
+            older ESP-NOW system; current BaseLink pairs its gamepad directly over Bluetooth.
+
+            USB serial uses 460800 baud. START or serial `E` requests arming.
+            Runtime parameter writes use `P,key,value`; `PS` saves to NVS.
+
+            [Firmware setup](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/firmware/BaseLink/README.md)
+            [Serial protocol](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/firmware/BaseLink/PROTOCOL.md)
