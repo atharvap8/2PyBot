@@ -1,0 +1,19 @@
+{
+  "source": "Seven full-resolution assembled robot STL parts",
+  "parts": [
+    "2pybot_base_B",
+    "2pybot_base_F",
+    "2pybot_face",
+    "2pybot_motor_L",
+    "2pybot_motor_R",
+    "2pybot_shell",
+    "beam_D"
+  ],
+  "wheels": "Matching parametric tyre/hub approximations from the driving model",
+  "view": "Front three-quarter orthographic",
+  "rendered_triangles": 33242,
+  "master_size_px": 1024,
+  "adaptive_layer_dp": 108,
+  "safe_zone_diameter_dp": 66,
+  "regenerate": "python scripts/generate_launcher_icon.py"
+}

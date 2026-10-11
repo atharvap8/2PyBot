@@ -101,6 +101,8 @@ Camera profiles are daylight, indoor, low_light, night, and driving. Built-in ex
 | `POST /api/camera/set` | Set `{name, value}` |
 | `POST /api/camera/profile/{name}` | Apply a camera profile |
 | `POST /api/camera/autocalibrate` | Adjust exposure/gain from snapshot brightness |
+| `GET /api/tof`, `POST /api/tof/guard` | Depth/guard status and explicit guard enable/disable |
+| `POST /api/tof/calibrate` | Save a range bias from a measured stable central target |
 | `GET /api/camera/snapshot`, `GET /api/camera/luma` | JPEG and brightness measurement |
 | `GET /api/stream` | Stream state and metrics |
 | `POST /api/stream/restart`, `POST /api/stream/stop` | Stream process control |
@@ -121,12 +123,15 @@ journalctl -u 2pybot-mediamtx -f
 Run only one application against the ESP32 serial port and camera. The older `radxa_brain.py` owns both and should not run alongside this console.
 
 The separate camera/ToF calibration service was not imported. Camera controls contained in this console are part of the downloaded application.
+Geometric lens and sensor-pose calibration are future work in the
+[vision roadmap](../../../docs/VISION_ROADMAP.md); exposure auto-calibration is
+not intrinsic/distortion calibration.
 
-## Vision + ToF
+## Driving view and ToF
 
-The **Vision + ToF** tab displays live WHEP camera video beside the native-order
-8×8 distance grid. Both this tab and Camera connect video automatically and
-release their WebRTC sessions when leaving. The toolbar has a non-shrinking
+The **Driving view** tab displays assembled CAD and accepted optical points,
+with trail and speed/status. Its expandable Live camera section starts WHEP
+on opening and stops on closing; Camera manages its own session. The toolbar has a non-shrinking
 66 px navigation row and 44 px buttons; narrow screens scroll horizontally.
 
 The depth worker uses `/dev/i2c-7`, address `0x29`, at 10 Hz. It runs as a separate
@@ -154,17 +159,24 @@ Stop other ToF readers, including the earlier calibration sensor worker, before
 starting console acquisition. The old calibration service remains separate.
 
 `GET /api/tof` and 10 Hz WebSocket `{"type":"tof","tof":...}` events report raw
-millimetres, validity, age, sensor errors, nearest central depth and guard state.
-Cells require ULD status 5, a detected target, 50–4000 mm and sigma ≤20 mm. Frames
-older than 500 ms are stale. An asterisk and grey colour identify invalid/stale
-cells; raw near-field values are still visible for diagnosis.
+and bias-corrected millimetres, validity, age, errors, accepted points, corridor
+depth, coverage and guard state. Zones require ULD status 5 or 9, a detected
+target, 50–4000 mm and sigma 0–20 mm. Frames older than 500 ms are stale.
+Invalid raw ranges remain in telemetry and recordings for diagnosis.
 
 `POST /api/tof/guard` accepts `{"enabled":true|false}`. The guard is **OFF on every
 console startup**, never persisted, and enabling requires the firmware's
-`PR,TOFGUARD,1` capability. It slows forward requests between 0.80 and 0.35 m
-using central rows 2–5 / columns 1–6. All central zones must be valid; unknown or
-stale central depth blocks forward requests when enabled. Thresholds refer to
-sensor range, not a calibrated bumper clearance or proven stopping distance.
+`PR,TOFGUARD,1` capability. Confirmed returns in a projected wheel/turn corridor
+set a reaction/braking cap, with 0.20 m close-obstacle clearance. From 3.4.0,
+fresh missing/partial coverage imposes no fixed creep cap; no confirmed obstacle
+leaves the normal `DRIVEV` limit. Stale/offline depth holds forward requests.
+Unknown depth is not a clear-path observation. These are sensor/reference
+limits, not measured bumper clearance or a proven physical stopping distance.
+
+`POST /api/tof/calibrate` accepts a measured `reference_m` from the sensor face.
+It requires stable central returns and a bias within ±0.10 m; the offset persists
+in `/var/lib/2pybot/tof_calibration.json`. This does not calibrate mounting pose
+or camera alignment. See [range calibration and guard](../../../docs/terrain-sessions.md).
 
 The host sends `TG,<enabled 0|1>,<forward limit m/s>` at 10 Hz while enabled.
 Firmware constrains the forward reference **after** host/gamepad/gesture
@@ -173,7 +185,7 @@ available; balance recovery acceleration/wheel velocity are not clamped. An
 enabled guard with a missing heartbeat blocks new forward requests after 500 ms.
 Explicit `TG,0,0` releases it. Disabled acquisition does not send `V` overrides.
 
-Grid orientation/coverage and actual stopping clearance need checking on the
+Zone orientation/coverage and actual stopping clearance need checking on the
 mounted robot. This is an optional forward-reference limiter, not a guaranteed
 collision stop or camera-ToF calibrated overlay.
 

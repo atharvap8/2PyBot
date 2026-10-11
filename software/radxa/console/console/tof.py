@@ -3,6 +3,7 @@ import asyncio
 import json
 import math
 import os
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -16,17 +17,30 @@ class ToF:
         self.error = ""
         self.state = "starting"
         self.guard_enabled = False  # never persisted; explicit opt-in each startup
-        self.stop_m = 0.35
+        self.stop_m = 0.20
         self.slow_m = 0.80
         self._was_connected = False
         self._sent_enabled = False
         self._hits = [0] * 64
         self._previous = [None] * 64
-        self.half_width_m = 0.14  # shell/wheels plus uncertainty margin
-        self.reaction_s = 0.25
+        self.half_width_m = 0.12  # wheel envelope plus a modest margin
+        self.reaction_s = 0.18
         self.deceleration_mps2 = 0.7
-        self.partial_speed_mps = 0.25
         self.sensor_height_m = float(os.environ.get("BOT_TOF_HEIGHT_M", "0.20"))
+        self.calibration_file = Path(os.environ.get("BOT_TOF_CALIBRATION", "/var/lib/2pybot/tof_calibration.json"))
+        self.range_offset_m = 0.0
+        self.range_calibrated = False
+        self.calibration_error = ""
+        try:
+            saved = json.loads(self.calibration_file.read_text())
+            offset = float(saved["offset_m"])
+            if not math.isfinite(offset) or abs(offset) > .10 or saved.get("source") != "measured-reference":
+                raise ValueError("Invalid ToF reference calibration")
+            self.range_offset_m, self.range_calibrated = offset, True
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self.calibration_error = str(exc)
 
     def accept(self, frame):
         if frame.get("state") != "ranging":
@@ -75,7 +89,7 @@ class ToF:
                 if not valid[i]:
                     continue
                 r, c = divmod(i, 8)
-                d = distance[i] / 1000
+                d = max(.001, distance[i] / 1000 + self.range_offset_m)
                 horizontal = math.radians((c - 3.5) * 45 / 8)
                 vertical = math.radians((3.5 - r) * 45 / 8)
                 x = d * math.tan(horizontal)
@@ -99,8 +113,8 @@ class ToF:
         nearest = min(candidates) if candidates else None
         max_speed = link.params["DRIVEV"].value if link and "DRIVEV" in link.params else 0.7
         stopping_distance = self.stop_m + speed * self.reaction_s + speed * speed / (2 * self.deceleration_mps2)
-        if stale or not points:
-            cap, reason = 0.0, "stale or unknown depth"
+        if stale:
+            cap, reason = 0.0, "depth offline or stale"
         elif nearest is not None and nearest <= self.stop_m:
             cap, reason = 0.0, "obstacle in stopping corridor"
         else:
@@ -109,11 +123,14 @@ class ToF:
             braking_cap = math.sqrt((self.deceleration_mps2 * self.reaction_s) ** 2 +
                                     2 * self.deceleration_mps2 * clearance) - self.deceleration_mps2 * self.reaction_s
             cap = min(max_speed, braking_cap) if nearest is not None else max_speed
-            if coverage < .5 or nearest is None:
-                cap = min(cap, self.partial_speed_mps if candidates else .15)
-                reason = "partial coverage — reduced speed"
+            if nearest is None:
+                reason = "no confirmed obstacle — depth unknown"
+            elif cap < max_speed:
+                reason = "slowing for stopping clearance"
+            elif coverage < .35:
+                reason = "no close obstacle — partial coverage"
             else:
-                reason = "slowing for stopping clearance" if cap < max_speed else "clear observed corridor"
+                reason = "clear observed corridor"
         supported = bool(link and link.derived.get("TOFGUARD", 0) == 1)
         active = bool(self.guard_enabled and supported and link.connected and not link.tel.get("stale", True))
         cap = math.floor(max(0.0, cap) * 1000) / 1000
@@ -129,23 +146,57 @@ class ToF:
             "status": self.frame.get("status", []),
             "valid_count": sum(valid) if not stale else 0,
             "quality_note": ("All zones currently fail status/range/sigma checks; raw distances are shown. "
-                             "Enabled guard treats this as unknown depth."
+                             "No fixed creep cap is applied; collision range is unobserved."
                              if not stale and not any(valid) else ""),
             "sigma_mm": self.frame.get("sigma_mm", []),
             "targets": self.frame.get("targets", []),
+            "corrected_distance_mm": [round(max(0, d + self.range_offset_m * 1000)) for d in distance],
+            "range_calibrated": self.range_calibrated,
+            "range_offset_m": round(self.range_offset_m, 4),
+            "calibration_ready": not stale and len(self._reference_ranges()) >= 3,
+            "calibration_error": self.calibration_error,
+            "guard_policy": "confirmed-obstacle braking; no fixed creep caps",
             "points": points, "coverage": round(coverage, 3),
             "corridor_half_width_m": self.half_width_m,
             "turn_envelope_curvature": round(curvature, 3),
             "stopping_distance_m": round(stopping_distance, 3),
             "reaction_s": self.reaction_s, "deceleration_mps2": self.deceleration_mps2,
             "projection_calibrated": False,
-            "projection_note": "Approximate 45° optics / 0.20 m mount; symmetric steering envelope until mounting calibration",
+            "projection_note": f"Approximate 45° optics / {self.sensor_height_m:.2f} m mount; symmetric steering envelope until mounting calibration",
             "nearest_m": nearest, "guard_enabled": self.guard_enabled,
             "guard_supported": supported, "guard_active": active,
             "guard_reason": reason if self.guard_enabled else "off",
             "forward_limit_mps": cap if self.guard_enabled else None,
             "stop_m": self.stop_m, "slow_m": self.slow_m,
         }
+
+    def _reference_ranges(self):
+        valid = self.frame.get("valid", [False] * 64)
+        distance = self.frame.get("distance_mm", [0] * 64)
+        return [distance[i] / 1000 for i in (27, 28, 35, 36) if valid[i] and self._hits[i] >= 3]
+
+    def calibrate(self, reference_m):
+        """An actual measured centre target is required; no inferred/fake auto calibration."""
+        if not isinstance(reference_m, (int, float)) or not math.isfinite(reference_m) or not .20 <= reference_m <= 3.0:
+            raise ValueError("Reference must be 0.20–3.00 metres from the ToF sensor face")
+        if self.state != "ranging" or self.received is None or time.monotonic() - self.received > .5:
+            raise ValueError("Depth sensor must be ranging with fresh measurements")
+        ranges = self._reference_ranges()
+        if len(ranges) < 3:
+            raise ValueError("Need a stable flat target in at least three central zones")
+        raw = statistics.median(ranges)
+        if max(ranges) - min(ranges) > .08:
+            raise ValueError("Central target ranges disagree; face the sensor towards a flat target")
+        offset = round(reference_m - raw, 4)
+        if abs(offset) > .10:
+            raise ValueError("Bias exceeds 0.10 m; check the target/mounting instead of applying a large offset")
+        saved = {"offset_m": offset, "reference_m": reference_m, "raw_median_m": raw,
+                 "source": "measured-reference", "captured_wall_s": time.time()}
+        self.calibration_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.calibration_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps(saved, indent=2) + "\n")
+        os.replace(temporary, self.calibration_file)
+        self.range_offset_m, self.range_calibrated, self.calibration_error = offset, True, ""
 
     async def acquire(self):
         worker = str(Path(__file__).with_name("tof_worker.py"))

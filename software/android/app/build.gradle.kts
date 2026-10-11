@@ -15,7 +15,11 @@ android {
         val revision = rootProject.file("../../VERSION").readText().trim()
         val parts = revision.split(".").map { it.toInt() }
         versionCode = parts[0] * 10000 + parts[1] * 100 + parts[2]
-        versionName = revision
+        val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: revision
+        require(Regex("^${Regex.escape(revision)}(?:-rc\\.[1-9][0-9]*)?$").matches(releaseVersion)) {
+            "releaseVersion must match VERSION, optionally suffixed with -rc.N"
+        }
+        versionName = releaseVersion
         // Default robot address: the Radxa's own hotspot gateway.
         buildConfigField("String", "DEFAULT_HOST", "\"10.42.0.1\"")
     }

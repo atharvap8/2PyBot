@@ -86,13 +86,30 @@ Saved NVS parameters take precedence over compiled defaults. `PD` restores defau
 | `tools/tuner/tuner.html` | Legacy Web Serial PID tuner; not a current parameter-store client |
 | `firmware/Controller/Controller.ino` | Legacy ESP-NOW transmitter; current BaseLink has no ESP-NOW receiver |
 
-The current console package was imported from the Cubie A7A. See its [setup and API guide](software/radxa/console/README.md) and [deployment layout](software/radxa/README.md). Its debug parser reads all 20 fields; a terrain parameter tab remains pending. **Vision + ToF** combines live camera video with the VL53L5CX 8×8 grid and an optional forward-reference guard, off by default.
+The current console package was imported from the Cubie A7A. See its [setup and API guide](software/radxa/console/README.md) and [deployment layout](software/radxa/README.md). Its debug parser reads all 20 fields; a terrain parameter tab remains pending. **Driving view** shows the assembled CAD, measured VL53L5CX returns, trail and optional forward-reference guard, off by default. Live camera is available separately in that view and in Camera.
 
 [Boot coordination](scripts/radxa/BOOT_COORDINATION.md) holds the ESP32's USB reset until the Radxa camera, API and hotspot are ready, then releases a firmware startup interlock. A deliberate local START request is still required. [Printed mass and LQI calculations](hardware/dynamics/README.md) contain re-sliced estimates and updated estimated gains validated against geometry, filtering, latency and acceleration limits.
 
 The older Radxa brain provides GUARD/FOLLOW modes. It owns the camera and serial port, so it cannot run alongside the console. See its [setup guide](software/runtime/vision_controller/README_RADXA.md).
 
-The [Android app](software/android/README.md) has Live, Map, Tune, Auto, Camera, and Setup screens. It defaults to the Radxa hotspot address `10.42.0.1`. Its Tune screen includes all groups reported by firmware, including TERRAIN. APK build instructions and CI artifacts are documented with the app.
+The [Android app](software/android/README.md) has Drive, Live, Map, Tune, Auto, Camera, Data and Setup screens. It defaults to the Radxa hotspot address `10.42.0.1`. Drive uses a touch-navigable shaded world; Data records labelled terrain sessions; Map and Setup export reports. Its Tune screen includes all groups reported by firmware, including TERRAIN. See [terrain sessions and Drive](docs/terrain-sessions.md) for current behaviour.
+
+## Next vision milestones
+
+The [vision roadmap](docs/VISION_ROADMAP.md) tracks camera distortion/intrinsic
+calibration, sensor extrinsics, synchronized camera/ToF distance overlays and
+later ONNX detection/tracking. Camera geometric calibration is separate from
+the existing colour/exposure tuning. The first proposed milestone is a measured
+intrinsic calibration and validated undistorted preview.
+
+## Revision Table
+
+The [complete Revision Table](docs/REVISION_HISTORY.md) records every historical
+commit from repository inception, feature-level additions and planned features
+with estimated dates. It uses **Sr. No. / Feature Name/Change / Version / Date**;
+untagged development, separate experiments and future estimates are marked
+explicitly. The [vision roadmap](docs/VISION_ROADMAP.md) provides the corresponding
+implementation checklists.
 
 ## Updating the bot
 
@@ -126,6 +143,8 @@ The existing simplified STEP model remains in `models/2pybot_simplified.step`; i
 | [Serial protocol](firmware/BaseLink/PROTOCOL.md) | Commands, parameter records, telemetry fields |
 | [Radxa console](software/radxa/console/README.md) | Browser UI, Android API, camera pipeline, deployment |
 | [Android app](software/android/README.md) | Build, host connection, screens, parameter and video transport |
+| [Vision roadmap](docs/VISION_ROADMAP.md) | Planned lens calibration, sensor geometry, depth fusion and ONNX perception |
+| [Terrain sessions and Drive](docs/terrain-sessions.md) | Recording, 3D world coordinates, guard and range calibration |
 | [Radxa deployment](scripts/radxa/README.md) | Git updates, selective restarts, systemd timer, health checks |
 | [Enclosure CAD](hardware/cad/enclosure/rev5/README.md) | Revision-5 source, exports, dimensions, and current print status |
 | [System architecture](docs/BaseLink/System_Architecture.md) | Sensors, control, actuation, host links |
