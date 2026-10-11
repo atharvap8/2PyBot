@@ -9,7 +9,10 @@ HTTP_PORT     = int(os.environ.get("BOT_PORT", "8080"))
 ENCODER_CPR   = 4096          # MT6816 with 4x quadrature decode
 TRACK_WIDTH_M = 0.155         # only used for map dead-reckoning
 
-CAMERA_DEV    = os.environ.get("BOT_CAM", "/dev/video0")
+CAMERA_DEV    = os.environ.get("BOT_CAM", "/dev/2pybot-imx708")
+CAMERA_WIDTH  = int(os.environ.get("BOT_CAM_WIDTH", "2304"))
+CAMERA_FPS    = int(os.environ.get("BOT_CAM_FPS", "56"))
+CAMERA_BITRATE = os.environ.get("BOT_CAM_BITRATE", "12M")
 SNAPSHOT_PATH = "/dev/shm/2pybot_snap.jpg"
 CAM_PROFILES  = "/var/lib/2pybot/camera_profiles.json"
 

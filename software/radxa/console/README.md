@@ -13,6 +13,7 @@ The Kotlin/Compose client is in [software/android](../../android/README.md).
 | `console/config.py` | Serial, HTTP, camera, snapshot, and profile settings |
 | `console/camera.py` | V4L2 controls, exposure/gain adjustment, profiles, JPEG snapshots |
 | `console/stream.py` | Camera mode selection, encoder startup, progress metrics, process supervision |
+| `console/tof.py`, `console/tof_worker.py` | Isolated VL53L5CX reader, 8×8 telemetry, optional forward-reference guard |
 | `ui/` | Browser shell, shared parameter renderer, twelve tabs |
 | `native/` | Allwinner Cedar H.264 publisher and probe source |
 | `systemd/` | Installer templates for console and MediaMTX |
@@ -26,7 +27,7 @@ Serial defaults to `/dev/ttyUSB0` at **460800 baud** with DTR/RTS disabled and e
 - `P!` acknowledges a write and requests a new dump.
 - `PS`, `PL`, and `PD` provide firmware persistence actions.
 - `O` records update pose and telemetry.
-- `D` records populate the original 15 debug fields. The five newer terrain fields are currently ignored.
+- `D` records populate the original 15 debug fields plus acceleration magnitude, roughness, softening, terrain state and drop count.
 
 The browser has parameter tabs for BALANCE, STEPPER, DRIVE, YAW, SAFETY, IMU, CLIMB, LED, and PAYLOAD. Firmware TERRAIN parameters are available through the API, but a terrain tab is not registered yet. Map dead reckoning uses the fixed 0.155 m track width from `config.py`.
 
@@ -105,7 +106,9 @@ Camera profiles are daylight, indoor, low_light, night, and driving. Built-in ex
 | `POST /api/stream/restart`, `POST /api/stream/stop` | Stream process control |
 | `WS /ws` | 10 Hz telemetry, parameter acknowledgements, and logs |
 
-`/api/camera/profile/save` is defined after the generic profile route in the imported code. Route ordering needs review before relying on profile saving through HTTP.
+`/api/camera/profile/save` precedes the generic profile route, so saved profiles
+are handled by the correct endpoint. CSI profiles and controls use the native
+publisher IPC and persist across restarts. See [camera tuning](native/CAMERA_TUNING.md).
 
 ## Operation
 
@@ -118,3 +121,65 @@ journalctl -u 2pybot-mediamtx -f
 Run only one application against the ESP32 serial port and camera. The older `radxa_brain.py` owns both and should not run alongside this console.
 
 The separate camera/ToF calibration service was not imported. Camera controls contained in this console are part of the downloaded application.
+
+## Vision + ToF
+
+The **Vision + ToF** tab displays live WHEP camera video beside the native-order
+8×8 distance grid. Both this tab and Camera connect video automatically and
+release their WebRTC sessions when leaving. The toolbar has a non-shrinking
+66 px navigation row and 44 px buttons; narrow screens scroll horizontally.
+
+The depth worker uses `/dev/i2c-7`, address `0x29`, at 10 Hz. It runs as a separate
+low-priority process with bounded initialization, I²C chunking, timeout/restart
+handling and explicit 64-bit ctypes signatures. The board's existing ULD is
+reused through `BOT_TOF_VENDOR`; `40-tof.conf` captures that setup. For a fresh
+board install `vl53l5cx-ctypes==0.0.3` and `smbus2` for its Python/architecture,
+or provide a compatible vendor directory. Console acquisition does not own the
+camera or open the ESP32 port independently.
+
+Autonomous ranging uses a 20 ms integration budget (four subframes per 8×8
+frame) to improve return quality. `BOT_TOF_INTEGRATION_MS` can configure this;
+the budget is checked against the requested frame rate. The API/grid also reports
+valid-zone count; invalid returns are retained for diagnosis, not treated as clear space.
+
+Install the environment override, then restart while idle:
+
+```bash
+sudo cp 40-tof.conf /etc/systemd/system/2pybot-console.service.d/
+sudo systemctl daemon-reload
+sudo systemctl restart 2pybot-console
+```
+
+Stop other ToF readers, including the earlier calibration sensor worker, before
+starting console acquisition. The old calibration service remains separate.
+
+`GET /api/tof` and 10 Hz WebSocket `{"type":"tof","tof":...}` events report raw
+millimetres, validity, age, sensor errors, nearest central depth and guard state.
+Cells require ULD status 5, a detected target, 50–4000 mm and sigma ≤20 mm. Frames
+older than 500 ms are stale. An asterisk and grey colour identify invalid/stale
+cells; raw near-field values are still visible for diagnosis.
+
+`POST /api/tof/guard` accepts `{"enabled":true|false}`. The guard is **OFF on every
+console startup**, never persisted, and enabling requires the firmware's
+`PR,TOFGUARD,1` capability. It slows forward requests between 0.80 and 0.35 m
+using central rows 2–5 / columns 1–6. All central zones must be valid; unknown or
+stale central depth blocks forward requests when enabled. Thresholds refer to
+sensor range, not a calibrated bumper clearance or proven stopping distance.
+
+The host sends `TG,<enabled 0|1>,<forward limit m/s>` at 10 Hz while enabled.
+Firmware constrains the forward reference **after** host/gamepad/gesture
+arbitration, including climb-mode speed conversion. Reverse and steering remain
+available; balance recovery acceleration/wheel velocity are not clamped. An
+enabled guard with a missing heartbeat blocks new forward requests after 500 ms.
+Explicit `TG,0,0` releases it. Disabled acquisition does not send `V` overrides.
+
+Grid orientation/coverage and actual stopping clearance need checking on the
+mounted robot. This is an optional forward-reference limiter, not a guaranteed
+collision stop or camera-ToF calibrated overlay.
+
+## Boot coordination
+
+See [Radxa / ESP32 boot coordination](../../../scripts/radxa/BOOT_COORDINATION.md).
+The console exposes `/api/ready`, sends the readiness handshake after camera and
+hotspot startup, and retries parameter discovery across an ESP32 reset/calibration.
+`BOOTWAIT` is reported in the firmware SAFETY group. The ready flag never arms.

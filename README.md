@@ -18,7 +18,7 @@
 - Encoder-differential heading hold and slew-limited steering.
 - Normal hold, stiff hold, velocity tracking, and climb reference tracking.
 - Terrain roughness, airborne, and landing detection with pitch-gain softening.
-- 106 runtime parameters with per-value bounds and NVS save/load.
+- 107 runtime parameters with per-value bounds and NVS save/load.
 - Auto-tuning routines for wobble, trim, radius, and stall speed, with current limitations documented in the tuning guide.
 - WS2812 status ring, camera pan/zoom servos, and PWM torch.
 
@@ -86,7 +86,9 @@ Saved NVS parameters take precedence over compiled defaults. `PD` restores defau
 | `tools/tuner/tuner.html` | Legacy Web Serial PID tuner; not a current parameter-store client |
 | `firmware/Controller/Controller.ino` | Legacy ESP-NOW transmitter; current BaseLink has no ESP-NOW receiver |
 
-The current console package was imported from the Cubie A7A. See its [setup and API guide](software/radxa/console/README.md) and [deployment layout](software/radxa/README.md). Its debug parser reads the original 15 fields; terrain telemetry and a terrain parameter tab remain pending.
+The current console package was imported from the Cubie A7A. See its [setup and API guide](software/radxa/console/README.md) and [deployment layout](software/radxa/README.md). Its debug parser reads all 20 fields; a terrain parameter tab remains pending. **Vision + ToF** combines live camera video with the VL53L5CX 8×8 grid and an optional forward-reference guard, off by default.
+
+[Boot coordination](scripts/radxa/BOOT_COORDINATION.md) holds the ESP32's USB reset until the Radxa camera, API and hotspot are ready, then releases a firmware startup interlock. A deliberate local START request is still required. [Printed mass and LQI calculations](hardware/dynamics/README.md) contain re-sliced estimates and updated estimated gains validated against geometry, filtering, latency and acceleration limits.
 
 The older Radxa brain provides GUARD/FOLLOW modes. It owns the camera and serial port, so it cannot run alongside the console. See its [setup guide](software/runtime/vision_controller/README_RADXA.md).
 

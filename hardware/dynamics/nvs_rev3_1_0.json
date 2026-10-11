@@ -1,0 +1,1108 @@
+{
+  "revision": "3.1.0",
+  "captured_at": "2026-10-11T10:07:49.057925",
+  "source": "ESP32 PL confirmed loaded from NVS, followed by complete P? dump",
+  "params": [
+    {
+      "key": "K1",
+      "value": -7.3234,
+      "lo": -40.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "position gain (per m)",
+      "dirty": false
+    },
+    {
+      "key": "K2",
+      "value": -7.4495,
+      "lo": -40.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "velocity gain (per m/s)",
+      "dirty": false
+    },
+    {
+      "key": "K3",
+      "value": -42.9506,
+      "lo": -120.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "pitch gain (per rad)",
+      "dirty": false
+    },
+    {
+      "key": "K4",
+      "value": -6.6862,
+      "lo": -20.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "pitch-rate damping (per rad/s)",
+      "dirty": false
+    },
+    {
+      "key": "K5",
+      "value": -2.1082,
+      "lo": -30.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "position integral (per m*s)",
+      "dirty": false
+    },
+    {
+      "key": "TRIM",
+      "value": 1.54042,
+      "lo": -8.0,
+      "hi": 8.0,
+      "group": "BALANCE",
+      "desc": "static pitch trim (deg)",
+      "dirty": false
+    },
+    {
+      "key": "ZLIM",
+      "value": 0.5,
+      "lo": 0.05,
+      "hi": 10.0,
+      "group": "BALANCE",
+      "desc": "integral anti-windup (m*s)",
+      "dirty": false
+    },
+    {
+      "key": "EXCLAMP",
+      "value": 0.15,
+      "lo": 0.02,
+      "hi": 1.0,
+      "group": "BALANCE",
+      "desc": "max position error fed to LQR (m)",
+      "dirty": false
+    },
+    {
+      "key": "VSATBLD",
+      "value": 3.0,
+      "lo": 0.0,
+      "hi": 20.0,
+      "group": "BALANCE",
+      "desc": "hold-point bleed when saturated (1/s)",
+      "dirty": false
+    },
+    {
+      "key": "BRAKELK",
+      "value": 0.3,
+      "lo": 0.0,
+      "hi": 2.0,
+      "group": "BALANCE",
+      "desc": "hold-point lead while driving (s)",
+      "dirty": false
+    },
+    {
+      "key": "S1",
+      "value": -60.0226,
+      "lo": -80.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "stiff: position gain",
+      "dirty": false
+    },
+    {
+      "key": "S2",
+      "value": -31.0364,
+      "lo": -60.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "stiff: velocity gain",
+      "dirty": false
+    },
+    {
+      "key": "S3",
+      "value": -82.0431,
+      "lo": -140.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "stiff: pitch gain",
+      "dirty": false
+    },
+    {
+      "key": "S4",
+      "value": -10.2571,
+      "lo": -25.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "stiff: pitch-rate gain",
+      "dirty": false
+    },
+    {
+      "key": "S5",
+      "value": -25.8199,
+      "lo": -40.0,
+      "hi": 0.0,
+      "group": "BALANCE",
+      "desc": "stiff: integral gain",
+      "dirty": false
+    },
+    {
+      "key": "WHEELR",
+      "value": 0.05,
+      "lo": 0.02,
+      "hi": 0.12,
+      "group": "STEPPER",
+      "desc": "LOADED wheel radius (m)",
+      "dirty": false
+    },
+    {
+      "key": "MAXSPD",
+      "value": 8500.0,
+      "lo": 500.0,
+      "hi": 15000.0,
+      "group": "STEPPER",
+      "desc": "speed ceiling (usteps/s)",
+      "dirty": false
+    },
+    {
+      "key": "MAXACC",
+      "value": 20000.0,
+      "lo": 1000.0,
+      "hi": 40000.0,
+      "group": "STEPPER",
+      "desc": "accel ceiling (usteps/s^2)",
+      "dirty": false
+    },
+    {
+      "key": "CURRENT",
+      "value": 1500.0,
+      "lo": 300.0,
+      "hi": 2000.0,
+      "group": "STEPPER",
+      "desc": "RMS current (mA) - applied live",
+      "dirty": false
+    },
+    {
+      "key": "DRIVEV",
+      "value": 0.908784,
+      "lo": 0.05,
+      "hi": 3.0,
+      "group": "DRIVE",
+      "desc": "full-stick speed (m/s)",
+      "dirty": false
+    },
+    {
+      "key": "DRIVEDB",
+      "value": 0.03,
+      "lo": 0.0,
+      "hi": 0.3,
+      "group": "DRIVE",
+      "desc": "stick deadband -> position hold",
+      "dirty": false
+    },
+    {
+      "key": "LOWDRV",
+      "value": 0.5,
+      "lo": 0.05,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "LOW mode drive scale",
+      "dirty": false
+    },
+    {
+      "key": "LOWSTR",
+      "value": 0.5,
+      "lo": 0.05,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "LOW mode steer scale",
+      "dirty": false
+    },
+    {
+      "key": "JOYFWD",
+      "value": -0.2,
+      "lo": -2.0,
+      "hi": 2.0,
+      "group": "DRIVE",
+      "desc": "pad fwd units -> normalised",
+      "dirty": false
+    },
+    {
+      "key": "JOYSTR",
+      "value": 1.0,
+      "lo": -2.0,
+      "hi": 2.0,
+      "group": "DRIVE",
+      "desc": "pad steer scale",
+      "dirty": false
+    },
+    {
+      "key": "STICKDZ",
+      "value": 0.1,
+      "lo": 0.0,
+      "hi": 0.4,
+      "group": "DRIVE",
+      "desc": "radial stick deadzone",
+      "dirty": false
+    },
+    {
+      "key": "SNAPIN",
+      "value": 10.0,
+      "lo": 0.0,
+      "hi": 40.0,
+      "group": "DRIVE",
+      "desc": "zero-steer cone (deg)",
+      "dirty": false
+    },
+    {
+      "key": "SNAPOUT",
+      "value": 26.0,
+      "lo": 1.0,
+      "hi": 70.0,
+      "group": "DRIVE",
+      "desc": "full-steer angle (deg)",
+      "dirty": false
+    },
+    {
+      "key": "EXPOSTR",
+      "value": 0.65,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "steer expo (0 lin, 1 cubic)",
+      "dirty": false
+    },
+    {
+      "key": "EXPODRV",
+      "value": 0.35,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "drive expo",
+      "dirty": false
+    },
+    {
+      "key": "MAXSTR",
+      "value": 3003.08,
+      "lo": 200.0,
+      "hi": 9000.0,
+      "group": "YAW",
+      "desc": "max differential (usteps/s)",
+      "dirty": false
+    },
+    {
+      "key": "STRSLEW",
+      "value": 15000.0,
+      "lo": 1000.0,
+      "hi": 40000.0,
+      "group": "YAW",
+      "desc": "steer slew (usteps/s^2)",
+      "dirty": false
+    },
+    {
+      "key": "STRDB",
+      "value": 0.05,
+      "lo": 0.0,
+      "hi": 0.3,
+      "group": "YAW",
+      "desc": "steer deadband",
+      "dirty": false
+    },
+    {
+      "key": "YAWKP",
+      "value": 1.5,
+      "lo": 0.0,
+      "hi": 20.0,
+      "group": "YAW",
+      "desc": "heading hold P (steps/s per count)",
+      "dirty": false
+    },
+    {
+      "key": "YAWKD",
+      "value": 0.02,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "YAW",
+      "desc": "heading hold D",
+      "dirty": false
+    },
+    {
+      "key": "YAWMAX",
+      "value": 1200.0,
+      "lo": 0.0,
+      "hi": 6000.0,
+      "group": "YAW",
+      "desc": "heading hold authority cap",
+      "dirty": false
+    },
+    {
+      "key": "YAWRELCH",
+      "value": 2000.0,
+      "lo": 100.0,
+      "hi": 20000.0,
+      "group": "YAW",
+      "desc": "slip re-latch threshold (counts)",
+      "dirty": false
+    },
+    {
+      "key": "YAWTILT",
+      "value": 12.0,
+      "lo": 0.0,
+      "hi": 45.0,
+      "group": "YAW",
+      "desc": "suspend heading hold above (deg)",
+      "dirty": false
+    },
+    {
+      "key": "TRACKW",
+      "value": 0.155,
+      "lo": 0.05,
+      "hi": 0.6,
+      "group": "YAW",
+      "desc": "wheel-to-wheel (m)",
+      "dirty": false
+    },
+    {
+      "key": "LOOKMAX",
+      "value": 18.0,
+      "lo": 0.0,
+      "hi": 60.0,
+      "group": "YAW",
+      "desc": "LOOK gesture yaw offset (deg)",
+      "dirty": false
+    },
+    {
+      "key": "ARMANG",
+      "value": 5.0,
+      "lo": 1.0,
+      "hi": 20.0,
+      "group": "SAFETY",
+      "desc": "must be this upright to arm (deg)",
+      "dirty": false
+    },
+    {
+      "key": "MAXTILT",
+      "value": 55.0,
+      "lo": 10.0,
+      "hi": 85.0,
+      "group": "SAFETY",
+      "desc": "fall cutoff (deg)",
+      "dirty": false
+    },
+    {
+      "key": "MAXRATE",
+      "value": 450.0,
+      "lo": 50.0,
+      "hi": 2000.0,
+      "group": "SAFETY",
+      "desc": "rate-spike cutoff (deg/s)",
+      "dirty": false
+    },
+    {
+      "key": "RADXATMO",
+      "value": 600.0,
+      "lo": 50.0,
+      "hi": 5000.0,
+      "group": "SAFETY",
+      "desc": "Radxa link freshness (ms)",
+      "dirty": false
+    },
+    {
+      "key": "JOYTMO",
+      "value": 200.0,
+      "lo": 50.0,
+      "hi": 5000.0,
+      "group": "SAFETY",
+      "desc": "pad link freshness (ms)",
+      "dirty": false
+    },
+    {
+      "key": "BOOTWAIT",
+      "value": 1.0,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "SAFETY",
+      "desc": "wait for Radxa boot-ready before arming",
+      "dirty": false
+    },
+    {
+      "key": "IMUCUT",
+      "value": 50.0,
+      "lo": 2.0,
+      "hi": 100.0,
+      "group": "IMU",
+      "desc": "pitch filter cutoff (Hz)",
+      "dirty": false
+    },
+    {
+      "key": "MAHKP",
+      "value": 2.0,
+      "lo": 0.0,
+      "hi": 20.0,
+      "group": "IMU",
+      "desc": "Mahony Kp",
+      "dirty": false
+    },
+    {
+      "key": "MAHKI",
+      "value": 0.005,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "Mahony Ki",
+      "dirty": false
+    },
+    {
+      "key": "PITCHSGN",
+      "value": -1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "pitch sign (+1/-1)",
+      "dirty": false
+    },
+    {
+      "key": "ENCSGN",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "encoder sign (+1/-1)",
+      "dirty": false
+    },
+    {
+      "key": "RATESGN",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "gyro-rate sign (+1/-1)",
+      "dirty": false
+    },
+    {
+      "key": "CLMBZ",
+      "value": 2.0,
+      "lo": 0.1,
+      "hi": 10.0,
+      "group": "CLIMB",
+      "desc": "climb integral clamp (m*s)",
+      "dirty": false
+    },
+    {
+      "key": "CLMBV",
+      "value": 0.25,
+      "lo": 0.02,
+      "hi": 1.5,
+      "group": "CLIMB",
+      "desc": "climb reference ramp (m/s)",
+      "dirty": false
+    },
+    {
+      "key": "CLMBSTR",
+      "value": 0.4,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "CLIMB",
+      "desc": "steer authority while climbing",
+      "dirty": false
+    },
+    {
+      "key": "LEDBRI",
+      "value": 200.0,
+      "lo": 0.0,
+      "hi": 255.0,
+      "group": "LED",
+      "desc": "brightness cap (0-255)",
+      "dirty": false
+    },
+    {
+      "key": "LEDFRONT",
+      "value": 7.5,
+      "lo": 0.0,
+      "hi": 63.0,
+      "group": "LED",
+      "desc": "which LED faces forward",
+      "dirty": false
+    },
+    {
+      "key": "SVYAWR",
+      "value": 70.0,
+      "lo": 5.0,
+      "hi": 300.0,
+      "group": "PAYLOAD",
+      "desc": "pan rate (deg/s)",
+      "dirty": false
+    },
+    {
+      "key": "SVZOOMR",
+      "value": 45.0,
+      "lo": 5.0,
+      "hi": 300.0,
+      "group": "PAYLOAD",
+      "desc": "zoom rate (deg/s)",
+      "dirty": false
+    },
+    {
+      "key": "SVYAWMIN",
+      "value": 120.0,
+      "lo": 0.0,
+      "hi": 270.0,
+      "group": "PAYLOAD",
+      "desc": "pan min (deg)",
+      "dirty": false
+    },
+    {
+      "key": "SVYAWMAX",
+      "value": 190.0,
+      "lo": 0.0,
+      "hi": 270.0,
+      "group": "PAYLOAD",
+      "desc": "pan max (deg)",
+      "dirty": false
+    },
+    {
+      "key": "SVZMIN",
+      "value": 80.0,
+      "lo": 0.0,
+      "hi": 270.0,
+      "group": "PAYLOAD",
+      "desc": "zoom min (deg)",
+      "dirty": false
+    },
+    {
+      "key": "SVZMAX",
+      "value": 140.0,
+      "lo": 0.0,
+      "hi": 270.0,
+      "group": "PAYLOAD",
+      "desc": "zoom max (deg)",
+      "dirty": false
+    },
+    {
+      "key": "TRCHSTP",
+      "value": 10.0,
+      "lo": 1.0,
+      "hi": 25.0,
+      "group": "PAYLOAD",
+      "desc": "torch dim step (%)",
+      "dirty": false
+    },
+    {
+      "key": "C1",
+      "value": -22.2369,
+      "lo": -60.0,
+      "hi": 0.0,
+      "group": "CLIMB",
+      "desc": "climb: position gain",
+      "dirty": false
+    },
+    {
+      "key": "C2",
+      "value": -20.0745,
+      "lo": -50.0,
+      "hi": 0.0,
+      "group": "CLIMB",
+      "desc": "climb: velocity gain",
+      "dirty": false
+    },
+    {
+      "key": "C3",
+      "value": -81.3063,
+      "lo": -140.0,
+      "hi": 0.0,
+      "group": "CLIMB",
+      "desc": "climb: pitch gain",
+      "dirty": false
+    },
+    {
+      "key": "C4",
+      "value": -12.7029,
+      "lo": -25.0,
+      "hi": 0.0,
+      "group": "CLIMB",
+      "desc": "climb: pitch-rate gain",
+      "dirty": false
+    },
+    {
+      "key": "C5",
+      "value": -8.165,
+      "lo": -30.0,
+      "hi": 0.0,
+      "group": "CLIMB",
+      "desc": "climb: integral gain",
+      "dirty": false
+    },
+    {
+      "key": "SGTHRSL",
+      "value": 76.0,
+      "lo": 0.0,
+      "hi": 255.0,
+      "group": "STEPPER",
+      "desc": "StallGuard threshold, left",
+      "dirty": false
+    },
+    {
+      "key": "SGTHRSR",
+      "value": 77.0,
+      "lo": 0.0,
+      "hi": 255.0,
+      "group": "STEPPER",
+      "desc": "StallGuard threshold, right",
+      "dirty": false
+    },
+    {
+      "key": "TCOOL",
+      "value": 300.0,
+      "lo": 0.0,
+      "hi": 1048580.0,
+      "group": "STEPPER",
+      "desc": "SG/CoolStep speed threshold",
+      "dirty": false
+    },
+    {
+      "key": "CSSEMIN",
+      "value": 5.0,
+      "lo": 0.0,
+      "hi": 15.0,
+      "group": "STEPPER",
+      "desc": "CoolStep lower limit (0=off)",
+      "dirty": false
+    },
+    {
+      "key": "CSSEMAX",
+      "value": 2.0,
+      "lo": 0.0,
+      "hi": 15.0,
+      "group": "STEPPER",
+      "desc": "CoolStep upper limit",
+      "dirty": false
+    },
+    {
+      "key": "MAGOFFX",
+      "value": 0.0,
+      "lo": -3000.0,
+      "hi": 3000.0,
+      "group": "IMU",
+      "desc": "hard-iron offset X",
+      "dirty": false
+    },
+    {
+      "key": "MAGOFFY",
+      "value": 0.0,
+      "lo": -3000.0,
+      "hi": 3000.0,
+      "group": "IMU",
+      "desc": "hard-iron offset Y",
+      "dirty": false
+    },
+    {
+      "key": "MAGOFFZ",
+      "value": 0.0,
+      "lo": -3000.0,
+      "hi": 3000.0,
+      "group": "IMU",
+      "desc": "hard-iron offset Z",
+      "dirty": false
+    },
+    {
+      "key": "MAGSGNX",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "mag axis sign X",
+      "dirty": false
+    },
+    {
+      "key": "MAGSGNY",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "mag axis sign Y",
+      "dirty": false
+    },
+    {
+      "key": "MAGSGNZ",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "mag axis sign Z",
+      "dirty": false
+    },
+    {
+      "key": "ACCSGN",
+      "value": -1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "accel tilt sign",
+      "dirty": false
+    },
+    {
+      "key": "GYROSGN",
+      "value": -1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "IMU",
+      "desc": "gyro axis sign",
+      "dirty": false
+    },
+    {
+      "key": "PADDZ",
+      "value": 0.08,
+      "lo": 0.0,
+      "hi": 0.4,
+      "group": "DRIVE",
+      "desc": "legacy per-axis deadzone",
+      "dirty": false
+    },
+    {
+      "key": "PADFWD",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "drive axis sign",
+      "dirty": false
+    },
+    {
+      "key": "PADSTR",
+      "value": -1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "steer axis sign",
+      "dirty": false
+    },
+    {
+      "key": "PADRPT1",
+      "value": 400.0,
+      "lo": 50.0,
+      "hi": 2000.0,
+      "group": "DRIVE",
+      "desc": "d-pad repeat delay (ms)",
+      "dirty": false
+    },
+    {
+      "key": "PADRPT",
+      "value": 130.0,
+      "lo": 20.0,
+      "hi": 1000.0,
+      "group": "DRIVE",
+      "desc": "d-pad repeat rate (ms)",
+      "dirty": false
+    },
+    {
+      "key": "BOOTHIGH",
+      "value": 0.0,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "DRIVE",
+      "desc": "boot in HIGH speed mode",
+      "dirty": false
+    },
+    {
+      "key": "PADYAW",
+      "value": -1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "PAYLOAD",
+      "desc": "pan axis sign",
+      "dirty": false
+    },
+    {
+      "key": "PADZOOM",
+      "value": 1.0,
+      "lo": -1.0,
+      "hi": 1.0,
+      "group": "PAYLOAD",
+      "desc": "zoom axis sign",
+      "dirty": false
+    },
+    {
+      "key": "SVUSMIN",
+      "value": 500.0,
+      "lo": 400.0,
+      "hi": 1500.0,
+      "group": "PAYLOAD",
+      "desc": "servo min pulse (us)",
+      "dirty": false
+    },
+    {
+      "key": "SVUSMAX",
+      "value": 2400.0,
+      "lo": 1500.0,
+      "hi": 2800.0,
+      "group": "PAYLOAD",
+      "desc": "servo max pulse (us)",
+      "dirty": false
+    },
+    {
+      "key": "SVYAWHOME",
+      "value": 165.0,
+      "lo": 0.0,
+      "hi": 270.0,
+      "group": "PAYLOAD",
+      "desc": "pan home (deg)",
+      "dirty": false
+    },
+    {
+      "key": "SVZHOME",
+      "value": 120.0,
+      "lo": 0.0,
+      "hi": 270.0,
+      "group": "PAYLOAD",
+      "desc": "zoom home (deg)",
+      "dirty": false
+    },
+    {
+      "key": "SVRATE",
+      "value": 50.0,
+      "lo": 10.0,
+      "hi": 200.0,
+      "group": "PAYLOAD",
+      "desc": "servo refresh (Hz)",
+      "dirty": false
+    },
+    {
+      "key": "SVIDLE",
+      "value": 0.0,
+      "lo": 0.0,
+      "hi": 10000.0,
+      "group": "PAYLOAD",
+      "desc": "stop pulsing after idle (ms)",
+      "dirty": false
+    },
+    {
+      "key": "TRCHBOOT",
+      "value": 25.0,
+      "lo": 1.0,
+      "hi": 90.0,
+      "group": "PAYLOAD",
+      "desc": "torch preset at boot (%)",
+      "dirty": false
+    },
+    {
+      "key": "TRCHMIN",
+      "value": 5.0,
+      "lo": 1.0,
+      "hi": 50.0,
+      "group": "PAYLOAD",
+      "desc": "torch minimum (%)",
+      "dirty": false
+    },
+    {
+      "key": "LEDFPS",
+      "value": 50.0,
+      "lo": 5.0,
+      "hi": 120.0,
+      "group": "LED",
+      "desc": "ring frame rate",
+      "dirty": false
+    },
+    {
+      "key": "TERREN",
+      "value": 1.0,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "TERRAIN",
+      "desc": "adaptive terrain gains on/off",
+      "dirty": false
+    },
+    {
+      "key": "TERRTHR",
+      "value": 0.18,
+      "lo": 0.02,
+      "hi": 1.0,
+      "group": "TERRAIN",
+      "desc": "roughness for full softening",
+      "dirty": false
+    },
+    {
+      "key": "TERRSOFT",
+      "value": 0.55,
+      "lo": 0.25,
+      "hi": 1.0,
+      "group": "TERRAIN",
+      "desc": "K3/K4 multiplier when rough",
+      "dirty": false
+    },
+    {
+      "key": "TERRTAU",
+      "value": 0.35,
+      "lo": 0.02,
+      "hi": 3.0,
+      "group": "TERRAIN",
+      "desc": "roughness filter time const (s)",
+      "dirty": false
+    },
+    {
+      "key": "DROPG",
+      "value": 0.55,
+      "lo": 0.1,
+      "hi": 0.95,
+      "group": "TERRAIN",
+      "desc": "free-fall threshold (g)",
+      "dirty": false
+    },
+    {
+      "key": "DROPMS",
+      "value": 35.0,
+      "lo": 5.0,
+      "hi": 300.0,
+      "group": "TERRAIN",
+      "desc": "airborne confirm time (ms)",
+      "dirty": false
+    },
+    {
+      "key": "LANDMS",
+      "value": 350.0,
+      "lo": 50.0,
+      "hi": 2000.0,
+      "group": "TERRAIN",
+      "desc": "soft-gain hold after landing (ms)",
+      "dirty": false
+    },
+    {
+      "key": "AIRFRZ",
+      "value": 1.0,
+      "lo": 0.0,
+      "hi": 1.0,
+      "group": "TERRAIN",
+      "desc": "freeze integrator while airborne",
+      "dirty": false
+    }
+  ],
+  "derived": {
+    "STEPSM": 5092.96,
+    "COUNTSM": 13037.97,
+    "VMAX": 1.669,
+    "AMAX": 3.927,
+    "TOFGUARD": 1.0,
+    "BOOTGATE": 1.0
+  },
+  "groups": {
+    "BALANCE": [
+      "K1",
+      "K2",
+      "K3",
+      "K4",
+      "K5",
+      "TRIM",
+      "ZLIM",
+      "EXCLAMP",
+      "VSATBLD",
+      "BRAKELK",
+      "S1",
+      "S2",
+      "S3",
+      "S4",
+      "S5"
+    ],
+    "STEPPER": [
+      "WHEELR",
+      "MAXSPD",
+      "MAXACC",
+      "CURRENT",
+      "SGTHRSL",
+      "SGTHRSR",
+      "TCOOL",
+      "CSSEMIN",
+      "CSSEMAX"
+    ],
+    "DRIVE": [
+      "DRIVEV",
+      "DRIVEDB",
+      "LOWDRV",
+      "LOWSTR",
+      "JOYFWD",
+      "JOYSTR",
+      "STICKDZ",
+      "SNAPIN",
+      "SNAPOUT",
+      "EXPOSTR",
+      "EXPODRV",
+      "PADDZ",
+      "PADFWD",
+      "PADSTR",
+      "PADRPT1",
+      "PADRPT",
+      "BOOTHIGH"
+    ],
+    "YAW": [
+      "MAXSTR",
+      "STRSLEW",
+      "STRDB",
+      "YAWKP",
+      "YAWKD",
+      "YAWMAX",
+      "YAWRELCH",
+      "YAWTILT",
+      "TRACKW",
+      "LOOKMAX"
+    ],
+    "SAFETY": [
+      "ARMANG",
+      "MAXTILT",
+      "MAXRATE",
+      "RADXATMO",
+      "JOYTMO",
+      "BOOTWAIT"
+    ],
+    "IMU": [
+      "IMUCUT",
+      "MAHKP",
+      "MAHKI",
+      "PITCHSGN",
+      "ENCSGN",
+      "RATESGN",
+      "MAGOFFX",
+      "MAGOFFY",
+      "MAGOFFZ",
+      "MAGSGNX",
+      "MAGSGNY",
+      "MAGSGNZ",
+      "ACCSGN",
+      "GYROSGN"
+    ],
+    "CLIMB": [
+      "CLMBZ",
+      "CLMBV",
+      "CLMBSTR",
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5"
+    ],
+    "LED": [
+      "LEDBRI",
+      "LEDFRONT",
+      "LEDFPS"
+    ],
+    "PAYLOAD": [
+      "SVYAWR",
+      "SVZOOMR",
+      "SVYAWMIN",
+      "SVYAWMAX",
+      "SVZMIN",
+      "SVZMAX",
+      "TRCHSTP",
+      "PADYAW",
+      "PADZOOM",
+      "SVUSMIN",
+      "SVUSMAX",
+      "SVYAWHOME",
+      "SVZHOME",
+      "SVRATE",
+      "SVIDLE",
+      "TRCHBOOT",
+      "TRCHMIN"
+    ],
+    "TERRAIN": [
+      "TERREN",
+      "TERRTHR",
+      "TERRSOFT",
+      "TERRTAU",
+      "DROPG",
+      "DROPMS",
+      "LANDMS",
+      "AIRFRZ"
+    ]
+  },
+  "complete": true
+}

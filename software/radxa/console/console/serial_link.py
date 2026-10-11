@@ -63,6 +63,8 @@ class SerialLink:
         s.exclusive = True
         s.open()
         self.ser = s
+        self.derived.clear()
+        self.tel["host_ready"] = False
         self.connected = True
         self._log(f"[console] opened {SERIAL_PORT} @ {SERIAL_BAUD}")
 
@@ -143,6 +145,12 @@ class SerialLink:
         if not line:
             return
         try:
+            if line == "BR!,1":
+                self.tel["host_ready"] = True
+                return
+            if line == "BR?,0":
+                self.tel["host_ready"] = False
+                return
             if line.startswith("O,"):
                 p = line.split(",")
                 if len(p) >= 6:
@@ -158,7 +166,8 @@ class SerialLink:
             if line.startswith("D,"):
                 f = line.split(",")[1:]
                 names = ["ms", "pF", "w", "u", "v", "ex", "vCmd", "steer",
-                         "satV", "satA", "loopMax", "spdHi", "bal", "fwd", "str"]
+                         "satV", "satA", "loopMax", "spdHi", "bal", "fwd", "str",
+                         "accelMag", "roughness", "soften", "terrainState", "drops"]
                 self.debug = {n: float(x) for n, x in zip(names, f) if x not in ("", None)}
                 self.tel["balancing"] = bool(self.debug.get("bal", 0))
                 return
@@ -209,12 +218,14 @@ class SerialLink:
         buf = b""
         last_tel = 0.0
         next_open = 0.0
+        next_dump = 0.0
         while True:
             if not self.connected and time.monotonic() >= next_open:
                 try:
                     self.open()
                     await asyncio.sleep(0.3)
                     self.request_dump()
+                    next_dump = time.monotonic() + 2
                 except Exception as e:
                     self._log(f"[console] serial unavailable: {e}")
                     self.close()
@@ -222,6 +233,11 @@ class SerialLink:
                     next_open = time.monotonic() + 3
             if self.connected:
                 try:
+                    # A reset-held ESP32 may discard the first request before
+                    # Serial.begin()/sensor calibration. Retry until P. arrives.
+                    if not self.dump_complete and time.monotonic() >= next_dump:
+                        self.send("P?")
+                        next_dump = time.monotonic() + 2
                     data = self.ser.read(4096)
                     if data:
                         buf += data

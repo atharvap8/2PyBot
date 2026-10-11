@@ -1,0 +1,25 @@
+[Unit]
+Description=Hold ESP32 reset until Radxa console, camera and hotspot are ready
+DefaultDependencies=no
+After=systemd-udevd.service
+Before=2pybot-console.service shutdown.target
+Conflicts=shutdown.target
+ConditionPathExists=/dev/ttyUSB0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=__USER__
+SupplementaryGroups=dialout
+RuntimeDirectory=2pybot-boot
+RuntimeDirectoryPreserve=yes
+RemainAfterExit=yes
+Environment=BOT_SERIAL=/dev/ttyUSB0
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=__VENV__/bin/python3 __REPO__/scripts/radxa/boot_gate.py
+TimeoutStartSec=15
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

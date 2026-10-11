@@ -72,6 +72,8 @@ PR,STEPSM,value
 PR,COUNTSM,value
 PR,VMAX,value
 PR,AMAX,value
+PR,TOFGUARD,1
+PR,BOOTGATE,1
 P.
 ```
 

@@ -16,6 +16,7 @@ import json, os, re, subprocess, time
 from typing import Dict, List
 
 from .config import CAMERA_DEV, SNAPSHOT_PATH, CAM_PROFILES
+from . import native_camera
 
 # V4L2 absolute exposure is in 100-us units: 300 = 30 ms, below a 30-fps frame.
 STREAM_EXPOSURE_MAX = 300
@@ -60,6 +61,9 @@ def _run(args, timeout=5):
 
 def list_controls(dev: str = CAMERA_DEV) -> List[Dict]:
     """Parse `v4l2-ctl --list-ctrls-menus` into something a GUI can render."""
+    native = native_camera.status() if dev == CAMERA_DEV else None
+    if native:
+        return native_camera.controls(native)
     out, ctrls = _run(["v4l2-ctl", "-d", dev, "--list-ctrls-menus"]), []
     cur = None
     for line in out.splitlines():
@@ -79,12 +83,17 @@ def list_controls(dev: str = CAMERA_DEV) -> List[Dict]:
 
 
 def get_control(name: str, dev: str = CAMERA_DEV):
+    native = native_camera.status() if dev == CAMERA_DEV else None
+    if native:
+        return native["values"].get(name)
     out = _run(["v4l2-ctl", "-d", dev, "--get-ctrl", name])
     m = re.search(r":\s*(-?\d+)", out)
     return int(m.group(1)) if m else None
 
 
 def set_control(name: str, value: int, dev: str = CAMERA_DEV):
+    if dev == CAMERA_DEV and native_camera.status():
+        return native_camera.set_control(name, int(value))
     r = subprocess.run(["v4l2-ctl", "-d", dev, "--set-ctrl", f"{name}={int(value)}"],
                        capture_output=True, text=True)
     return r.returncode == 0, (r.stderr or r.stdout).strip()
@@ -92,6 +101,9 @@ def set_control(name: str, value: int, dev: str = CAMERA_DEV):
 
 def apply_profile(name: str, dev: str = CAMERA_DEV):
     """Apply a named profile; returns which keys this camera accepted."""
+    if dev == CAMERA_DEV and native_camera.status():
+        prof = native_camera.PROFILES.get(name)
+        return (True, native_camera.apply_values(prof)) if prof else (False, {"error": f"unknown CSI profile {name}"})
     prof = PROFILES.get(name)
     if not prof:
         return False, {"error": f"unknown profile {name}"}
@@ -135,17 +147,19 @@ def autocalibrate(target: float = 110.0, tol: float = 8.0, max_iter: int = 12,
     it is inside tolerance, so it doesn't gratuitously crank the gain.
     """
     have = {c["name"]: c for c in list_controls(dev)}
-    exp_key = next((k for k in ("exposure_time_absolute", "exposure_absolute") if k in have), None)
+    exp_key = next((k for k in ("exposure_us", "exposure_time_absolute", "exposure_absolute") if k in have), None)
     gain_key = next((k for k in ("gain", "analogue_gain") if k in have), None)
     auto_key = next((k for k in ("auto_exposure", "exposure_auto") if k in have), None)
     if auto_key:
         set_control(auto_key, 1, dev)          # 1 = manual on both spellings
     if not exp_key:
+        if "imx708" in dev:
+            return {"ok": False, "error": "CSI publisher control channel is not ready; wait for the video pipeline"}
         return {"ok": False, "error": "camera exposes no manual exposure control"}
 
     steps = []
     lo = have[exp_key].get("min", 1)
-    hi = max(lo, min(have[exp_key].get("max", 2000), STREAM_EXPOSURE_MAX))
+    hi = have[exp_key]["max"] if exp_key == "exposure_us" else max(lo, min(have[exp_key].get("max", 2000), STREAM_EXPOSURE_MAX))
     current = get_control(exp_key, dev)
     if current is not None and current > hi:
         set_control(exp_key, hi, dev)
@@ -170,7 +184,7 @@ def autocalibrate(target: float = 110.0, tol: float = 8.0, max_iter: int = 12,
         # Keep exposure within one frame; use gain for the remaining light.
         if gain_key and cur_g is not None:
             gmax = have[gain_key].get("max", 255)
-            new_g = int(min(gmax, max(0, cur_g * ratio if cur_g else 16)))
+            new_g = int(min(gmax, max(have[gain_key].get("min", 0), cur_g * ratio if cur_g else 16)))
             if new_g == cur_g:
                 break
             set_control(gain_key, new_g, dev)
@@ -207,5 +221,12 @@ def load_profiles() -> Dict:
 
 
 def current_values(dev: str = CAMERA_DEV) -> Dict[str, int]:
+    native = native_camera.status() if dev == CAMERA_DEV else None
+    if native:
+        return native["values"]
     return {c["name"]: get_control(c["name"], dev) for c in list_controls(dev)
             if c["type"] in ("int", "bool", "menu")}
+
+
+def profile_names():
+    return list(native_camera.PROFILES if native_camera.status() else PROFILES) + list(load_profiles())

@@ -77,7 +77,7 @@ Portrait uses a bottom navigation bar and top stop button. Landscape uses a navi
 
 ## Parameters and commands
 
-Tune builds its group list from the console parameter payload. Current firmware has **106 parameters in ten groups**, including TERRAIN. Unlike the browser's fixed tab list, the Android group list includes new groups automatically.
+Tune builds its group list from the console parameter payload. Current firmware has **107 parameters in ten groups**, including TERRAIN. Unlike the browser's fixed tab list, the Android group list includes new groups automatically.
 
 Parameter writes change firmware RAM. Save sends the NVS save action; Reload loads saved values; Defaults restores compiled settings without saving.
 

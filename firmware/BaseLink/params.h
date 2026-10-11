@@ -89,6 +89,7 @@
   X(maxRate,   "MAXRATE", MAX_PITCH_RATE_SAFETY,50.0f,2000.0f,"SAFETY", "rate-spike cutoff (deg/s)")    \
   X(radxaTmo,  "RADXATMO",RADXA_TIMEOUT_MS,   50.0f, 5000.0f,"SAFETY",  "Radxa link freshness (ms)")    \
   X(joyTmo,    "JOYTMO",  JOY_TIMEOUT_MS_CFG,  50.0f,5000.0f,"SAFETY",  "pad link freshness (ms)")      \
+  X(bootWait,  "BOOTWAIT",HOST_BOOT_WAIT,      0.0f,   1.0f,"SAFETY",  "wait for Radxa boot-ready before arming") \
   /* ---------- IMU / SIGNS ---------- */                                                     \
   X(imuCutoff, "IMUCUT",  IMU_FILTER_CUTOFF_HZ,2.0f, 100.0f, "IMU",     "pitch filter cutoff (Hz)")     \
   X(mahonyKp,  "MAHKP",   MAHONY_KP,           0.0f,  20.0f, "IMU",     "Mahony Kp")                    \

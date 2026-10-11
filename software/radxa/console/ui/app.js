@@ -35,7 +35,7 @@ export function msg(t, bad) {
 }
 
 // ---------------- shared state ----------------
-export const state = { params: {}, derived: {}, tel: {}, debug: {}, pending: {} };
+export const state = { params: {}, derived: {}, tel: {}, debug: {}, tof: {}, pending: {} };
 
 export async function refreshParams() {
   const d = await API.params();
@@ -128,6 +128,7 @@ export function registerTab(t) { TABS.push(t); }
 
 let current = null;
 function select(tab) {
+  current?.onLeave?.();
   current = tab;
   for (const b of document.querySelectorAll('nav button')) b.classList.toggle('sel', b.dataset.id === tab.id);
   const view = document.getElementById('view');
@@ -159,6 +160,15 @@ function connectWS() {
       state.tel = m.tel; state.debug = m.debug || {};
       paintHeader();
       current?.onTelemetry?.(state.tel, state.debug);
+    } else if (m.type === 'tof') {
+      state.tof = m.tof;
+      current?.onToF?.(state.tof);
+    } else if (m.type === 'hello') {
+      state.tel = m.status.telemetry || {};
+      state.debug = m.status.debug || {};
+      state.tof = m.status.tof || {};
+      paintHeader();
+      current?.onToF?.(state.tof);
     } else if (m.type === 'params') {
       state.params = Object.fromEntries(m.params.map(p => [p.key, p]));
       state.derived = m.derived || {};
@@ -175,7 +185,8 @@ function connectWS() {
 function paintHeader() {
   const t = state.tel, d = state.debug;
   document.getElementById('dot').classList.toggle('ok', !t.stale);
-  const st = t.balancing ? 'BALANCING' : (t.stale ? 'NO LINK' : 'IDLE');
+  const waiting = state.derived.BOOTGATE === 1 && !t.host_ready;
+  const st = t.balancing ? 'BALANCING' : (t.stale ? 'NO LINK' : (waiting ? 'BOOT WAIT' : 'IDLE'));
   const cs = document.getElementById('cState');
   cs.textContent = st;
   cs.className = 'chip' + (t.stale ? ' bad' : (t.balancing ? '' : ' warn'));
@@ -187,7 +198,7 @@ function paintHeader() {
 }
 
 // ---------------- boot ----------------
-const TAB_FILES = ['telemetry', 'camera', 'balance', 'stepper', 'drive', 'yaw',
+const TAB_FILES = ['telemetry', 'vision', 'camera', 'balance', 'stepper', 'drive', 'yaw',
                    'safety', 'imu', 'climb', 'led', 'payload', 'console'];
 
 (async function boot() {
@@ -198,6 +209,10 @@ const TAB_FILES = ['telemetry', 'camera', 'balance', 'stepper', 'drive', 'yaw',
   buildNav();
   connectWS();
   try { await refreshParams(); } catch (e) { msg('waiting for ESP32…', true); }
-  document.addEventListener('params', () => { if (current) select(current); });
+  document.addEventListener('params', () => {
+    paintHeader();
+    // Parameter dumps must not tear down live video/grid/log views.
+    if (current && !['telemetry', 'vision', 'camera', 'console'].includes(current.id)) select(current);
+  });
   setInterval(() => { if (!Object.keys(state.params).length) refreshParams().catch(() => {}); }, 4000);
 })();

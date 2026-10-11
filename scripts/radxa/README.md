@@ -72,3 +72,8 @@ python3 scripts/radxa/deploy.py --dry-run
 If a deployment fails, the previous marker stays in place and the timer retries. The script does not reset the checkout or automatically roll back application code. Configuration backups are retained for manual recovery.
 
 `pair2.sh` is the older Linux gamepad-pairing helper. Current BaseLink pairs its gamepad directly to the ESP32.
+
+The separately installed [boot gate](BOOT_COORDINATION.md) holds the ESP32's USB
+reset until the camera, API and hotspot are ready. The monitor installs changed
+boot-gate units/rules and ToF/boot overrides and enables the gate for the next
+boot. It does not restart the reset holder against a live serial connection.

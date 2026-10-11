@@ -12,8 +12,10 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import HTTP_PORT, STREAM_NAME
+from .config import HTTP_PORT, STREAM_NAME, SNAPSHOT_PATH
+from .readiness import HOTSPOT_ADDRESS, publish_ready, readiness
 from .serial_link import link
+from .tof import tof
 from . import camera, stream
 
 UI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")
@@ -26,12 +28,19 @@ app = FastAPI(title="2PyBot Console", version="2.0")
 # ============================================================
 @app.on_event("startup")
 async def _startup():
-    asyncio.create_task(link.run())
-    asyncio.create_task(stream.streamer.supervise())
+    app.state.background_tasks = [asyncio.create_task(link.run()),
+                                  asyncio.create_task(stream.streamer.supervise()),
+                                  asyncio.create_task(tof.acquire()),
+                                  asyncio.create_task(tof.publish(link)),
+                                  asyncio.create_task(publish_ready(link, host_ready))]
+    app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
 
 
 @app.on_event("shutdown")
 async def _shutdown():
+    for task in app.state.background_tasks:
+        task.cancel()
+    await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
     stream.streamer.stop()
     link.close()
 
@@ -49,7 +58,14 @@ def status():
         "derived": link.derived,
         "stream": stream.streamer.status(),
         "param_count": len(link.params),
+        "tof": tof.status(link),
+        "host": host_ready(),
     }
+
+
+@app.get("/api/ready")
+def host_ready():
+    return readiness(stream.streamer.status(), SNAPSHOT_PATH, HOTSPOT_ADDRESS)
 
 
 @app.get("/api/params")
@@ -124,14 +140,37 @@ def get_log(n: int = 200):
     return {"log": list(link.log)[-n:]}
 
 
+@app.get("/api/tof")
+def tof_status():
+    return tof.status(link)
+
+
+class ToFGuard(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/tof/guard")
+async def tof_guard(body: ToFGuard):
+    if body.enabled and (not link.connected or link.derived.get("TOFGUARD") != 1):
+        raise HTTPException(409, "Install ToF-guard firmware and connect the ESP32 first")
+    tof.guard_enabled = body.enabled
+    if not body.enabled:
+        link.send("TG,0,0")
+    else:
+        link.send(f"TG,1,{tof.status(link)['forward_limit_mps']:.3f}")
+    return tof.status(link)
+
+
 # ============================================================
 #  camera
 # ============================================================
 @app.get("/api/camera/controls")
 def cam_controls():
+    native = camera.native_camera.status() or {}
     return {"device": camera.CAMERA_DEV, "controls": camera.list_controls(),
             "values": camera.current_values(),
-            "profiles": list(camera.PROFILES) + list(camera.load_profiles()),
+            "colour_profile": native.get("colour_profile"), "ccm_enabled": native.get("ccm_enabled"),
+            "profiles": camera.profile_names(),
             "formats": stream.probe_formats()}
 
 
@@ -148,10 +187,22 @@ def cam_set(body: CamCtrl):
     return {"ok": True}
 
 
+class SaveProfile(BaseModel):
+    name: str
+
+
+@app.post("/api/camera/profile/save")
+def cam_profile_save(body: SaveProfile):
+    camera.save_profile(body.name, camera.current_values())
+    return {"ok": True, "saved": body.name}
+
+
 @app.post("/api/camera/profile/{name}")
 def cam_profile(name: str):
     user = camera.load_profiles()
     if name in user:
+        if camera.native_camera.status():
+            return {"ok": True, **camera.native_camera.apply_values(user[name])}
         applied = {}
         for k, v in user[name].items():
             ok, _ = camera.set_control(k, v)
@@ -162,16 +213,6 @@ def cam_profile(name: str):
     if not ok:
         raise HTTPException(404, res.get("error", "unknown profile"))
     return {"ok": True, **res}
-
-
-class SaveProfile(BaseModel):
-    name: str
-
-
-@app.post("/api/camera/profile/save")
-def cam_profile_save(body: SaveProfile):
-    camera.save_profile(body.name, camera.current_values())
-    return {"ok": True, "saved": body.name}
 
 
 @app.post("/api/camera/autocalibrate")

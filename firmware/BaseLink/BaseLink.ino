@@ -13,13 +13,13 @@
  *      vCmd += u*dt  ->  stepper ISR (steps/s)
  *
  *  Gains were computed offline by solving the continuous-time 
- *  algebraic Riccati equation (see tools/simulate_controllers.py,
+ *  algebraic Riccati equation (see scripts/lqr_design.py,
  *  which also regenerates them for different geometry). Validated
  *  in simulation: 0.5 cm RMS station keeping under a 0.35 deg CoG
  *  error, 2.3 deg peak excursion for a 45 deg/s shove, < 0.3 cm
  *  steady-state error on a 0.5 m position command.
  *
- *  Radxa serial bridge (USB serial, 115200):
+ *  Radxa serial bridge (USB serial, 460800):
  *    OUT 50 Hz :  O,<millis>,<encL>,<encR>,<pitchDeg>,<yawDeg>\n
  *    IN        :  V,<forward -1..1>,<steering -1..1>,<enable 0|1>\n
  *
@@ -39,6 +39,7 @@
 #include "params.h"
 #include "autotune.h"
 #include "terrain.h"
+#include "tof_guard.h"
 #include "imu_sensor.h"
 #include "stepper_control.h"
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
@@ -55,6 +56,7 @@ RobotState state       = STATE_IDLE;
 bool motorsRequested   = false;
 bool DEBUG_STREAM      = true;
 bool RADXA_STREAM      = true;
+bool hostBootReady     = false;
 
 // Forward-positive measurements (see config.h sign conventions)
 float pitchF = 0.0f, rateF = 0.0f;      // deg, deg/s
@@ -111,6 +113,7 @@ float cmdFwd = 0.0f, cmdSteer = 0.0f;
 uint32_t radxaLastRx = 0;
 float    radxaFwd = 0.0f, radxaSteer = 0.0f;
 uint8_t  radxaEn = 0, radxaEnPrev = 0;
+ToFGuard tofGuard;
 
 
 // Serial line buffer
@@ -171,6 +174,11 @@ void startGesture(const GStep* seq, uint8_t len, const char* name) {
 void stopGesture() { gestSeq = nullptr; }
 
 void requestEnable() {
+    if (P.bootWait > 0.5f && !hostBootReady) {
+        btgamepad_syncArmed(false);
+        Serial.println("[MAIN] Waiting for Radxa boot-ready; press START after host is ready");
+        return;
+    }
     motorsRequested = true;
     Serial.println("[MAIN] Enable requested — will arm when upright");
 }
@@ -196,6 +204,26 @@ void handleLine(char* line) {
     // P-commands (parameter get/set/save) are handled first.
     if (at_handleLine(line)) return;      // AT,<routine>
     if (params_handleLine(line)) return;
+
+    if (!strcmp(line, "BR,1")) {
+        hostBootReady = true;
+        Serial.println("BR!,1");
+        return;
+    }
+    if (!strcmp(line, "BR,0")) {
+        hostBootReady = false;
+        requestDisable("Radxa boot wait");
+        Serial.println("BR?,0");
+        return;
+    }
+
+    if (!strncmp(line, "TG,", 3)) {
+        int en = 0; float limit = 0; char extra = 0;
+        if (sscanf(line + 3, "%d,%f%c", &en, &limit, &extra) != 2 ||
+            !tofGuard.update(en, limit, millis()))
+            Serial.println("[TOF] Invalid TG command");
+        return;
+    }
 
     if (line[0] == 'V' && line[1] == ',') {
         float f = 0, s = 0; int en = 0;
@@ -428,6 +456,7 @@ void setup() {
     Serial.println("==================================================");
 
     params_begin();
+    Serial.println("BR?,0");
     joySpeedHigh = (P.bootHigh > 0.5f) ? 1 : 0;     // NVS or compiled defaults, before any consumer
     leds_begin();   // boot swirl plays while sensors settle below
 
@@ -588,9 +617,13 @@ void loop() {
         }
     }
 
+    // Optional ToF constraint applies to EVERY drive source, including gestures.
+    // Reverse/steering and balance-recovery authority are unchanged.
+    cmdFwd = tofGuard.apply(cmdFwd, climbMode ? P.climbVel : P.maxDriveV, millis());
+
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {
-        if (motorsRequested && fabsf(pitchF) < P.armAngle) {
+        if (motorsRequested && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
             resetController();
             steppers.enable();
             state = STATE_BALANCING;

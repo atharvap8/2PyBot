@@ -1,12 +1,16 @@
 # Cubie A7A hardware camera publisher
 
-`2pybot_hwstream` captures MJPEG from the USB camera and uses Allwinner's
+`2pybot_hwstream` captures MJPEG from a USB camera or NV12 from the IMX708 CSI/ISP and uses Allwinner's
 **Cedar VE2 H.264 encoder** directly. JPEG decoding and pixel conversion run
 on the CPU; H.264 encoding does not use libx264 or the GPU/NPU.
 
-The console selects this backend for MJPEG modes when the executable exists.
+The console selects this backend for MJPEG/CSI NV12 modes when the executable exists.
 The process publishes `rtsp://127.0.0.1:8554/cam` and atomically writes original
 JPEG snapshots to `/dev/shm/2pybot_snap.jpg` for calibration.
+
+The CSI publisher exposes live owner-mediated controls and neutral-preserving
+tone/colour processing. See [IMX708 camera tuning](CAMERA_TUNING.md) for units,
+presets, persistence, research and recovery checkpoints.
 
 ## Build
 

@@ -12,8 +12,10 @@ android {
         applicationId = "in.twopybot.app"
         minSdk = 26                 // WebRTC prebuilts need 21+, Compose likes 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        val revision = rootProject.file("../../VERSION").readText().trim()
+        val parts = revision.split(".").map { it.toInt() }
+        versionCode = parts[0] * 10000 + parts[1] * 100 + parts[2]
+        versionName = revision
         // Default robot address: the Radxa's own hotspot gateway.
         buildConfigField("String", "DEFAULT_HOST", "\"10.42.0.1\"")
     }

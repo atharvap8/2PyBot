@@ -15,13 +15,39 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .config import CAMERA_DEV, SNAPSHOT_PATH, STREAM_NAME, WHEP_URL
+from .config import CAMERA_DEV, CAMERA_WIDTH, CAMERA_FPS, CAMERA_BITRATE, SNAPSHOT_PATH, STREAM_NAME, WHEP_URL
 
 HARDWARE_STREAMER = Path(__file__).resolve().parent.parent / "native" / "2pybot_hwstream"
 
 
 def probe_formats(dev: str = CAMERA_DEV) -> List[Dict]:
     """What this camera can actually deliver — never trust the box."""
+    # VIN exposes stepwise scaler sizes. Enumerate the IMX708 sensor's actual
+    # discrete modes instead, then let the ISP deliver NV12 to the encoder.
+    try:
+        node = Path(dev).resolve().name
+        name = (Path("/sys/class/video4linux") / node / "name").read_text().strip()
+        if name.startswith("vin_video"):
+            for subdev in Path("/sys/class/video4linux").glob("v4l-subdev*"):
+                if (subdev / "name").read_text().strip() != "imx708":
+                    continue
+                sensor = f"/dev/{subdev.name}"
+                sizes = subprocess.run(
+                    ["v4l2-ctl", "-d", sensor, "--list-subdev-framesizes=pad=0,code=0x300f"],
+                    capture_output=True, text=True, timeout=5, check=True).stdout
+                modes = []
+                for width, height in re.findall(r"Size Range:\s*(\d+)x(\d+)\s*-", sizes):
+                    intervals = subprocess.run(
+                        ["v4l2-ctl", "-d", sensor,
+                         f"--list-subdev-frameintervals=pad=0,code=0x300f,width={width},height={height}"],
+                        capture_output=True, text=True, timeout=5, check=True).stdout
+                    rates = [float(rate) for rate in re.findall(r"\(([\d.]+) fps\)", intervals)]
+                    if rates:
+                        modes.append({"fmt": "NV12" if int(width) <= 4096 else "RG10",
+                                      "w": int(width), "h": int(height), "fps": rates})
+                return modes
+    except (OSError, subprocess.SubprocessError):
+        return []
     try:
         out = subprocess.run(["v4l2-ctl", "-d", dev, "--list-formats-ext"],
                              capture_output=True, text=True, timeout=5).stdout
@@ -45,9 +71,10 @@ def best_mode(modes: List[Dict], max_w=1920) -> Optional[Dict]:
     """Prefer MJPG (USB bandwidth) at the highest resolution that still
     offers >=25 fps — raw YUYV is capped by USB and looks like a slideshow
     above 640x480."""
-    cands = [m for m in modes if m["fps"] and max(m["fps"]) >= 25 and m["w"] <= max_w]
+    usable = [m for m in modes if m["fmt"] in ("MJPG", "NV12", "YUYV", "UYVY") and m["fps"]]
+    cands = [m for m in usable if max(m["fps"]) >= 25 and m["w"] <= max_w]
     if not cands:
-        cands = modes
+        cands = [m for m in usable if m["w"] <= max_w] or usable
     if not cands:
         return None
     cands.sort(key=lambda m: (m["fmt"] != "MJPG", -(m["w"] * m["h"]), -max(m["fps"])))
@@ -83,8 +110,8 @@ class Streamer:
         self.proc: Optional[subprocess.Popen] = None
         self.mode: Optional[Dict] = None
         self.encoder = "libx264"
-        self.bitrate = "6M"
-        self.width = 1920
+        self.bitrate = CAMERA_BITRATE
+        self.width = CAMERA_WIDTH
         self.metrics = {}
         self.started_at = 0.0
         self._lock = threading.RLock()
@@ -106,7 +133,8 @@ class Streamer:
         for raw in proc.stdout:
             key, _, value = raw.decode(errors="replace").strip().partition("=")
             if key in ("frame", "fps", "dup_frames", "drop_frames", "speed", "out_time",
-                       "capture_to_publish_ms", "hardware_encode_ms", "timestamp_fallbacks"):
+                       "capture_to_publish_ms", "hardware_encode_ms", "timestamp_fallbacks",
+                       "autofocus_position", "autofocus_sharpness", "autofocus_state"):
                 metrics[key] = value
             if key == "progress" and self.proc is proc:
                 self.metrics = dict(metrics)
@@ -123,7 +151,7 @@ class Streamer:
                 raise ValueError("bitrate must be a number, optionally followed by K or M")
             multiplier = {"": 1, "k": 1000, "m": 1000000}[match[2].lower()]
             bitrate = int(float(match[1]) * multiplier)
-            fps = min(30, int(max(mode["fps"]) if mode["fps"] else 30))
+            fps = min(CAMERA_FPS, int(max(mode["fps"]) if mode["fps"] else CAMERA_FPS))
             return [str(HARDWARE_STREAMER), CAMERA_DEV, str(mode["w"]), str(mode["h"]),
                     str(fps), str(bitrate), f"rtsp://127.0.0.1:8554/{STREAM_NAME}", SNAPSHOT_PATH]
         # V4L2 FOURCC names differ from FFmpeg's codec/pixel-format names.
@@ -171,7 +199,7 @@ class Streamer:
             self.last_error = f"no usable mode on {CAMERA_DEV}"
             return False, self.last_error
         self.mode = mode
-        self.encoder = ("cedar_h264" if mode["fmt"] == "MJPG" and HARDWARE_STREAMER.is_file()
+        self.encoder = ("cedar_h264" if mode["fmt"] in ("MJPG", "NV12") and HARDWARE_STREAMER.is_file()
                         else pick_encoder(mode["w"], mode["h"]))
         if bitrate:
             self.bitrate = bitrate

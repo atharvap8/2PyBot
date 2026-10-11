@@ -1,0 +1,1 @@
+ACTION=="add", SUBSYSTEM=="tty", KERNEL=="ttyUSB0", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", TAG+="systemd", ENV{SYSTEMD_WANTS}+="2pybot-boot-gate.service"
