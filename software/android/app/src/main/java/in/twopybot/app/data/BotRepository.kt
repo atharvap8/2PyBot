@@ -9,6 +9,7 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.*
@@ -97,7 +98,7 @@ data class PadMirror(
 // ============================================================
 //  repository
 // ============================================================
-class BotRepository(initialHost: String) {
+class BotRepository(initialHost: String, val recorder: SessionRecorder) {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
     private val FloatMap = MapSerializer(String.serializer(), Float.serializer())
@@ -140,11 +141,17 @@ class BotRepository(initialHost: String) {
 
     // ---------- HTTP ----------
     private suspend fun req(r: Request): String = suspendCoroutine { cont ->
+        val requestBody = okio.Buffer().also { r.body?.writeTo(it) }.readUtf8()
+        recorder.record("http_request", """{"method":"${r.method}","path":${JsonPrimitive(r.url.encodedPath)},"body":${JsonPrimitive(requestBody)}}""")
         http.newCall(r).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) = cont.resumeWithException(e)
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                recorder.record("http_error", JsonPrimitive("${r.url.encodedPath}: ${e.message}").toString())
+                cont.resumeWithException(e)
+            }
             override fun onResponse(call: Call, response: Response) {
                 response.use {
                     val body = it.body?.string().orEmpty()
+                    recorder.record("http_response", """{"path":${JsonPrimitive(r.url.encodedPath)},"status":${it.code},"body":${runCatching { json.parseToJsonElement(body) }.getOrElse { JsonPrimitive(body) }}}""")
                     if (it.isSuccessful) cont.resume(body)
                     else cont.resumeWithException(java.io.IOException("HTTP ${it.code}: $body"))
                 }
@@ -257,16 +264,19 @@ class BotRepository(initialHost: String) {
             val latch = CompletableDeferred<Unit>()
             ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    recorder.record("connection", """{"state":"open","host":${JsonPrimitive(_host.value)}}""")
                     connected.value = true
                     scope.launch { refreshParams(); refreshStatus(); refreshLog() }
                 }
                 override fun onMessage(webSocket: WebSocket, text: String) = handle(text)
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    recorder.record("connection", """{"state":"failed","reason":${JsonPrimitive(t.message)}}""")
                     connected.value = false
                     Log.w("BotRepo", "ws failed: ${t.message}")
                     latch.complete(Unit)
                 }
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    recorder.record("connection", """{"state":"closed","code":$code,"reason":${JsonPrimitive(reason)}}""")
                     connected.value = false; latch.complete(Unit)
                 }
             })
@@ -276,6 +286,7 @@ class BotRepository(initialHost: String) {
     }
 
     private fun handle(text: String) {
+        recorder.record("ws", text)
         runCatching {
             val o = json.parseToJsonElement(text) as JsonObject
             when (o["type"]?.toString()?.trim('"')) {

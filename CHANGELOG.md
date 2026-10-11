@@ -1,5 +1,15 @@
 # Platform revisions
 
+## 3.1.6 — labelled terrain sessions
+
+- Add a Data destination with start/stop, terrain markers and outcome notes.
+- Capture ordered raw WebSocket/HTTP events to disk before app decoding, including
+  ToF, unknown message types, disconnects, parameter changes and app commands.
+- Export persisted sessions as ZIP: JSONL, state/action CSV, live parameter/version
+  metadata and pitch/speed/distance/staleness/saturation diagnostics.
+- Preserve unassigned reward/terminal fields for offline RL preparation; camera
+  video and unobserved sensor internals are not represented as captured data.
+
 ## 3.1.5 — controlled three-way rotation
 
 - Support portrait, landscape and reverse landscape with sensor hysteresis.

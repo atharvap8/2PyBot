@@ -42,6 +42,7 @@ private val DESTS = listOf(
     Dest("tune", "Tune", Icons.Filled.Tune),
     Dest("auto", "Auto", Icons.Filled.AutoFixHigh),
     Dest("cam", "Camera", Icons.Filled.CameraAlt),
+    Dest("data", "Data", Icons.Filled.FiberManualRecord),
     Dest("set", "Setup", Icons.Filled.Settings),
 )
 
@@ -163,7 +164,8 @@ class MainActivity : ComponentActivity() {
                                 "map"  -> MapScreen(vm)
                                 "tune" -> TuneScreen(vm)
                                 "auto" -> AutoScreen(vm)
-                                "cam"  -> CameraScreen(vm)
+                                 "cam"  -> CameraScreen(vm)
+                                 "data" -> RecorderScreen(vm)
                                 else   -> SettingsScreen(vm)
                             }
                         }
