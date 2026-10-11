@@ -114,7 +114,7 @@ jobs:
             Tagged source: `${{ github.sha }}`.
 
             Tags containing a suffix such as `-rc.1` are prerelease candidates.
-            [Complete Revision Table](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/REVISION_HISTORY.md)
+            [Revision Table](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/REVISION_HISTORY.md)
             records historical features and estimated future milestones.
             [Vision roadmap](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/VISION_ROADMAP.md)
             tracks calibration, camera/ToF fusion and later ONNX perception work.

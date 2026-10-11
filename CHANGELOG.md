@@ -1,7 +1,7 @@
 # Platform revisions
 
-The complete standard feature/revision table, including repository inception and
-estimated future work, is in [Revision Table](docs/REVISION_HISTORY.md).
+For the main milestones and estimated dates for future work, see the
+[Revision Table](docs/REVISION_HISTORY.md).
 
 ## 3.4.0 — remove fixed creep limits and prepare vision roadmap
 

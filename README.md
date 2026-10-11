@@ -104,12 +104,9 @@ intrinsic calibration and validated undistorted preview.
 
 ## Revision Table
 
-The [complete Revision Table](docs/REVISION_HISTORY.md) records every historical
-commit from repository inception, feature-level additions and planned features
-with estimated dates. It uses **Sr. No. / Feature Name/Change / Version / Date**;
-untagged development, separate experiments and future estimates are marked
-explicitly. The [vision roadmap](docs/VISION_ROADMAP.md) provides the corresponding
-implementation checklists.
+The [Revision Table](docs/REVISION_HISTORY.md) covers the main releases and
+features, along with estimated dates for upcoming work. Smaller fixes are grouped
+together. See the [vision roadmap](docs/VISION_ROADMAP.md) for the detailed task list.
 
 ## Updating the bot
 
