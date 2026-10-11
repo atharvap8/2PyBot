@@ -1,5 +1,11 @@
 # Platform revisions
 
+## 3.1.5 — controlled three-way rotation
+
+- Support portrait, landscape and reverse landscape with sensor hysteresis.
+- Ignore reverse portrait and unknown/flat sensor readings; rotation tests cover
+  all permitted windows and the excluded upside-down state.
+
 ## 3.1.4 — foreground screen keep-awake
 
 - Keep the display awake while the robot app is visible; clear the window flag
