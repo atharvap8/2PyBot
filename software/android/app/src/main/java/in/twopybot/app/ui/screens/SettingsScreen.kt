@@ -1,17 +1,25 @@
 package `in`.twopybot.app.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.twopybot.app.ui.components.Section
 import `in`.twopybot.app.ui.theme.*
 import `in`.twopybot.app.vm.BotViewModel
+import `in`.twopybot.app.BuildConfig
+import `in`.twopybot.app.export.RobotReportExporter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(vm: BotViewModel) {
@@ -19,6 +27,20 @@ fun SettingsScreen(vm: BotViewModel) {
     val stream by vm.repo.stream.collectAsStateWithLifecycle()
     val log by vm.repo.logLines.collectAsStateWithLifecycle()
     var field by remember(host) { mutableStateOf(host) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exportRows by remember { mutableStateOf<List<String>>(emptyList()) }
+    val exportPdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri, "w")?.use {
+                        RobotReportExporter.writeLog(it, exportRows, host, BuildConfig.VERSION_NAME)
+                    } ?: error("Could not open PDF destination")
+                }
+            }.fold({ vm.toast("Robot log PDF exported") }, { vm.toast("Export failed: ${it.message}") })
+        }
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
 
@@ -57,6 +79,10 @@ fun SettingsScreen(vm: BotViewModel) {
         }
 
         Section("Robot log") {
+            OutlinedButton(onClick = {
+                exportRows = log.toList()
+                exportPdf.launch("2PyBot-log-${System.currentTimeMillis()}.pdf")
+            }, modifier = Modifier.fillMaxWidth()) { Text("Export log PDF (${log.size} rows)") }
             Text(log.takeLast(40).joinToString("\n").ifEmpty { "—" },
                  style = Mono.copy(fontSize = 10.sp), color = TextDim, lineHeight = 14.sp)
         }

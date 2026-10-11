@@ -9,6 +9,8 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -64,6 +66,11 @@ data class StatusPayload(
 
 @Serializable
 data class PathPayload(val path: List<List<Float>> = emptyList())
+
+@Serializable
+data class RobotLogRow(val text: String = "", val t: Double = 0.0)
+@Serializable
+data class RobotLogPayload(val log: List<RobotLogRow> = emptyList())
 
 @Serializable
 data class CamControl(
@@ -170,6 +177,12 @@ class BotRepository(initialHost: String) {
         }
     }
 
+    suspend fun refreshLog() = withContext(Dispatchers.IO) {
+        runCatching {
+            logLines.value = json.decodeFromString<RobotLogPayload>(get("/api/log")).log.map { it.text }.takeLast(1000)
+        }
+    }
+
     suspend fun setParam(key: String, value: Float) = withContext(Dispatchers.IO) {
         runCatching {
             post("/api/params/set", """{"key":"$key","value":$value}""")
@@ -245,7 +258,7 @@ class BotRepository(initialHost: String) {
             ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     connected.value = true
-                    scope.launch { refreshParams(); refreshStatus() }
+                    scope.launch { refreshParams(); refreshStatus(); refreshLog() }
                 }
                 override fun onMessage(webSocket: WebSocket, text: String) = handle(text)
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -274,8 +287,8 @@ class BotRepository(initialHost: String) {
                 }
                 "params" -> scope.launch { refreshParams() }
                 "log", "param_msg" -> {
-                    val t = o["text"]?.toString()?.trim('"') ?: return
-                    logLines.value = (logLines.value + t).takeLast(300)
+                    val t = o["text"]?.jsonPrimitive?.contentOrNull ?: return
+                    logLines.value = (logLines.value + t).takeLast(1000)
                     if (t.startsWith("A,")) {
                         autoLog.value = (autoLog.value + t.removePrefix("A,")).takeLast(120)
                     }
