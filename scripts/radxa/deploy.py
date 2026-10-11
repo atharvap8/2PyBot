@@ -39,7 +39,7 @@ def plan_changes(paths, first=False):
             plan.dependencies = plan.console = True
         elif path.startswith(APP + "console/") and path.endswith(".py"):
             plan.console = True
-        elif path.startswith(APP + "ui/") and path.endswith((".js", ".html", ".css")):
+        elif path.startswith(APP + "ui/") and path.endswith((".js", ".html", ".css", ".json")):
             plan.console = True
         elif path.startswith(APP + "native/") and (
             path.endswith((".c", ".h")) or path.endswith("/Makefile")

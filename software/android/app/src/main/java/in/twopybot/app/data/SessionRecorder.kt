@@ -70,7 +70,7 @@ class SessionRecorder(private val directory: File) {
         try {
             events = File(target, "events.jsonl").bufferedWriter()
             telemetry = File(target, "telemetry.csv").bufferedWriter().also {
-                it.write("seq,elapsed_ms,wall_ms,terrain,firmware_ms,x_m,y_m,heading_deg,pitch_deg,speed_mps,armed,balancing,stale,fwd,steer,v_cmd,sat_v,sat_a,loop_max_us,debug_json,reward,terminal\n")
+                it.write("seq,elapsed_ms,wall_ms,terrain,firmware_ms,x_m,y_m,heading_deg,pitch_deg,speed_mps,armed,balancing,stale,fwd,steer,v_cmd_steps_s,sat_v,sat_a,loop_max_us,debug_json,reward,terminal\n")
             }
             state.value = RecordingState(active = true, id = id, terrain = terrain)
             record("session_start", metadata.toString())
@@ -162,7 +162,7 @@ class SessionRecorder(private val directory: File) {
         } finally { events = null; telemetry = null; refreshSessions() }
     }
 
-    @Synchronized fun export(id: String, output: OutputStream) {
+    fun export(id: String, output: OutputStream) {
         require(id in sessions.value && id != state.value.takeIf { it.active }?.id) { "Stop the session before exporting" }
         val target = File(directory, id)
         require(target.parentFile?.canonicalFile == directory.canonicalFile)

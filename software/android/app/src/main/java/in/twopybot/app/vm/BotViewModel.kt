@@ -73,6 +73,10 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
         }.fold({ toast("Recording started") }, { toast("Recording failed: ${it.message}") })
     }
 
+    fun setToFGuard(enabled: Boolean) = viewModelScope.launch {
+        repo.setToFGuard(enabled).onFailure { toast("Guard change failed: ${it.message}") }
+    }
+
     fun stopRecording() = viewModelScope.launch(Dispatchers.IO) {
         runCatching { recorder.stop() }.fold({ toast("Session saved on device") }, { toast("Save failed: ${it.message}") })
     }

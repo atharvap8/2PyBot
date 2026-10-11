@@ -56,11 +56,20 @@ pre.log{max-height:280px;overflow:auto;background:#05070b;border:1px solid var(-
 padding:10px;font:11.5px/1.5 ui-monospace,monospace;color:#9fb0c8;margin:0}
 .deriv{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:8px}
 .deriv b{color:var(--cy);font-variant-numeric:tabular-nums}
-.vision-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px}
-.tof-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;margin-top:12px}
-.tof-cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:5px;
-font:11px ui-monospace,monospace;background:#252b36;min-width:0}
-.tof-cell.roi{outline:1px solid rgba(255,255,255,.35)}
-@media(max-width:760px){.vision-layout{grid-template-columns:1fr}.tof-grid{max-width:440px}}
+.driving-layout{display:grid;grid-template-columns:minmax(140px,.9fr) minmax(0,2.2fr) minmax(150px,.8fr);gap:10px;margin-bottom:14px}
+.drive-panel{background:#e8eaed;color:#4c555e;border:1px solid #bfc6cc;border-radius:14px;overflow:hidden;min-width:0}
+.drive-panel h3{padding:12px 12px 0;margin:0;font-size:14px}
+.drive-map{display:flex;flex-direction:column;justify-content:center}.drive-map canvas{width:100%;aspect-ratio:1}
+.drive-map small{padding:12px;font-size:11px}.drive-scene canvas{display:block;width:100%;height:440px}
+.drive-stats{padding:14px;font-size:12px}.drive-stats strong{display:block;font-size:40px;font-weight:400;font-variant-numeric:tabular-nums}
+.drive-stats p{margin:12px 0}.drive-stats hr{border:0;border-top:1px solid #bec5cb;margin:16px 0}
+details.card video{max-height:340px;margin-top:12px}
+@media(max-width:760px){.driving-layout{grid-template-columns:minmax(100px,1fr) minmax(0,2fr)}
+.drive-scene canvas{height:340px}.drive-stats{grid-column:1/-1;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.drive-stats strong{font-size:30px}.drive-stats p{margin:4px}.drive-stats hr{display:none}}
 @media(max-width:760px){nav{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden}
 header{padding:10px 12px;gap:10px}.chips{gap:5px}.estop{margin-left:auto}}
+@media(orientation:landscape){nav{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden}
+.driving-layout{height:clamp(200px,calc(100dvh - 180px),440px);grid-template-columns:minmax(110px,.9fr) minmax(0,2.2fr) minmax(130px,.8fr)}
+.drive-scene canvas{height:100%}.drive-map canvas{max-height:calc(100% - 70px);aspect-ratio:auto}
+.drive-stats{overflow-y:auto;grid-column:auto;display:block}}

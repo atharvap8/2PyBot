@@ -113,6 +113,13 @@ jobs:
 
             Tagged source: `${{ github.sha }}`.
 
+            ### Android outputs
+
+            The Android Build workflow attaches `2PyBot-${{ github.ref_name }}-debug.apk`
+            (debug-signed, directly installable), an unsigned release APK and APK checksums.
+            Terrain sessions, exports and the driving view are documented in
+            [Terrain sessions](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/terrain-sessions.md).
+
             BaseLink uses ESP32 LQR/LQI control, direct Bluepad32 gamepad input,
             TMC2226 drivers, runtime parameters, terrain adaptation, and camera payload controls.
 

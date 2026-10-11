@@ -63,6 +63,32 @@ data class StatusPayload(
     val derived: Map<String, Float> = emptyMap(),
     val stream: StreamStatus = StreamStatus(),
     @SerialName("param_count") val paramCount: Int = 0,
+    val tof: ToFPayload = ToFPayload(),
+)
+
+@Serializable
+data class DepthPoint(
+    @SerialName("x_m") val x: Float = 0f,
+    @SerialName("y_m") val y: Float = 0f,
+    @SerialName("z_m") val z: Float = 0f,
+    val confidence: Float = 0f, val confirmed: Boolean = false,
+    @SerialName("in_path") val inPath: Boolean = false,
+)
+
+@Serializable
+data class ToFPayload(
+    val state: String = "starting", val stale: Boolean = true, val error: String = "",
+    @SerialName("valid_count") val validCount: Int = 0,
+    val coverage: Float = 0f, val points: List<DepthPoint> = emptyList(),
+    @SerialName("nearest_m") val nearest: Float? = null,
+    @SerialName("guard_enabled") val guardEnabled: Boolean = false,
+    @SerialName("guard_supported") val guardSupported: Boolean = false,
+    @SerialName("guard_active") val guardActive: Boolean = false,
+    @SerialName("guard_reason") val guardReason: String = "off",
+    @SerialName("forward_limit_mps") val forwardLimit: Float? = null,
+    @SerialName("stopping_distance_m") val stoppingDistance: Float = .35f,
+    @SerialName("corridor_half_width_m") val halfWidth: Float = .14f,
+    @SerialName("turn_envelope_curvature") val curvature: Float = 0f,
 )
 
 @Serializable
@@ -127,6 +153,7 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
     val autoLog = MutableStateFlow<List<String>>(emptyList())
     val unsaved = MutableStateFlow(false)
     val stream = MutableStateFlow(StreamStatus())
+    val tof = MutableStateFlow(ToFPayload())
 
     val pad: StateFlow<PadMirror> = combine(debug, connected) { d, c ->
         PadMirror(
@@ -181,6 +208,8 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
             telemetry.value = s.telemetry
             derived.value = s.derived
             stream.value = s.stream
+            debug.value = s.debug
+            tof.value = s.tof
         }
     }
 
@@ -218,6 +247,10 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
     }
 
     suspend fun estop() = withContext(Dispatchers.IO) { runCatching { post("/api/estop") } }
+
+    suspend fun setToFGuard(enabled: Boolean) = withContext(Dispatchers.IO) {
+        runCatching { tof.value = json.decodeFromString<ToFPayload>(post("/api/tof/guard", """{"enabled":$enabled}""")) }
+    }
 
     suspend fun resetPose() = withContext(Dispatchers.IO) { runCatching { post("/api/pose/reset") } }
 
@@ -272,12 +305,14 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     recorder.record("connection", """{"state":"failed","reason":${JsonPrimitive(t.message)}}""")
                     connected.value = false
+                    tof.value = tof.value.copy(stale = true)
                     Log.w("BotRepo", "ws failed: ${t.message}")
                     latch.complete(Unit)
                 }
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     recorder.record("connection", """{"state":"closed","code":$code,"reason":${JsonPrimitive(reason)}}""")
                     connected.value = false; latch.complete(Unit)
+                    tof.value = tof.value.copy(stale = true)
                 }
             })
             latch.await()
@@ -290,6 +325,12 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
         runCatching {
             val o = json.parseToJsonElement(text) as JsonObject
             when (o["type"]?.toString()?.trim('"')) {
+                "hello" -> o["status"]?.let {
+                    val status = json.decodeFromJsonElement(StatusPayload.serializer(), it)
+                    telemetry.value = status.telemetry; debug.value = status.debug
+                    tof.value = status.tof; derived.value = status.derived; stream.value = status.stream
+                }
+                "tof" -> o["tof"]?.let { tof.value = json.decodeFromJsonElement(ToFPayload.serializer(), it) }
                 "telemetry" -> {
                     o["tel"]?.let { telemetry.value = json.decodeFromJsonElement(Telemetry.serializer(), it) }
                     o["debug"]?.let {

@@ -1,5 +1,20 @@
 # Platform revisions
 
+## 3.1.7 — measured-depth driving scene and projected guard
+
+- Replace the web ToF grid with a grey driving scene: trail left, current assembled
+  STL robot and accepted depth returns centrally, speed/status right. Add matching
+  Android Drive destination, preserving existing camera and Live views.
+- Use seven current printed CAD components plus parametric tyres/hubs; ship meshes
+  locally, without a CDN or the obsolete simplified STEP model.
+- Confirm isolated depth returns over successive frames; immediate close returns
+  stop forward requests. Apply reaction/braking limits inside a swept corridor.
+- A missing zone no longer blocks every request: partial coverage reduces speed;
+  stale/wholly unknown depth stays blocked. Reverse, steering and balance recovery
+  retain their existing authority. Guard remains opt-in after restart.
+- Expose coverage, confidence, measured points and stopping distance; mounting and
+  optical projection are explicitly approximate, with a reference floor.
+
 ## 3.1.6 — labelled terrain sessions
 
 - Add a Data destination with start/stop, terrain markers and outcome notes.

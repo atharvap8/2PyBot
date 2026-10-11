@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.collectLatest
 private data class Dest(val id: String, val label: String, val icon: ImageVector)
 
 private val DESTS = listOf(
+    Dest("drive", "Drive", Icons.Filled.DirectionsCar),
     Dest("live", "Live", Icons.Filled.Videocam),
     Dest("map", "Map", Icons.Filled.Map),
     Dest("tune", "Tune", Icons.Filled.Tune),
@@ -83,7 +84,7 @@ class MainActivity : ComponentActivity() {
             TwoPyBotTheme {
                 val vm: BotViewModel = viewModel()
                 val snackbar = remember { SnackbarHostState() }
-                var dest by rememberSaveable { mutableStateOf("live") }
+                var dest by rememberSaveable { mutableStateOf("drive") }
 
                 LaunchedEffect(Unit) {
                     vm.snack.collectLatest { m ->
@@ -142,7 +143,7 @@ class MainActivity : ComponentActivity() {
                                     ) { Icon(Icons.Filled.Stop, "E-stop") }
                                     Spacer(Modifier.height(4.dp))
                                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                                    val height = (maxHeight / DESTS.size).coerceIn(40.dp, 64.dp)
+                                    val height = (maxHeight / DESTS.size).coerceIn(34.dp, 64.dp)
                                     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                                         DESTS.forEach { d ->
                                             Column(Modifier.fillMaxWidth().height(height)
@@ -159,7 +160,8 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         Box(Modifier.weight(1f)) {
-                            when (dest) {
+                             when (dest) {
+                                 "drive" -> DrivingScreen(vm)
                                 "live" -> LiveScreen(vm)
                                 "map"  -> MapScreen(vm)
                                 "tune" -> TuneScreen(vm)

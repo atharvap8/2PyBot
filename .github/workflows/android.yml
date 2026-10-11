@@ -3,14 +3,20 @@ name: Android Build
 on:
   push:
     branches: [main, 'system/**']
+    tags: ['v*.*.*']
     paths:
       - 'software/android/**'
       - '.github/workflows/android.yml'
+      - 'VERSION'
   pull_request:
     paths:
       - 'software/android/**'
       - '.github/workflows/android.yml'
+      - 'VERSION'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -40,7 +46,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Build APKs
-        run: bash gradlew :app:assembleDebug :app:assembleRelease --no-daemon --stacktrace
+        run: bash gradlew :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -48,6 +54,23 @@ jobs:
           name: 2pybot-apk
           path: software/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Name tagged APKs
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          BUILD_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p tagged-apks
+          cp app/build/outputs/apk/debug/app-debug.apk "tagged-apks/2PyBot-${BUILD_TAG}-debug.apk"
+          cp app/build/outputs/apk/release/app-release-unsigned.apk "tagged-apks/2PyBot-${BUILD_TAG}-release-unsigned.apk"
+          sha256sum tagged-apks/*.apk > "tagged-apks/Android-SHA256SUMS-${BUILD_TAG}.txt"
+
+      - name: Publish tagged Android APKs
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: software/android/tagged-apks/*
 
       - name: Upload unsigned release APK
         uses: actions/upload-artifact@v4
