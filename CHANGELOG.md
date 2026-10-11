@@ -1,5 +1,10 @@
 # Platform revisions
 
+## 3.1.4 — foreground screen keep-awake
+
+- Keep the display awake while the robot app is visible; clear the window flag
+  when leaving the app without requiring wake-lock or background permissions.
+
 ## 3.1.3 — complete landscape navigation
 
 - Landscape navigation adapts item height to available screen height and keeps
