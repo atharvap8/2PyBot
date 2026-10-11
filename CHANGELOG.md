@@ -1,5 +1,69 @@
 # Platform revisions
 
+The complete standard feature/revision table, including repository inception and
+estimated future work, is in [Revision Table](docs/REVISION_HISTORY.md).
+
+## 3.4.0 — remove fixed creep limits and prepare vision roadmap
+
+- Remove fixed 0.20/0.45 m/s unknown/partial-depth caps. Fresh unconfirmed depth
+  leaves the normal DRIVEV limit; confirmed obstacles still apply braking/stop
+  limits and stale/offline depth still holds forward requests.
+- Keep unknown depth explicitly labelled as unobserved rather than clear.
+- Document camera distortion/intrinsics, camera/base and camera/ToF extrinsics,
+  time-aligned distance overlays and a later measured ONNX perception pipeline.
+
+## 3.3.0 — Drive alignment and richer chase world
+
+- Use one forward-first world frame for CAD, encoder movement, trail and depth.
+- Read the existing PITCHSGN calibration for display; raw negative forward tilt
+  now leans the CAD forward rather than backward.
+- Keep grounded CAD yaw aligned with odometry; idle compass changes cannot leave
+  a sideways heading offset when forward driving resumes.
+- Add a centered rear chase view and richer dark-world reference guidance.
+- Expand the world to the full viewport with floating speed/status and collapsible
+  map/details; add a fading direction ribbon, range arcs and ground parallax cues.
+- Camera follow/explore changes preserve the view; all scene guidance is labelled
+  as a reference rather than fabricated sensor-detected terrain or roads.
+
+## 3.2.0 — refined Android Drive world
+
+### Less intrusive collision guard and reference calibration
+
+- Use a 0.20 m close-obstacle clearance, 0.18 s reaction model and narrower wheel
+  corridor; partial coverage permits up to 0.45 m/s, fresh unknown depth creep
+  up to 0.20 m/s. Confirmed collisions stop requests; stale/offline depth holds.
+- Add measured-reference range-bias calibration to Drive, persisted separately
+  from robot NVS. Require stable central returns and a bias within ±0.10 m.
+- Preserve raw ranges alongside corrected ranges; never fabricate calibration
+  from invalid/self-reflection returns. Balance/reverse/steering are unchanged.
+
+### Live world motion and lift evidence
+
+- Move CAD in the same metre-based frame as the encoder trail, with interpolated
+  heading/pitch, encoder wheel rotation, camera following and exploration mode.
+- Show compass-observed hand-held yaw when wheel odometry cannot observe rotation.
+- Show existing firmware airborne/landing events, low-g and handled/tilted cues.
+  Lift animation is symbolic; steady hand-held height/contact remain unmeasured.
+- Freeze stale pose and preserve short-angle interpolation across 0/360 degrees.
+
+### Dark touch-navigable Drive world
+
+- Replace Android's light painter-style scene with a hardware depth-buffered 3D
+  world, plain dark floor, fog, contact shadow and smoothly shaded CAD surfaces.
+- One finger orbits, two fingers pan, pinch zooms; Recenter restores the view.
+- Add dark instrument cards and a toggleable trail panel. No CAD edge/wireframe
+  pass is drawn. Camera gestures change the view only.
+- Use full-resolution printed CAD surfaces for the Android world, preserving
+  vents/cut-outs rather than decimation artefacts; retain smooth tyre shading.
+
+### Prepared assembled robot launcher icon
+
+- Render a front three-quarter app icon from all seven full-resolution current
+  robot STL components, using matching parametric tyres/hubs and app-theme colours.
+- Generate 1024px artwork, density-specific launcher/adaptive layers, round icons
+  and Android 13 themed monochrome icons with adaptive-mask safe padding.
+- Keep the render reproducible with `python scripts/generate_launcher_icon.py`.
+
 ## 3.1.7 — measured-depth driving scene and projected guard
 
 - Replace the web ToF grid with a grey driving scene: trail left, current assembled

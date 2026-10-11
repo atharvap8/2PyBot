@@ -36,6 +36,10 @@ Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
 
 `assembleRelease` produces an unsigned release APK. No signing key is included. Machine-specific SDK paths belong in ignored `local.properties`, or use `ANDROID_HOME`.
 
+Release-candidate tags keep root `VERSION` numeric (for example `3.4.0`) and
+build with `-PreleaseVersion=3.4.0-rc.1`. APK versionName then includes the RC
+suffix, while versionCode continues to derive from the numeric base version.
+
 ## Build helper and CI
 
 `build.sh` supports debug, run, release, clean, setup, and doctor modes. Its setup commands use Arch Linux `pacman`; they are not a generic Linux installer.
@@ -46,7 +50,7 @@ bash build.sh
 bash build.sh run
 ```
 
-The repository's [Android workflow](../../.github/workflows/android.yml) builds debug and unsigned release APKs when Android files change on `main` or `system/**`, on matching pull requests, or through manual dispatch. Artifacts are `2pybot-apk` and `2pybot-apk-release-unsigned`.
+The repository's [Android workflow](../../.github/workflows/android.yml) builds debug and unsigned release APKs and runs unit tests when Android/version files change on `main` or `system/**`, on matching pull requests, or through manual dispatch. Artifacts are `2pybot-apk` and `2pybot-apk-release-unsigned`; version tags also attach named APKs to the GitHub release. App version/code derive from the repository's root `VERSION`.
 
 ## Connection
 
@@ -66,14 +70,23 @@ The app communicates with the Radxa, not directly with the ESP32. The console ow
 
 | Screen | Contents |
 | :--- | :--- |
+| Drive | Full-width dark shaded world, chase/orbit/pan/zoom, live pose, reference guidance, depth and guard/range calibration |
 | Live | WHEP camera, attitude gauge, controller debug values, gesture controls |
-| Map | Console dead-reckoned trail and pose; local pose reset |
+| Map | Console dead-reckoned trail and pose; local pose reset; PNG/PDF exports |
 | Tune | Parameter groups, values, bounds, descriptions, Save/Reload/Defaults |
 | Auto | Wobble, trim, radius, and stall commands with progress logs |
 | Camera | V4L2 settings, named profiles, exposure/gain adjustment, stream settings |
-| Setup | Robot address, stream status, stop control, console logs |
+| Data | Labelled on-disk telemetry/ToF sessions, annotations, diagnostics and ZIP export |
+| Setup | Robot address, stream status, stop control, console logs and log PDF export |
 
 Portrait uses a bottom navigation bar and top stop button. Landscape uses a navigation rail with stop control and wider two-pane screens. See [landscape and auto-tuning](LANDSCAPE_AND_AUTOTUNE.md).
+
+The display stays awake while the app is visible. Rotation supports portrait and
+both landscape directions. Drive touch gestures change only the camera view;
+they do not drive or arm the robot. Its references are not measured roads or
+free-space claims. Detailed coordinates, recorder and guard behaviour are in
+[terrain sessions and Drive](../../docs/terrain-sessions.md). Planned camera/ToF
+calibration and ML work is tracked in the [vision roadmap](../../docs/VISION_ROADMAP.md).
 
 ## Parameters and commands
 
@@ -89,12 +102,20 @@ The stop button calls `/api/estop`, which sends firmware `X`. That command stops
 
 | File | Responsibility |
 | :--- | :--- |
-| `MainActivity.kt` | Six destinations, portrait/landscape navigation, stop control |
+| `MainActivity.kt` | Eight destinations, orientation/navigation, keep-awake and stop control |
 | `data/BotRepository.kt` | HTTP/WebSocket models, parameter requests, progress logs, WHEP URL |
 | `vm/BotViewModel.kt` | Saved host setting and UI command actions |
 | `net/WhepClient.kt` | Receive-only video track, SDP exchange, decoder factory |
-| `ui/screens/` | Live, Map, Tune, Auto, Camera, Setup |
+| `data/SessionRecorder.kt` | Raw timestamped events, labelled CSV, metadata/diagnostics and ZIP export |
+| `ui/screens/` | Drive, Live, Map, Tune, Auto, Camera, Data and Setup |
+| `ui/components/RobotWorldView.kt` | GLES shaded CAD/world and touch interaction |
+| `ui/components/WorldFrame.kt`, `WorldMotion.kt`, `WorldCamera.kt` | Shared scene axes, calibrated pitch, pose and chase/explore camera |
 | `ui/Responsive.kt` | Orientation helpers |
 | `ui/components/Widgets.kt` | Reusable gauges, parameter rows, and status components |
 
 Kotlin files are under `app/src/main/java/in/twopybot/app/`.
+
+Launcher artwork and density variants are reproducible with
+`python scripts/generate_launcher_icon.py` from the repository root (numpy,
+trimesh, Pillow). The full-resolution world asset uses
+`python scripts/generate_world_model.py` (numpy, trimesh).

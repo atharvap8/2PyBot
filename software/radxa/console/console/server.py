@@ -145,6 +145,21 @@ def tof_status():
     return tof.status(link)
 
 
+class ToFCalibration(BaseModel):
+    reference_m: float
+
+
+@app.post("/api/tof/calibrate")
+def tof_calibrate(body: ToFCalibration):
+    try:
+        tof.calibrate(body.reference_m)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, "Could not persist ToF calibration") from exc
+    return tof.status(link)
+
+
 class ToFGuard(BaseModel):
     enabled: bool
 

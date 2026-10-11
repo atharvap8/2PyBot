@@ -86,9 +86,13 @@ data class ToFPayload(
     @SerialName("guard_active") val guardActive: Boolean = false,
     @SerialName("guard_reason") val guardReason: String = "off",
     @SerialName("forward_limit_mps") val forwardLimit: Float? = null,
-    @SerialName("stopping_distance_m") val stoppingDistance: Float = .35f,
-    @SerialName("corridor_half_width_m") val halfWidth: Float = .14f,
+    @SerialName("stopping_distance_m") val stoppingDistance: Float = .20f,
+    @SerialName("corridor_half_width_m") val halfWidth: Float = .12f,
     @SerialName("turn_envelope_curvature") val curvature: Float = 0f,
+    @SerialName("range_calibrated") val rangeCalibrated: Boolean = false,
+    @SerialName("range_offset_m") val rangeOffset: Float = 0f,
+    @SerialName("calibration_ready") val calibrationReady: Boolean = false,
+    @SerialName("calibration_error") val calibrationError: String = "",
 )
 
 @Serializable
@@ -250,6 +254,10 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
 
     suspend fun setToFGuard(enabled: Boolean) = withContext(Dispatchers.IO) {
         runCatching { tof.value = json.decodeFromString<ToFPayload>(post("/api/tof/guard", """{"enabled":$enabled}""")) }
+    }
+
+    suspend fun calibrateToF(reference: Float) = withContext(Dispatchers.IO) {
+        runCatching { tof.value = json.decodeFromString<ToFPayload>(post("/api/tof/calibrate", """{"reference_m":$reference}""")) }
     }
 
     suspend fun resetPose() = withContext(Dispatchers.IO) { runCatching { post("/api/pose/reset") } }

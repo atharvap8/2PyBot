@@ -50,7 +50,7 @@ export default function register(registerTab) {
         </div>
         <p class=hint id=tofError></p>
         <div class=card><h3>Confidence-based reference guard</h3>
-          <p class=hint>Confirmed returns in the projected corridor set a reaction/braking speed cap. Partial coverage allows reduced-speed requests; stale or wholly unknown depth holds forward requests.
+          <p class=hint>Confirmed returns in the projected corridor set a reaction/braking speed cap. Fresh missing or partial coverage does not impose a fixed creep limit; stale/offline depth holds forward requests. Unknown depth does not establish a clear path.
             Reverse, steering and balance recovery remain available. Off after console restart. Approximate optics/mounting; reference floor is not measured terrain.</p></div>
         <details class=card><summary>Live camera</summary><video autoplay playsinline muted id=tofVideo></video>
           <div class=bar><button class=act id=tofConnect>Reconnect video</button><button class=act id=tofSnap>Snapshot</button><span class=chip id=tofCameraState>Connecting…</span></div>

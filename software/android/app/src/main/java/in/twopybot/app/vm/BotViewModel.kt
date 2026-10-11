@@ -77,6 +77,11 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
         repo.setToFGuard(enabled).onFailure { toast("Guard change failed: ${it.message}") }
     }
 
+    fun calibrateToF(reference: Float) = viewModelScope.launch {
+        repo.calibrateToF(reference).fold({ toast("ToF reference calibration saved") },
+            { toast("Calibration: ${it.message}") })
+    }
+
     fun stopRecording() = viewModelScope.launch(Dispatchers.IO) {
         runCatching { recorder.stop() }.fold({ toast("Session saved on device") }, { toast("Save failed: ${it.message}") })
     }
