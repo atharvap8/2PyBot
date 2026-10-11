@@ -1,5 +1,11 @@
 # Platform revisions
 
+## 3.1.3 — complete landscape navigation
+
+- Landscape navigation adapts item height to available screen height and keeps
+  all destinations accessible, with scrolling only on unusually short displays.
+- Stop remains fixed and accessible above the destination list.
+
 ## 3.1.2 — trail reports
 
 - Map exports a rendered trail/robot-position image as PNG or PDF.

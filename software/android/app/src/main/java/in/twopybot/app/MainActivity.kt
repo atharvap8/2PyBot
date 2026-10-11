@@ -5,12 +5,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -92,10 +97,9 @@ class MainActivity : ComponentActivity() {
                         if (land) {
                             // Rail instead of a bottom bar: vertical space is the
                             // scarce resource when the phone is sideways.
-                            NavigationRail(
-                                containerColor = Panel,
-                                header = {
-                                    Spacer(Modifier.height(6.dp))
+                            Column(Modifier.width(80.dp).fillMaxHeight().background(Panel),
+                                horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Spacer(Modifier.height(4.dp))
                                     FilledIconButton(
                                         onClick = { vm.estop() },
                                         colors = IconButtonDefaults.filledIconButtonColors(
@@ -103,19 +107,20 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.size(44.dp)
                                     ) { Icon(Icons.Filled.Stop, "E-stop") }
                                     Spacer(Modifier.height(4.dp))
-                                }
-                            ) {
-                                DESTS.forEach { d ->
-                                    NavigationRailItem(
-                                        selected = dest == d.id,
-                                        onClick = { dest = d.id },
-                                        icon = { Icon(d.icon, d.label, modifier = Modifier.size(20.dp)) },
-                                        label = { Text(d.label, fontSize = 9.sp) },
-                                        colors = NavigationRailItemDefaults.colors(
-                                            selectedIconColor = Ink, selectedTextColor = Cyan,
-                                            indicatorColor = Cyan,
-                                            unselectedIconColor = TextDim, unselectedTextColor = TextDim)
-                                    )
+                                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                                    val height = (maxHeight / DESTS.size).coerceIn(40.dp, 64.dp)
+                                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                                        DESTS.forEach { d ->
+                                            Column(Modifier.fillMaxWidth().height(height)
+                                                .background(if (dest == d.id) Cyan.copy(alpha=.16f) else Color.Transparent)
+                                                .clickable { dest = d.id },
+                                                horizontalAlignment=Alignment.CenterHorizontally,
+                                                verticalArrangement=Arrangement.Center) {
+                                                Icon(d.icon,d.label,Modifier.size(20.dp),tint=if (dest==d.id) Cyan else TextDim)
+                                                Text(d.label,fontSize=10.sp,color=if (dest==d.id) Cyan else TextDim)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
