@@ -102,16 +102,8 @@ fun MapScreen(vm: BotViewModel) {
              fontSize = 11.sp, color = TextDim, modifier = Modifier.padding(top = 8.dp))
     }
 
-    if (isLandscape()) {
-        Row(Modifier.fillMaxSize().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            map(Modifier.weight(1f).fillMaxHeight())
-            Column(Modifier.width(230.dp).verticalScroll(rememberScrollState())) { stats() }
-        }
-    } else {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
-            Section("Odometry") { map(Modifier.fillMaxWidth().aspectRatio(1f)) }
-            stats()
-            Spacer(Modifier.height(70.dp))
-        }
-    }
+    AdaptiveWorkspace(portraitRatio=1.15f,primary=map,tools={
+        WorkspaceTitle("Odometry","Live trail & report export")
+        stats()
+    })
 }

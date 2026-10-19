@@ -186,7 +186,8 @@ function paintHeader() {
   const t = state.tel, d = state.debug;
   document.getElementById('dot').classList.toggle('ok', !t.stale);
   const waiting = state.derived.BOOTGATE === 1 && !t.host_ready;
-  const st = t.balancing ? 'BALANCING' : (t.stale ? 'NO LINK' : (waiting ? 'BOOT WAIT' : 'IDLE'));
+   const startup = {WAIT_HOST:'WAIT RADXA ACK',INITIALIZING:'INITIALIZING',CALIBRATING:'IMU CALIBRATION',ERROR:'STARTUP ERROR'}[t.startup_state];
+   const st = startup || (t.balancing ? 'BALANCING' : (t.stale ? 'NO LINK' : (waiting ? 'BOOT WAIT' : 'IDLE')));
   const cs = document.getElementById('cState');
   cs.textContent = st;
   cs.className = 'chip' + (t.stale ? ' bad' : (t.balancing ? '' : ' warn'));
@@ -198,7 +199,7 @@ function paintHeader() {
 }
 
 // ---------------- boot ----------------
-const TAB_FILES = ['telemetry', 'vision', 'camera', 'balance', 'stepper', 'drive', 'yaw',
+const TAB_FILES = ['telemetry', 'vision', 'camera', 'calibration', 'objects', 'balance', 'stepper', 'drive', 'yaw',
                    'safety', 'imu', 'climb', 'led', 'payload', 'console'];
 
 (async function boot() {
@@ -212,7 +213,7 @@ const TAB_FILES = ['telemetry', 'vision', 'camera', 'balance', 'stepper', 'drive
   document.addEventListener('params', () => {
     paintHeader();
     // Parameter dumps must not tear down live video/grid/log views.
-    if (current && !['telemetry', 'vision', 'camera', 'console'].includes(current.id)) select(current);
+    if (current && !['telemetry', 'vision', 'camera', 'calibration', 'objects', 'console'].includes(current.id)) select(current);
   });
   setInterval(() => { if (!Object.keys(state.params).length) refreshParams().catch(() => {}); }, 4000);
 })();

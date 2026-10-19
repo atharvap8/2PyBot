@@ -121,18 +121,29 @@ def main():
         call("start_ranging")
         started = True
         last = time.monotonic()
+        sequence = 0
         while not stopping[0]:
             signal.alarm(6)
             ready = C.c_uint8()
             call("check_data_ready", C.byref(ready))
             if ready.value:
                 result = sdk.VL53L5CX_ResultsData()
+                read_start = time.monotonic_ns()
                 call("get_ranging_data", C.byref(result))
+                read_end = time.monotonic_ns()
+                sequence += 1
                 last = time.monotonic()
                 emit(state="ranging", distance_mm=list(result.distance_mm[0]),
                      status=list(result.target_status[0]),
                      sigma_mm=list(result.range_sigma_mm[0]),
-                     targets=list(result.nb_target_detected))
+                     targets=list(result.nb_target_detected), sequence=sequence,
+                     capture_monotonic_ns=(read_start + read_end) // 2,
+                     read_duration_ms=round((read_end-read_start)/1e6, 3),
+                     timestamp_source="host_read_midpoint",
+                     timestamp_uncertainty_ms=round(500/hz+(read_end-read_start)/2e6, 2),
+                     ambient_per_spad=list(result.ambient_per_spad),
+                     signal_per_spad=list(result.signal_per_spad[0]),
+                     reflectance=list(result.reflectance[0]))
             elif time.monotonic() - last > 3:
                 raise RuntimeError("No fresh depth frame for 3 seconds")
             time.sleep(0.01)

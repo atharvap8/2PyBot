@@ -16,6 +16,9 @@ jobs:
       - name: Checkout tagged source
         uses: actions/checkout@v4
 
+      - name: Check project version policy
+        run: python3 scripts/versioning.py --check
+
       - name: Install arduino-cli
         uses: arduino/setup-arduino-cli@v2
 
@@ -38,11 +41,7 @@ jobs:
 
       - name: Build BaseLink
         run: |
-          arduino-cli compile \
-            --fqbn esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app \
-            --warnings default \
-            --output-dir build/BaseLink \
-            firmware/BaseLink/BaseLink.ino
+          python3 scripts/firmware/build.py --output-dir build/BaseLink
 
       - name: Build legacy Controller
         run: |
@@ -61,6 +60,7 @@ jobs:
           cp build/BaseLink/BaseLink.ino.bootloader.bin "release/BaseLink-${BUILD_TAG}.bootloader.bin"
           cp build/BaseLink/BaseLink.ino.partitions.bin "release/BaseLink-${BUILD_TAG}.partitions.bin"
           cp build/BaseLink/BaseLink.ino.elf "release/BaseLink-${BUILD_TAG}.elf"
+          cp build/BaseLink/manifest.json "release/BaseLink-${BUILD_TAG}.manifest.json"
           cp build/Controller/Controller.ino.bin "release/Controller-${BUILD_TAG}.bin"
           arduino-cli core list --format json > "release/core-versions-${BUILD_TAG}.json"
           arduino-cli lib list --format json > "release/library-versions-${BUILD_TAG}.json"

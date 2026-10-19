@@ -87,6 +87,11 @@ Camera profiles are daylight, indoor, low_light, night, and driving. Built-in ex
 
 ## API
 
+The [guided camera calibration suite](../../../docs/CAMERA_CALIBRATION.md) is
+available at `/ui/calibration.html` and in the Calibration tab. It reuses the
+capture owner's JPEG snapshots rather than opening a second camera reader.
+Geometry fitting runs on a bounded worker; existing ISP/exposure settings remain.
+
 | Method and path | Purpose |
 | :--- | :--- |
 | `GET /api/status` | Connection, telemetry, debug, derived values, stream state, parameter count |

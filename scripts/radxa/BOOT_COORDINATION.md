@@ -2,9 +2,10 @@
 
 ## Installed behaviour
 
-1. Firmware starts with `BOOTWAIT=1` and its host-ready flag false. A local
-   START/serial E request is rejected until `BR,1` is received. The ready message
-   does not arm the robot; press START after startup.
+1. Firmware starts with `BOOTWAIT=1` and its host-ready flag false. Only serial,
+   saved parameter loading/discovery and safe disabled output levels are prepared.
+   IMU initialization/calibration, driver startup, gamepad, LEDs and payload are
+   held until Radxa sends `BR,1`. An ACK never arms the robot.
 2. Once Linux enumerates the CP2102 at `/dev/ttyUSB0`, `2pybot-boot-gate.service`
    opens it exclusively with DTR false and RTS true. On the existing ESP32
    auto-reset circuit this holds EN low while keeping GPIO0 in normal-boot mode.
@@ -16,12 +17,23 @@
    Invalid depth readings do not prevent host startup; the optional guard handles
    unknown depth separately.
 5. The gate releases RTS/reset, closes its serial connection and records
-   `/run/2pybot-boot/ready.json`. The console acquires serial, retries `P?` until
-   calibration/boot completes, recognizes `PR,BOOTGATE,1`, and sends `BR,1`.
-6. Firmware replies `BR!,1`; status telemetry reports `host_ready=true`.
+   `/run/2pybot-boot/ready.json`. The console acquires serial and can get `P?`
+   before sensors initialize. It recognizes `PR,BOOTGATE,1` and sends `BR,1`.
+6. Firmware replies `BR!,1`, then initializes hardware and runs the existing
+   three-second settling and roughly one-second gyro sampling sequence. It emits
+   `BS,WAIT_HOST`, `BS,INITIALIZING`, `BS,CALIBRATING` and finally `BS,READY`.
+   Startup failure emits `BS,ERROR` and leaves motors disabled.
+7. After `BS,READY`, put the bot upright and press local START. Early enable/auto-
+   tune/actuator commands are not queued through startup. Host readiness depends
+   on the host camera/API/hotspot, not fresh IMU telemetry, so the handshake cannot
+   deadlock waiting for calibration it has not released yet.
+
+You can leave the bot resting still while Linux boots; it need not be held
+upright for those minutes. Gyro bias calibration needs stillness, not an upright
+position. Stand it upright only when startup is ready and you want to arm.
 
 Software cannot physically assert EN before Linux can control USB. Firmware's
-startup arming interlock covers that initial power-on interval. The physical
+firmware startup hold covers that initial power-on interval. The physical
 USB reset sequence and the firmware handshake were verified on this board.
 
 The six-second console `ExecStartPre` sleep is removed by `45-boot-ready.conf`.
@@ -74,7 +86,8 @@ curl http://127.0.0.1:8080/api/ready
 ```
 
 `BOT_BOOT_HOTSPOT` may be empty for a wired host that does not require a hotspot.
-`BOOTWAIT=0` disables the firmware arming interlock; the systemd reset holder is
+`BOOTWAIT=0` explicitly bypasses the firmware host-startup wait for a standalone
+ESP32 setup; initialization/calibration must still finish before arming. The reset holder is
 separate and must also be disabled for an independent ESP32-only setup.
 
 ## Recovery checkpoints

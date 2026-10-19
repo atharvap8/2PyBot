@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.twopybot.app.data.PadMirror
@@ -32,9 +33,9 @@ import kotlin.math.*
 fun Section(title: String, hint: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxWidth().padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Panel).border(1.dp, Line, RoundedCornerShape(18.dp))
-            .padding(14.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Panel).border(1.dp, Line.copy(alpha=.65f), RoundedCornerShape(14.dp))
+            .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium, color = TextHi)
         if (hint != null) {
@@ -54,38 +55,43 @@ fun Tile(label: String, value: String, accent: Color = Cyan, modifier: Modifier 
             .padding(vertical = 10.dp, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(label.uppercase(), fontSize = 9.5.sp, letterSpacing = 1.sp, color = TextDim)
+        Text(label.uppercase(), fontSize = 10.sp, letterSpacing = .5.sp, color = TextDim,maxLines=1,overflow=TextOverflow.Ellipsis)
         Spacer(Modifier.height(3.dp))
         Text(value, style = Mono.copy(fontSize = 18.sp, color = accent, fontWeight = FontWeight.SemiBold),
-             maxLines = 1, textAlign = TextAlign.Center)
+             maxLines = 1, overflow=TextOverflow.Ellipsis,textAlign = TextAlign.Center)
     }
 }
 
 @Composable
 fun StatusStrip(tel: Telemetry, connected: Boolean, unsaved: Boolean) {
     val dot by animateColorAsState(
-        if (!connected || tel.stale) Red else if (tel.balancing) Green else Amber, label = "dot")
+        if (!connected || tel.startupState=="ERROR") Red
+        else if(tel.startupState in listOf("WAIT_HOST","INITIALIZING","CALIBRATING")) Amber
+        else if(tel.stale) Red else if (tel.balancing) Green else Amber, label = "dot")
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Panel)
-            .border(1.dp, Line, RoundedCornerShape(14.dp)).padding(10.dp),
+            .border(1.dp, Line, RoundedCornerShape(14.dp)).padding(horizontal=12.dp,vertical=8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Canvas(Modifier.size(10.dp)) { drawCircle(dot) }
         Spacer(Modifier.width(8.dp))
         Text(
             when {
-                !connected -> "NO CONSOLE"
-                tel.stale  -> "NO ESP32"
+                 !connected -> "NO CONSOLE"
+                 tel.startupState == "WAIT_HOST" -> "WAIT HOST"
+                 tel.startupState == "INITIALIZING" -> "INITIALIZING"
+                 tel.startupState == "CALIBRATING" -> "IMU CALIBRATION"
+                 tel.startupState == "ERROR" -> "STARTUP ERROR"
+                 tel.stale  -> "NO ESP32"
                 tel.balancing -> "BALANCING"
                 else -> "IDLE"
             },
-            style = Mono.copy(fontSize = 12.sp), color = dot
+            style = Mono.copy(fontSize = 11.sp), color = dot,maxLines=1,modifier=Modifier.weight(1f)
         )
-        Spacer(Modifier.weight(1f))
         Text("${"%.1f".format(tel.rxHz)} Hz", style = Mono.copy(fontSize = 12.sp), color = TextDim)
         if (unsaved) {
             Spacer(Modifier.width(10.dp))
-            Text("● unsaved", style = Mono.copy(fontSize = 12.sp), color = Amber)
+            Text("●", style = Mono.copy(fontSize = 12.sp), color = Amber)
         }
     }
 }
@@ -227,7 +233,7 @@ fun ParamSlider(p: Param, onCommit: (Float) -> Unit) {
                 thumbColor = if (p.dirty) Amber else Cyan,
                 activeTrackColor = (if (p.dirty) Amber else Cyan).copy(alpha = 0.6f),
                 inactiveTrackColor = Line),
-            modifier = Modifier.height(28.dp)
+            modifier = Modifier.height(40.dp)
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(fmt(p.lo), fontSize = 10.sp, color = TextDim)

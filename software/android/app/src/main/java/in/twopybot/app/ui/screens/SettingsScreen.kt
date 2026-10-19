@@ -13,6 +13,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.twopybot.app.ui.components.Section
+import `in`.twopybot.app.ui.components.WorkspaceColumns
+import `in`.twopybot.app.ui.components.WorkspaceTitle
 import `in`.twopybot.app.ui.theme.*
 import `in`.twopybot.app.vm.BotViewModel
 import `in`.twopybot.app.BuildConfig
@@ -42,7 +44,8 @@ fun SettingsScreen(vm: BotViewModel) {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+    WorkspaceColumns(first={
+        WorkspaceTitle("Robot setup","Connection & device services")
 
         Section("Robot address",
             "10.42.0.1 is the Radxa's own hotspot gateway. Use the LAN address instead " +
@@ -59,6 +62,9 @@ fun SettingsScreen(vm: BotViewModel) {
             }
         }
 
+    },second={
+        FirmwareSection(vm)
+
         Section("Stream") {
             Text("encoder  ${stream.encoder.ifEmpty { "—" }}", style = Mono.copy(fontSize = 12.sp), color = TextDim)
             Text("bitrate  ${stream.bitrate.ifEmpty { "—" }}", style = Mono.copy(fontSize = 12.sp), color = TextDim)
@@ -67,11 +73,7 @@ fun SettingsScreen(vm: BotViewModel) {
                 Text(stream.error, style = Mono.copy(fontSize = 11.sp), color = Red)
         }
 
-        Section("Safety",
-            "The gamepad is paired to the ESP32 over Bluetooth and stays that way. This app " +
-            "mirrors pad state for display and can tune parameters, but it cannot drive. " +
-            "The console also refuses remote ARM on purpose: a remote link may STOP the " +
-            "robot, never START it.") {
+        Section("Local control", "Gamepad START arms the robot. Drive-stick input takes over route replay; SELECT stops motors.") {
             Button(onClick = { vm.estop() }, modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Red, contentColor = androidx.compose.ui.graphics.Color.White)) {
                 Text("E-STOP")
@@ -87,6 +89,6 @@ fun SettingsScreen(vm: BotViewModel) {
                  style = Mono.copy(fontSize = 10.sp), color = TextDim, lineHeight = 14.sp)
         }
 
-        Spacer(Modifier.height(70.dp))
-    }
+        Spacer(Modifier.height(14.dp))
+    })
 }

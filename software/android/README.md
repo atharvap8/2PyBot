@@ -1,5 +1,17 @@
 # 2PyBot Android App
 
+Revision **3.40.0** fixes Routes rendering across rotation and short landscape
+windows, with instance-owned WebView lifecycle, explicit viewport sizing and Reload.
+
+Revision **3.30.0** introduced the [adaptive cockpit](../../docs/ANDROID_COCKPIT_DESIGN.md):
+five primary navigation items, a compact landscape rail, a larger driving/video
+workspace, direct Routes entry and responsive settings columns. The installed
+controller firmware is independent of the Android UI revision.
+
+**More → Setup → Controller firmware** can reflash the latest
+compiled build registered on the bot, with exact build identity, durable progress
+and rollback results. See [firmware reflashing](../../docs/FIRMWARE_REFLASH.md).
+
 Native Kotlin and Jetpack Compose client for the [Radxa console](../radxa/console/README.md). The app uses HTTP for commands and settings, WebSocket for telemetry, and WebRTC/WHEP for camera video.
 
 ## Build configuration
@@ -74,12 +86,16 @@ The app communicates with the Radxa, not directly with the ESP32. The console ow
 | Live | WHEP camera, attitude gauge, controller debug values, gesture controls |
 | Map | Console dead-reckoned trail and pose; local pose reset; PNG/PDF exports |
 | Tune | Parameter groups, values, bounds, descriptions, Save/Reload/Defaults |
-| Auto | Wobble, trim, radius, and stall commands with progress logs |
+| Routes | Original-command route teaching/replay; tuning routines remain available through the toolbar |
 | Camera | V4L2 settings, named profiles, exposure/gain adjustment, stream settings |
+| Camera → Lens calibration | Embedded progressive web wizard, printable targets, automatic capture/analysis, corrected previews and reports |
 | Data | Labelled on-disk telemetry/ToF sessions, annotations, diagnostics and ZIP export |
 | Setup | Robot address, stream status, stop control, console logs and log PDF export |
 
-Portrait uses a bottom navigation bar and top stop button. Landscape uses a navigation rail with stop control and wider two-pane screens. See [landscape and auto-tuning](LANDSCAPE_AND_AUTOTUNE.md).
+Portrait uses five bottom destinations: Drive, Live, Routes, Map and More. More
+contains Tune, Camera, Sessions and Setup. Landscape uses a 72 dp navigation rail
+with an anchored stop control. Content panels use available window width, bounded
+tool panes and independent scrolling. See [cockpit design](../../docs/ANDROID_COCKPIT_DESIGN.md).
 
 The display stays awake while the app is visible. Rotation supports portrait and
 both landscape directions. Drive touch gestures change only the camera view;

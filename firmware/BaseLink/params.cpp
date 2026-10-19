@@ -109,6 +109,12 @@ void params_dump() {
     Serial.printf("PR,AMAX,%.4f\n",    P.aMax);
     Serial.println("PR,TOFGUARD,1");
     Serial.println("PR,BOOTGATE,1");
+    Serial.println("PR,STARTUPACK,1");
+    Serial.println("PR,FALLPREVENT,1");
+    Serial.println("PR,AUTOCLIMB,1");
+    Serial.println("PR,AUTODESCENT,1");
+    Serial.println("PR,FLASHLOCK,1");
+    Serial.println("PR,NAVIGATION,1");
     Serial.println("P.");
 }
 

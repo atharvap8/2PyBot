@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +48,11 @@ private val ROUTINES = listOf(
 
 @Composable
 fun AutoScreen(vm: BotViewModel) {
+    var routes by rememberSaveable { mutableStateOf(true) }
+    if(routes) {
+        CalibrationScreen(vm,page="/ui/autonomy.html",backLabel="Tuning routines") { routes=false }
+        return
+    }
     val log by vm.repo.autoLog.collectAsStateWithLifecycle()
     val tel by vm.repo.telemetry.collectAsStateWithLifecycle()
     val busy = log.lastOrNull()?.startsWith("start") == true ||
@@ -54,6 +60,12 @@ fun AutoScreen(vm: BotViewModel) {
     var confirm by remember { mutableStateOf<Routine?>(null) }
 
     val cards: @Composable ColumnScope.() -> Unit = {
+        Button(onClick={routes=true},modifier=Modifier.fillMaxWidth(),
+            colors=ButtonDefaults.buttonColors(containerColor=Cyan,contentColor=Ink)) {
+            Text("Autopilot · routes / waypoints")
+        }
+        Text("Original-speed replay with recorded turns, reverse, stops and timing.",
+            fontSize=12.sp,color=TextDim,modifier=Modifier.padding(vertical=8.dp))
         ROUTINES.forEach { r ->
             Column(
                 Modifier.fillMaxWidth().padding(vertical = 5.dp)
@@ -138,7 +150,7 @@ fun AutoScreen(vm: BotViewModel) {
             cards()
             Spacer(Modifier.height(12.dp))
             logPane()
-            Spacer(Modifier.height(70.dp))
+            Spacer(Modifier.height(14.dp))
         }
     }
 

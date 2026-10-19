@@ -5,12 +5,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import `in`.twopybot.app.data.CamControl
 import `in`.twopybot.app.data.CamPayload
 import `in`.twopybot.app.ui.components.Section
+import `in`.twopybot.app.ui.components.WorkspaceColumns
+import `in`.twopybot.app.ui.components.WorkspaceTitle
 import `in`.twopybot.app.ui.theme.*
 import `in`.twopybot.app.vm.BotViewModel
 import kotlinx.coroutines.launch
@@ -21,16 +24,36 @@ fun CameraScreen(vm: BotViewModel) {
     var cam by remember { mutableStateOf<CamPayload?>(null) }
     var busy by remember { mutableStateOf(false) }
     var calLog by remember { mutableStateOf("") }
+    var geometry by rememberSaveable { mutableStateOf(false) }
+    var objects by rememberSaveable { mutableStateOf(false) }
+
+    if(objects) {
+        CalibrationScreen(vm,page="/ui/ml.html") { objects=false }
+        return
+    }
+
+    if(geometry) {
+        CalibrationScreen(vm) { geometry=false }
+        return
+    }
 
     LaunchedEffect(Unit) { cam = vm.repo.cameraControls() }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+    WorkspaceColumns(first={
+        WorkspaceTitle("Camera studio","Optics, exposure & perception")
 
-        Section("Low-light calibration",
-            "Auto-exposure is why the frame rate collapses in a dim room — the sensor " +
-            "lengthens exposure instead of admitting it is dark. This locks exposure to " +
-            "manual, then walks exposure and gain to a target brightness. Exposure first " +
-            "(free, but adds motion blur), gain second (keeps the frame rate, adds noise).") {
+        Section("Lens calibration", "Guided target detection, automatic capture and analysis, corrected previews and exportable reports. " +
+            "Use this to correct curved straight lines; it is separate from exposure tuning.") {
+            Button(onClick={ geometry=true },modifier=Modifier.fillMaxWidth(),
+                colors=ButtonDefaults.buttonColors(containerColor=Cyan,contentColor=Ink)) { Text("Open guided calibration suite") }
+        }
+        Section("Object detection", "ONNX common-object/person detection and track IDs. Distances stay unknown until camera–ToF alignment.") {
+            Button(onClick={ objects=true },modifier=Modifier.fillMaxWidth()) { Text("Open object detector") }
+        }
+
+        Section("Exposure adjustment",
+            "Adjust exposure and gain for the current light. The native camera profile keeps " +
+            "exposure within a sensor frame. This action does not calibrate lens geometry.") {
             Button(
                 onClick = {
                     busy = true; calLog = "calibrating, ~15 s…"
@@ -51,6 +74,7 @@ fun CameraScreen(vm: BotViewModel) {
             }
         }
 
+    },second={
         cam?.let { c ->
             Section("Profiles", "Presets matched to this camera's real control ranges.") {
                 c.profiles.chunked(3).forEach { row ->
@@ -78,8 +102,8 @@ fun CameraScreen(vm: BotViewModel) {
             }
         } ?: Text("reading camera…", color = TextDim, fontSize = 13.sp)
 
-        Spacer(Modifier.height(70.dp))
-    }
+        Spacer(Modifier.height(14.dp))
+    })
 }
 
 @Composable
@@ -98,7 +122,7 @@ private fun CamRow(ctl: CamControl, initial: Int, onCommit: (Int) -> Unit) {
             valueRange = ctl.min.toFloat()..ctl.max.toFloat(),
             colors = SliderDefaults.colors(thumbColor = Cyan,
                 activeTrackColor = Cyan.copy(alpha = .6f), inactiveTrackColor = Line),
-            modifier = Modifier.height(26.dp)
+            modifier = Modifier.height(40.dp)
         )
     }
 }

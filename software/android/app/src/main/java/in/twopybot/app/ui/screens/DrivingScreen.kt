@@ -20,6 +20,7 @@ import `in`.twopybot.app.ui.components.RobotScene
 import `in`.twopybot.app.ui.components.TrailMap
 import `in`.twopybot.app.ui.components.SupportEvidence
 import `in`.twopybot.app.ui.components.supportEvidence
+import `in`.twopybot.app.ui.components.InstrumentRow
 import `in`.twopybot.app.ui.theme.*
 import `in`.twopybot.app.vm.BotViewModel
 import kotlinx.coroutines.delay
@@ -82,54 +83,74 @@ fun DrivingScreen(vm: BotViewModel) {
             if(tof.calibrationError.isNotEmpty()) Text(tof.calibrationError,color=Amber,fontSize=9.sp)
         }
     }
-    BoxWithConstraints(Modifier.fillMaxSize().background(Ink)) {
-        val panelHeight=(maxHeight-92.dp).coerceAtLeast(100.dp)
-        RobotScene(tel,tof,Modifier.fillMaxSize(),trail,follow,reset,{ follow=false },debug,connected,pitchSign,guides)
-        Column(Modifier.align(Alignment.TopStart).padding(16.dp)) {
-            Text("DRIVE",color=TextDim,fontSize=9.sp,letterSpacing=2.sp)
-            Text("%.2f".format(tel.v),style=Mono.copy(fontSize=48.sp,fontWeight=FontWeight.Light),color=TextHi)
-            Text("m/s",color=TextDim,fontSize=11.sp)
-            Spacer(Modifier.height(8.dp))
-            Text(when {
-                !connected || tel.stale -> "OFFLINE"
-                tel.v > .025f -> "FORWARD"
-                tel.v < -.025f -> "REVERSE"
-                tel.balancing -> "HOLD"
-                else -> "READY"
-            },color=if(!connected || tel.stale) Amber else Cyan,fontSize=10.sp,letterSpacing=1.sp)
-        }
-        Column(Modifier.align(Alignment.TopEnd).padding(14.dp).clip(RoundedCornerShape(12.dp))
-            .background(Panel.copy(alpha=.82f)).padding(10.dp),horizontalAlignment=Alignment.End) {
-            Text(if(follow) "CHASE VIEW" else "EXPLORE",color=TextHi,fontSize=10.sp)
-            Text(if(tof.stale) "DEPTH OFFLINE" else if(tof.validCount==0) "NO DEPTH RETURNS" else "${tof.validCount} DEPTH RETURNS",
-                color=if(tof.stale || tof.validCount==0) Amber else Green,fontSize=9.sp)
-            tof.nearest?.let { Text("%.2f m nearest".format(it),color=TextHi,fontSize=11.sp) }
-        }
-        if(showMap) {
-            Column(Modifier.align(Alignment.BottomStart).padding(start=12.dp,bottom=76.dp)
-                .width(132.dp).height(132.dp).clip(RoundedCornerShape(14.dp)).background(Panel.copy(alpha=.9f))
-                .border(1.dp,Line,RoundedCornerShape(14.dp)).padding(8.dp)) {
-                Text("ENCODER TRAIL",color=TextDim,fontSize=8.sp)
+    val motion=when {
+        !connected || tel.stale -> "OFFLINE"
+        !tel.startupReady -> tel.startupState.replace('_',' ')
+        tel.v>.025f -> "FORWARD"
+        tel.v<-.025f -> "REVERSE"
+        tel.balancing -> "HOLDING"
+        else -> "STANDBY"
+    }
+    val scenePane:@Composable (Modifier)->Unit={ modifier ->
+        BoxWithConstraints(modifier.clip(RoundedCornerShape(16.dp)).background(Panel)) {
+            RobotScene(tel,tof,Modifier.fillMaxSize(),trail,follow,reset,{follow=false},debug,connected,pitchSign,guides)
+            Row(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Ink.copy(alpha=.7f)).padding(horizontal=14.dp,vertical=10.dp),
+                horizontalArrangement=Arrangement.SpaceBetween) {
+                Text(if(follow) "CHASE / LIVE 3D" else "EXPLORE / LIVE 3D",color=TextHi,fontSize=10.sp,letterSpacing=1.sp)
+                Text("${tof.validCount}/64 depth",color=TextDim,fontSize=10.sp)
+            }
+            if(showMap) Column(Modifier.align(Alignment.BottomStart).padding(start=12.dp,bottom=64.dp)
+                .size(120.dp).clip(RoundedCornerShape(12.dp)).background(Panel.copy(alpha=.95f)).padding(10.dp)) {
+                Text("ODOMETRY",fontSize=10.sp,color=TextDim)
                 TrailMap(trail,tel.x,tel.y,tel.heading,Modifier.weight(1f).fillMaxWidth())
             }
-        }
-        if(details) {
-            Column(Modifier.align(Alignment.BottomEnd).padding(end=10.dp,bottom=76.dp)
-                .width(204.dp).heightIn(max=panelHeight).clip(RoundedCornerShape(14.dp))
-                .background(Panel.copy(alpha=.96f)).border(1.dp,Line,RoundedCornerShape(14.dp))
-                .verticalScroll(rememberScrollState()).padding(12.dp)) { numbers() }
-        }
-        Column(Modifier.align(Alignment.BottomCenter).padding(bottom=8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
-            Row(Modifier.clip(RoundedCornerShape(18.dp)).background(Panel.copy(alpha=.94f)).padding(horizontal=4.dp),
-                horizontalArrangement=Arrangement.spacedBy(2.dp)) {
-                TextButton(onClick={ follow=!follow },contentPadding=PaddingValues(8.dp)) {
-                    Text(if(follow) "Follow" else "Explore",color=if(follow) Cyan else TextHi,fontSize=11.sp)
+            if(details) Column(Modifier.align(Alignment.TopEnd).padding(top=44.dp,end=10.dp)
+                .width(252.dp).heightIn(max=(maxHeight-112.dp).coerceAtLeast(100.dp))
+                .clip(RoundedCornerShape(14.dp)).background(Panel.copy(alpha=.97f))
+                .border(1.dp,Line,RoundedCornerShape(14.dp)).verticalScroll(rememberScrollState()).padding(14.dp)) {numbers()}
+            Row(Modifier.align(Alignment.BottomCenter).padding(8.dp).clip(RoundedCornerShape(12.dp))
+                .background(Panel.copy(alpha=.96f)).padding(horizontal=4.dp),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+                TextButton(onClick={follow=!follow},contentPadding=PaddingValues(horizontal=10.dp)) {
+                    Text(if(follow) "Following" else "Explore",fontSize=12.sp,color=Cyan)
                 }
-                TextButton(onClick={ reset++; follow=true },contentPadding=PaddingValues(8.dp)) { Text("Center",fontSize=11.sp) }
-                TextButton(onClick={ showMap=!showMap },contentPadding=PaddingValues(8.dp)) { Text("Map",color=if(showMap) Cyan else TextDim,fontSize=11.sp) }
-                TextButton(onClick={ details=!details },contentPadding=PaddingValues(8.dp)) { Text("Details",color=if(details) Cyan else TextDim,fontSize=11.sp) }
+                TextButton(onClick={reset++;follow=true},contentPadding=PaddingValues(horizontal=10.dp)) {Text("Recenter",fontSize=12.sp)}
+                TextButton(onClick={showMap=!showMap},contentPadding=PaddingValues(horizontal=10.dp)) {Text("Trail",fontSize=12.sp,color=if(showMap) Cyan else TextDim)}
+                TextButton(onClick={details=!details},contentPadding=PaddingValues(horizontal=10.dp)) {Text("Details",fontSize=12.sp,color=if(details) Cyan else TextDim)}
             }
-            Text("Reference guidance · measured depth only",color=TextDim,fontSize=8.sp,modifier=Modifier.padding(top=3.dp))
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Ink)) {
+        val clusterWidth=(maxWidth*.28f).coerceIn(200.dp,260.dp)
+        if(maxWidth>=520.dp) Row(Modifier.fillMaxSize().padding(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.width(clusterWidth).fillMaxHeight()
+                .clip(RoundedCornerShape(16.dp)).background(Panel).verticalScroll(rememberScrollState()).padding(20.dp)) {
+                Text("VELOCITY",color=TextDim,fontSize=10.sp,letterSpacing=1.5.sp)
+                Row(verticalAlignment=Alignment.Bottom) {
+                    Text("%.2f".format(tel.v),style=Mono.copy(fontSize=52.sp,fontWeight=FontWeight.Light),color=TextHi)
+                    Text(" m/s",fontSize=12.sp,color=TextDim,modifier=Modifier.padding(bottom=10.dp))
+                }
+                Text(motion,color=if(connected && !tel.stale) Cyan else TextDim,fontSize=11.sp,letterSpacing=1.sp)
+                HorizontalDivider(Modifier.padding(vertical=14.dp),color=Line)
+                InstrumentRow("Pitch","%.1f°".format(tel.pitch*pitchSign))
+                InstrumentRow("Heading","%.0f°".format(tel.heading))
+                InstrumentRow("Loop","%.1f ms".format((debug["loopMax"]?:0f)/1000))
+                InstrumentRow("Support",support.label)
+                InstrumentRow("Telemetry","%.0f Hz".format(tel.rxHz),if(connected) Green else TextDim)
+                Text("Gamepad drive · live robot pose",fontSize=11.sp,color=TextDim,modifier=Modifier.padding(top=12.dp))
+            }
+            scenePane(Modifier.weight(1f).fillMaxHeight())
+        } else Column(Modifier.fillMaxSize().padding(horizontal=12.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal=6.dp),verticalAlignment=Alignment.CenterVertically) {
+                Text("%.2f".format(tel.v),style=Mono.copy(fontSize=46.sp,fontWeight=FontWeight.Light),color=TextHi)
+                Text(" m/s",color=TextDim,fontSize=13.sp,modifier=Modifier.padding(top=16.dp))
+                Spacer(Modifier.weight(1f));Text(motion,fontSize=11.sp,color=Cyan,letterSpacing=1.sp)
+            }
+            scenePane(Modifier.weight(1f).fillMaxWidth())
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                `in`.twopybot.app.ui.components.Tile("Pitch","%.1f°".format(tel.pitch*pitchSign),TextHi,Modifier.weight(1f))
+                `in`.twopybot.app.ui.components.Tile("Heading","%.0f°".format(tel.heading),TextHi,Modifier.weight(1f))
+                `in`.twopybot.app.ui.components.Tile("Link","%.0f Hz".format(tel.rxHz),Cyan,Modifier.weight(1f))
+            }
         }
     }
 }

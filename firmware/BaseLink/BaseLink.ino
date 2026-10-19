@@ -40,6 +40,11 @@
 #include "autotune.h"
 #include "terrain.h"
 #include "tof_guard.h"
+#include "startup_gate.h"
+#include "fall_prevention.h"
+#include "auto_climb.h"
+#include "descent_guard.h"
+#include "navigation_lease.h"
 #include "imu_sensor.h"
 #include "stepper_control.h"
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
@@ -57,6 +62,8 @@ bool motorsRequested   = false;
 bool DEBUG_STREAM      = true;
 bool RADXA_STREAM      = true;
 bool hostBootReady     = false;
+StartupGate startupGate;
+bool hardwareReady = false;
 
 // Forward-positive measurements (see config.h sign conventions)
 float pitchF = 0.0f, rateF = 0.0f;      // deg, deg/s
@@ -114,6 +121,17 @@ uint32_t radxaLastRx = 0;
 float    radxaFwd = 0.0f, radxaSteer = 0.0f;
 uint8_t  radxaEn = 0, radxaEnPrev = 0;
 ToFGuard tofGuard;
+FallPrevention fallPrevention;
+AutoClimb autoClimb;
+DescentGuard descentGuard;
+NavigationLease navigation;
+float climbXRef=0.0f,climbIntegral=0.0f,climbDriveRef=0.0f,climbRecovery=0.0f;
+bool climbReferenceInitialized=false;
+float requestedDriveV = 0.0f;
+float appliedBalanceScale = 1.0f;
+float wheelTargetL = 0.0f, wheelTargetR = 0.0f;
+float appliedSteerSteps = 0.0f;
+bool driveReferenceActive = false;
 
 
 // Serial line buffer
@@ -131,6 +149,7 @@ bool ledState = false;
 bool at_isBalancing() { return state == STATE_BALANCING; }
 void at_motorsOff()   { steppers.setSpeeds(0, 0); steppers.disable(); }
 void at_setWheelSpeed(float stepsPerSec) {
+    if(startupGate.maintenance)return;
     // Raw drive, used only by the stall search with the wheels off the ground.
     if (!steppers.isEnabled()) steppers.enable();
     int32_t v = (int32_t)stepsPerSec;
@@ -144,8 +163,7 @@ void at_setWheelSpeed(float stepsPerSec) {
 //  here; only latched hardware settings do.
 // ============================================================
 void params_applyHardware(bool currentChanged) {
-    static bool ready = false;          // ignore calls before begin()
-    if (!ready) { ready = true; return; }
+    if (!hardwareReady) return;        // NVS/metadata remain usable before hardware begin()
     imu.setFilterCutoff(P.imuCutoff);
     steppers.applyTuning();                 // SGTHRS / TCOOLTHRS / CoolStep
     if (currentChanged) steppers.setCurrent((uint16_t)P.motorMa);
@@ -159,24 +177,34 @@ static inline float clampf(float v, float lo, float hi) {
 }
 
 void resetController() {
+    navigation.reset();
+    fallPrevention.reset();
+    autoClimb.resetDynamics();
+    descentGuard.reset();
+    climbXRef=posM;climbIntegral=climbDriveRef=climbRecovery=0;
+    climbReferenceInitialized=false;
+    requestedDriveV=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
+    appliedSteerSteps=0.0f;
+    driveReferenceActive=false;
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
     xRef = posM;
     steerSteps = 0.0f; diffTarget = encDiff;
-    gestSeq = nullptr; stiffHold = false; climbMode = false; lookCmd = 0.0f;
+    gestSeq = nullptr;stiffHold=autoClimb.policy==AutoClimb::FORCE_STIFF;climbMode=false;lookCmd=0.0f;
 }
 
 void startGesture(const GStep* seq, uint8_t len, const char* name) {
+    if(navigation.granted)navigation.cancel(NavigationLease::NAV_TAKEOVER);
     if (state != STATE_BALANCING) { Serial.println("[GEST] Not balancing -- ignored"); return; }
-    if (climbMode) { Serial.println("[GEST] Climb mode -- gestures ignored"); return; }
+    if (climbMode || autoClimb.targetClimb()) { Serial.println("[GEST] Climb mode -- gestures ignored"); return; }
     gestSeq = seq; gestLen = len; gestIdx = 0; gestStepStart = millis();
     Serial.printf("[GEST] %s\n", name);
 }
 void stopGesture() { gestSeq = nullptr; }
 
 void requestEnable() {
-    if (P.bootWait > 0.5f && !hostBootReady) {
+    if (!startupGate.mayArm(P.bootWait > 0.5f)) {
         btgamepad_syncArmed(false);
-        Serial.println("[MAIN] Waiting for Radxa boot-ready; press START after host is ready");
+        Serial.println("[MAIN] Startup is not ready; press START after calibration completes");
         return;
     }
     motorsRequested = true;
@@ -184,6 +212,7 @@ void requestEnable() {
 }
 
 void requestDisable(const char* why) {
+    navigation.cancel(NavigationLease::NAV_DISABLED);radxaLastRx=0;radxaFwd=radxaSteer=0;
     motorsRequested = false;
     // Push the state back into the pad module. Without this, an AUTOMATIC
     // disable (FELL / RATE SPIKE) left the pad still believing it was armed,
@@ -194,6 +223,8 @@ void requestDisable(const char* why) {
         steppers.disable();
         state = STATE_IDLE;
     }
+    wheelTargetL=wheelTargetR=appliedSteerSteps=0.0f;
+    autoClimb.resetDynamics();climbMode=false;
     Serial.printf("[MAIN] Motors OFF (%s)\n", why);
 }
 
@@ -201,19 +232,72 @@ void requestDisable(const char* why) {
 //  SERIAL PARSER — Radxa 'V' lines + tuner commands, one reader
 // ============================================================
 void handleLine(char* line) {
-    // P-commands (parameter get/set/save) are handled first.
-    if (at_handleLine(line)) return;      // AT,<routine>
-    if (params_handleLine(line)) return;
-
+    if(!strcmp(line,"FU,1") || !strcmp(line,"FU,0")) {
+        if(line[3]=='1' && (state==STATE_BALANCING || motorsRequested)) {
+            Serial.println("FU?,BUSY");return;
+        }
+        startupGate.maintenance=line[3]=='1';
+        if(startupGate.maintenance) {
+            if(hardwareReady) { char stop[]="AT,stop";at_handleLine(stop);requestDisable("firmware maintenance"); }
+            else motorsRequested=false;
+        }
+        Serial.printf("FU!,%u\n",(unsigned)startupGate.maintenance);
+        return;
+    }
     if (!strcmp(line, "BR,1")) {
         hostBootReady = true;
+        startupGate.acknowledge(true);
         Serial.println("BR!,1");
+        if (startupGate.initialized) Serial.println("BS,READY");
         return;
     }
     if (!strcmp(line, "BR,0")) {
         hostBootReady = false;
-        requestDisable("Radxa boot wait");
+        startupGate.acknowledge(false);
+        if (hardwareReady) requestDisable("Radxa boot wait");
+        else motorsRequested = false;
         Serial.println("BR?,0");
+        return;
+    }
+
+    // Keep discovery alive while all sensor/controller startup is on HOLD.
+    // In particular P? -> BOOTGATE is how Radxa knows to send BR,1.
+    if (!startupGate.initialized) {
+        if (!strcmp(line, "P?") || !strcmp(line, "p?")) { params_dump(); return; }
+        if (!strcmp(line, "X") || !strcmp(line, "x")) { motorsRequested = false; return; }
+        Serial.println("[BOOT] Startup on hold/in progress; only BR and P? are accepted");
+        return;
+    }
+
+    if(startupGate.maintenance && !strncmp(line,"AT,",3) && strcmp(line,"AT,stop") && strcmp(line,"AT,?")) {
+        Serial.println("[MAIN] Auto-tune blocked during firmware maintenance");return;
+    }
+    if (at_handleLine(line)) return;      // AT,<routine>, only after startup
+    if (params_handleLine(line)) return;
+
+    if(!strncmp(line,"AN,",3)) {
+        unsigned long owner=0;int en=0;char extra=0;
+        if(sscanf(line+3,"%lu,%d%c",&owner,&en,&extra)!=2 || (en!=0 && en!=1))return;
+        if(!en) { if(navigation.granted && navigation.token==owner)navigation.cancel(NavigationLease::NAV_STOPPED);return; }
+        const bool neutral=fabsf(joyForward*P.joyFwdSc)<.10f && fabsf(joySteering*P.joyStrSc)<.10f;
+        const bool available=!startupGate.maintenance && btgamepad_connected() &&
+                             state==STATE_BALANCING;
+        if(navigation.grant((uint32_t)owner,millis(),state==STATE_BALANCING,available,neutral)) {
+            stopGesture();radxaLastRx=0;Serial.printf("AN!,%lu\n",owner);
+        } else Serial.printf("AN?,%lu\n",owner);
+        return;
+    }
+    if(!strncmp(line,"AU,",3)) {
+        unsigned long owner=0,seq=0;float v=0,w=0;char extra=0;
+        if(sscanf(line+3,"%lu,%lu,%f,%f%c",&owner,&seq,&v,&w,&extra)==4)
+            navigation.command((uint32_t)owner,(uint32_t)seq,v,w,millis());
+        return;
+    }
+
+    if (!strcmp(line,"AC,1") || !strcmp(line,"AC,0")) {
+        if(navigation.granted)navigation.cancel(NavigationLease::NAV_TAKEOVER);
+        autoClimb.configure(line[3]=='1');stiffHold=false;
+        Serial.printf("[AUTOCLIMB] %s\n",autoClimb.enabled?"AUTO ENABLED":"AUTO DISABLED");
         return;
     }
 
@@ -254,13 +338,16 @@ void handleLine(char* line) {
         return;
     }
     if ((line[0] == 'H' || line[0] == 'h') && line[1] == ',') {
+        if(navigation.granted)navigation.cancel(NavigationLease::NAV_TAKEOVER);
         int hv = atoi(line + 2);
         if (hv == 2) {                                  // CLIMB mode
-            climbMode = true; stiffHold = false; stopGesture();
-            xRef = posM;
+            autoClimb.select(AutoClimb::FORCE_CLIMB);stiffHold=false;stopGesture();
             Serial.println("[HOLD] CLIMB");
+        } else if(hv==3) {
+            autoClimb.configure(true);stiffHold=false;
+            Serial.println("[AUTOCLIMB] AUTO ENABLED");
         } else {
-            climbMode = false;
+            autoClimb.select(hv==0?AutoClimb::FORCE_NORMAL:AutoClimb::FORCE_STIFF);
             zInt = clampf(zInt, -P.zIntLim, P.zIntLim); // re-shrink climb integral
             stiffHold = hv != 0;
             if (stiffHold) { xRef = posM; zInt = 0.0f; }   // hold RIGHT HERE
@@ -325,7 +412,7 @@ void handleLine(char* line) {
             Serial.println("K1=..K5= LQR gains   T= trim (deg)   M= motor current (mA)");
             Serial.printf ("F torch toggle | N centre servos | B=<%d..%d> torch %%%% | P=<deg> pan | Z=<deg> zoom\n",
                            TORCH_MIN_PCT, TORCH_MAX_PCT);
-            Serial.println("G,yes|no|spin|dance|stop   H,0|1|2 normal|stiff|CLIMB   A,<-1..1> look");
+            Serial.println("G,yes|no|spin|dance|stop   H,0|1|2|3 normal|stiff|CLIMB|auto   AC,0|1 auto off|on   A,<-1..1> look");
             Serial.println("Radxa: V,<fwd -1..1>,<steer -1..1>,<en 0|1>\n");
             break;
         default: break;
@@ -353,32 +440,63 @@ void runController(float dt) {
     float th = pitchF * DEG_TO_RAD;      // rad
     float om = rateF  * DEG_TO_RAD;      // rad/s
 
-    // Terrain adaptation: on broken ground (or mid-drop) a stiff angle/rate
-    // pair fights every bump. Soften BOTH, bounded by TERRSOFT, and never
-    // touch the slow position/velocity terms -- those still hold the spot.
-    const float sf = terrain_soften();
-    const float k3t = k3 * sf, k4t = k4 * sf;
+    // Preserve terrain adaptation during calm motion; manoeuvre/recovery
+    // feedback takes priority when the reference governor detects a hazard.
     const bool  airborne = terrain_airborne() && P.airFreeze > 0.5f;
+    const float driveScale = P.maxDriveV+autoClimb.referenceBlend*(P.climbVel-P.maxDriveV);
+    float nominalDriveV=navigation.granted?navigation.velocity:cmdFwd*driveScale;
+    requestedDriveV = navigation.granted?nominalDriveV:descentGuard.limitReference(nominalDriveV);
+    fallPrevention.update(requestedDriveV,velF,pitchF,rateF,vCmd,P.vMax,P.aMax,P.maxTilt,dt,airborne);
+    // A tighter obstacle/heartbeat reference cap takes effect immediately,
+    // rather than waiting for the normal operator-reference slew to catch up.
+    if (!navigation.granted && tofGuard.enabled) {
+        const float boundedRef = driveScale>0.0f ?
+            tofGuard.apply(fallPrevention.operatorRef/driveScale,driveScale,millis())*driveScale : 0.0f;
+        fallPrevention.constrainForwardReference(boundedRef,velF);
+    }
+    const bool wasAutomatic=autoClimb.active;
+    const bool wasLimited=autoClimb.actuatorLimited;
+    const bool wasExiting=autoClimb.exitPending;
+    const float wheelDiffVelocity=diffRateF/(2.0f*P.countsPerM);
+    // Observe the nominal reference, not the speed reduction this detector
+    // itself created. Raw intent also resets confirmation during stick changes.
+    autoClimb.update(nominalDriveV,velF,pitchF,rateF,cmdSteer,
+                     wheelTargetL/P.stepsPerM,wheelTargetR/P.stepsPerM,
+                     velF-wheelDiffVelocity,velF+wheelDiffVelocity,P.maxDriveV,
+                     fallPrevention.hazardRisk,terrain_airborne(),stiffHold || gestSeq!=nullptr,satA!=0,dt,
+                     navigation.granted?nominalDriveV:cmdFwd*P.maxDriveV);
+    const bool descentEligible=(autoClimb.enabled && autoClimb.policy==AutoClimb::AUTOMATIC) ||
+                               autoClimb.policy==AutoClimb::FORCE_CLIMB;
+    const bool descentCue=(autoClimb.active && autoClimb.kind==AutoClimb::DOWN_LOAD) ||
+                          (autoClimb.candidateKind==AutoClimb::DOWN_LOAD && autoClimb.suspectSeconds>=.25f) ||
+                          (autoClimb.candidateKind==AutoClimb::DOWN_LOAD && autoClimb.overspeed>.35f) ||
+                          (autoClimb.policy==AutoClimb::FORCE_CLIMB && autoClimb.overspeed>.18f);
+    descentGuard.update(navigation.granted?nominalDriveV:cmdFwd*P.climbVel,velF,
+                        descentEligible,descentCue,terrain_airborne(),dt);
+    if(autoClimb.exitPending && !wasExiting)Serial.println("[AUTOCLIMB] EXIT CHECK: monitored normal-controller hand-back");
+    if(!autoClimb.exitPending && wasExiting && autoClimb.active)
+        Serial.println("[AUTOCLIMB] EXIT CANCELLED: load/overspeed still requires compensation");
+    if(autoClimb.active!=wasAutomatic)
+        Serial.printf("[AUTOCLIMB] %s %s; error=%.3f m/s bias=%.2f deg\n",
+                      autoClimb.active?"ENTER":"EXIT",autoClimb.kind==AutoClimb::DOWN_LOAD?"DOWNCLIMB":"load inferred",
+                      autoClimb.trackingError,autoClimb.pitchBias);
+    if(autoClimb.actuatorLimited && !wasLimited)
+        Serial.println("[AUTOCLIMB] LIMITED: wheel command/encoder mismatch; check load/driver/supply");
+    climbMode=autoClimb.blend>.001f || autoClimb.active; // retain shadow C state during exit verification
+    float vIn = fallPrevention.effectiveRef;
+    const float deadband = P.driveDb*P.maxDriveV;
+    if(fabsf(requestedDriveV)>deadband || fabsf(fallPrevention.operatorRef)>deadband)
+        driveReferenceActive=true;
+    if(fabsf(requestedDriveV)<=deadband && fabsf(fallPrevention.operatorRef)<=deadband &&
+       fabsf(velF)<.05f && !fallPrevention.recovering) driveReferenceActive=false;
+    bool driving = driveReferenceActive;
+    const float normalScale=(fallPrevention.fullBalanceFeedback || (stiffHold && !driving)) ?
+                            1.0f:terrain_soften();
+    const float sf=normalScale+autoClimb.blend*(1.0f-normalScale);
+    appliedBalanceScale = sf;
+    const float k3t = k3*sf, k4t = k4*sf;
 
-    float vIn = cmdFwd * P.maxDriveV;
-    bool driving = fabsf(vIn) > (P.driveDb * P.maxDriveV);
-
-    if (climbMode) {
-        // CLIMB: the stick ramps the position REFERENCE slowly and the
-        // full 5-state LQI tracks it at all times. The always-on integral
-        // (wider clamp) absorbs the slope's shifted equilibrium pitch and
-        // holding torque, so tracking is zero-error uphill — unlike the
-        // normal driving branch, which zeroes zInt and picks up a large
-        // steady-state velocity error on an incline.
-        xRef += (cmdFwd * P.climbVel) * dt;
-        // Rubber band: the reference may never run further than the error
-        // clamp ahead of the robot — releasing the stick (or stalling on
-        // the slope) stops the target within P.exClamp, no runaway.
-        xRef = clampf(xRef, posM - P.exClamp, posM + P.exClamp);
-        float ex = posM - xRef;                       // already in-clamp
-        if (!airborne) zInt = clampf(zInt + ex * dt, -P.climbZLim, P.climbZLim);
-        uOut = -(P.c1 * ex + P.c2 * velF + (P.c3*sf) * th + (P.c4*sf) * om + P.c5 * zInt);
-    } else if (driving) {
+    if (driving) {
         // Velocity-tracking mode: K2..K4 subset (poles verified stable).
         // Hold point is dragged along with a braking lookahead so the
         // robot parks smoothly where it stops.
@@ -386,6 +504,10 @@ void runController(float dt) {
         zInt = 0.0f;
         uOut = -(k2 * (velF - vIn) + k3t * th + k4t * om);
     } else {
+        if(fallPrevention.recovering) {
+            xRef += (posM-xRef)*clampf(2.0f*fallPrevention.risk*dt,0.0f,1.0f);
+            zInt -= zInt*clampf(2.0f*fallPrevention.risk*dt,0.0f,1.0f);
+        }
         // Position hold / go-to: full LQI vector. Position error is
         // clamped so a big displacement asks for a gentle walk back,
         // never a sprint that eats the balance headroom.
@@ -396,6 +518,46 @@ void runController(float dt) {
         } else {
             uOut = -(k1 * ex + k2 * velF + k3t * th + k4t * om + k5 * zInt);
         }
+    }
+
+    // Separate climb state makes entry/exit a 0.75 s convex blend instead of
+    // replacing the normal position reference/integral in one control cycle.
+    if(climbMode) {
+        if(!climbReferenceInitialized) {
+            climbXRef=posM;
+            climbDriveRef=clampf(velF,-P.climbVel,P.climbVel);
+            climbIntegral=fabsf(P.c5)>.0001f ?
+                clampf((-uOut-P.c2*velF-P.c3*th-P.c4*om)/P.c5,-P.climbZLim,P.climbZLim) : 0;
+            climbReferenceInitialized=true;
+        }
+        const float climbGoal=navigation.granted?nominalDriveV:descentGuard.goal;
+        climbDriveRef+=clampf(climbGoal-climbDriveRef,-2.40f*dt,2.40f*dt);
+        if(!navigation.granted && tofGuard.enabled && P.climbVel>0) {
+            const float cap=tofGuard.apply(climbDriveRef/P.climbVel,P.climbVel,millis())*P.climbVel;
+            climbDriveRef=fminf(climbDriveRef,cap);
+        }
+        if(airborne)climbDriveRef=0;
+        climbRecovery=fallPrevention.climbRecoveryScale();
+        climbXRef+=climbDriveRef*(1.0f-climbRecovery)*dt;
+        if(climbRecovery>0) {
+            const float bleed=clampf(2.0f*climbRecovery*dt,0,1);
+            climbXRef+=(posM-climbXRef)*bleed;climbIntegral-=climbIntegral*bleed;
+        }
+        climbXRef=clampf(climbXRef,posM-P.exClamp,posM+P.exClamp);
+        const float climbError=posM-climbXRef;
+        const float dz=airborne || autoClimb.blend<.05f?0.0f:climbError*dt;
+        const float trial=clampf(climbIntegral+dz,-P.climbZLim,P.climbZLim);
+        const float trialU=-(P.c1*climbError+P.c2*velF+P.c3*th+P.c4*om+P.c5*trial);
+        // Conditional anti-windup: only reject integral motion that would push
+        // the selected acceleration deeper into its physical clamp.
+        const float integralEffect=-P.c5*(trial-climbIntegral);
+        const float mixedTrial=uOut+autoClimb.blend*(trialU-uOut);
+        if(!((mixedTrial>P.aMax && integralEffect>0) || (mixedTrial<-P.aMax && integralEffect<0)))
+            climbIntegral=trial;
+        const float climbU=-(P.c1*climbError+P.c2*velF+P.c3*th+P.c4*om+P.c5*climbIntegral);
+        uOut+=autoClimb.blend*(climbU-uOut);
+    } else {
+        climbReferenceInitialized=false;climbXRef=posM;climbIntegral=climbDriveRef=climbRecovery=0;
     }
 
     satA = (fabsf(uOut) > P.aMax) ? 1 : 0;
@@ -411,14 +573,21 @@ void runController(float dt) {
     if (fabsf(vCmd) > 0.90f * P.vMax) {
         xRef += (posM - xRef) * clampf(P.vsatBleed * dt, 0.0f, 1.0f);
         zInt -= zInt * clampf(2.0f * dt, 0.0f, 1.0f);
+        if(climbMode) {
+            climbXRef+=(posM-climbXRef)*clampf(P.vsatBleed*dt,0,1);
+            climbIntegral-=climbIntegral*clampf(2.0f*dt,0,1);
+        }
     }
 
     float baseSteps = vCmd * P.stepsPerM;
 
     // ---- yaw: commanded turn or encoder-differential heading hold ----
-    float steerIn = climbMode ? cmdSteer * P.climbStr : cmdSteer;
-    if (fabsf(steerIn) > P.steerDb) {
-        float target = steerIn * P.maxSteerSt;
+    float steerIn = cmdSteer*(1.0f+autoClimb.blend*(P.climbStr-1.0f));
+    const bool navigationTurning=navigation.granted && fabsf(navigation.yawRate)>.005f;
+    if (navigationTurning || fabsf(steerIn) > P.steerDb) {
+        // Navigation is in rad/s, not stick units: small planned turns must
+        // bypass the gamepad deadband and retain their calibrated yaw scale.
+        float target = navigationTurning ? navigation.yawRate*P.trackW*P.stepsPerM*.5f : steerIn * P.maxSteerSt;
         float slew = P.steerSlew * dt;
         steerSteps += clampf(target - steerSteps, -slew, slew);
         diffTarget = encDiff;                       // re-latch heading
@@ -438,14 +607,41 @@ void runController(float dt) {
                             -P.yawMaxSt, P.yawMaxSt);
     }
 
-    steppers.setSpeeds((int32_t)(baseSteps - steerSteps),
-                       (int32_t)(baseSteps + steerSteps));
+    appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,P.maxSpdSt);
+    wheelTargetL=baseSteps-appliedSteerSteps;
+    wheelTargetR=baseSteps+appliedSteerSteps;
+    steppers.setSpeeds((int32_t)wheelTargetL,(int32_t)wheelTargetR);
 }
 
 // ============================================================
 //  SETUP
 // ============================================================
+void waitForHostStartup() {
+    if (P.bootWait <= 0.5f) {
+        Serial.println("BS,INITIALIZING");
+        Serial.println("[BOOT] BOOTWAIT disabled: explicit standalone startup");
+        return;
+    }
+    Serial.println("BS,WAIT_HOST");
+    Serial.println("[BOOT] Waiting for Radxa ACK; IMU calibration and device startup are on HOLD");
+    uint32_t lastRequest = millis();
+    while (!startupGate.mayInitialize(P.bootWait > 0.5f)) {
+        pollSerial();
+        if (millis() - lastRequest >= 1000) {
+            Serial.println("BR?,0");
+            lastRequest = millis();
+        }
+        delay(5);  // yield while waiting; no timeout that starts calibration prematurely
+    }
+    Serial.println("BS,INITIALIZING");
+    Serial.println("[BOOT] Radxa ACK received; starting deferred initialization");
+}
+
 void setup() {
+    digitalWrite(MOTOR_EN_PIN, HIGH); // disable both drivers before any lengthy startup
+    pinMode(MOTOR_EN_PIN, OUTPUT);
+    digitalWrite(TORCH_PIN, LOW);
+    pinMode(TORCH_PIN, OUTPUT);
     Serial.begin(SERIAL_BAUD);
     delay(300);
     // GPIO 2 is the torch MOSFET gate now; payload_begin() claims it
@@ -457,10 +653,13 @@ void setup() {
 
     params_begin();
     Serial.println("BR?,0");
+    params_dump(); // capability/readback only; does not access IMU or drivers
+    waitForHostStartup();
     joySpeedHigh = (P.bootHigh > 0.5f) ? 1 : 0;     // NVS or compiled defaults, before any consumer
     leds_begin();   // boot swirl plays while sensors settle below
 
     if (!imu.begin()) {
+        Serial.println("BS,ERROR");
         Serial.println("[MAIN] FATAL: IMU init failed — halting");
         while (true) delay(1000);
     }
@@ -469,15 +668,28 @@ void setup() {
     }
 
     Serial.printf("[MAIN] Settling sensors %d ms — keep robot still\n", STARTUP_SETTLE_MS);
+    Serial.println("BS,CALIBRATING");
     delay(STARTUP_SETTLE_MS);
-    imu.calibrateGyro();
+    if (!imu.calibrateGyro()) {
+        Serial.println("BS,ERROR");
+        Serial.println("[MAIN] FATAL: gyro calibration failed — motors remain disabled");
+        while (true) delay(1000);
+    }
 
     btgamepad_begin();
     payload_begin();
+    hardwareReady = true;
+    // Consume commands buffered during initialization while the startup guard is
+    // still closed. An old serial enable must not arm immediately after calibration.
+    pollSerial();
+    startupGate.complete();
+    motorsRequested = false;
+    btgamepad_syncArmed(false);
 
     Serial.printf("[MAIN] P.stepsPerM=%.0f  P.countsPerM=%.0f  Vmax=%.2f m/s  Amax=%.2f m/s^2\n",
                   P.stepsPerM, P.countsPerM, P.vMax, P.aMax);
-    Serial.println("[MAIN] Send 'E' (or Radxa V,..,1 / joystick) to arm. '?' for help.\n");
+    Serial.println("BS,READY");
+    Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
 
     lastLoopUs = micros();
 }
@@ -533,14 +745,19 @@ void loop() {
         case 3: startGesture(GEST_SPIN,  sizeof(GEST_SPIN)/sizeof(GStep),  "spin");    break;
         case 4: startGesture(GEST_DANCE, sizeof(GEST_DANCE)/sizeof(GStep), "dance");   break;
         case 5: stiffHold = !stiffHold;
-                if (stiffHold) { climbMode = false; xRef = posM; zInt = 0.0f; }
+                if(navigation.granted)navigation.cancel(NavigationLease::NAV_TAKEOVER);
+                autoClimb.select(stiffHold?AutoClimb::FORCE_STIFF:AutoClimb::FORCE_NORMAL);
+                if (stiffHold) { xRef = posM; zInt = 0.0f; }
                 Serial.printf("[HOLD] %s (pad)\n", stiffHold ? "STIFF" : "normal");
                 break;
-        case 6: climbMode = !climbMode;
-                if (climbMode) { stiffHold = false; stopGesture(); xRef = posM; }
-                else           { zInt = clampf(zInt, -P.zIntLim, P.zIntLim); }
-                Serial.printf("[HOLD] %s (pad)\n", climbMode ? "CLIMB" : "climb off");
+        case 6: {
+                if(navigation.granted)navigation.cancel(NavigationLease::NAV_TAKEOVER);
+                const bool selectClimb=!autoClimb.targetClimb();
+                autoClimb.select(selectClimb?AutoClimb::FORCE_CLIMB:AutoClimb::FORCE_NORMAL);
+                stiffHold=false;stopGesture();
+                Serial.printf("[HOLD] %s (pad; manual override)\n",selectClimb?"CLIMB":"climb off");
                 break;
+                }
         default: break;
     }
 
@@ -587,7 +804,22 @@ void loop() {
     // Drive-authority arbitration: Radxa fresh > joystick fresh > zero
     bool radxaFresh = (millis() - radxaLastRx) < P.radxaTmo && radxaLastRx != 0;
     bool joyFresh   = (millis() - lastJoyPacketMs) < P.joyTmo && lastJoyPacketMs != 0;
-    if (radxaFresh) {
+    const float manualFwd=clampf(joyForward*P.joyFwdSc,-1.0f,1.0f)*(joySpeedHigh?1.0f:P.spdLoDrv);
+    const float manualSteer=clampf(joySteering*P.joyStrSc,-1.0f,1.0f)*(joySpeedHigh?1.0f:P.spdLoStr);
+    const bool takeover=joyFresh && (fabsf(joyForward*P.joyFwdSc)>.12f || fabsf(joySteering*P.joyStrSc)>.18f);
+    const NavigationLease::State previousNavState=navigation.state;
+    navigation.update(millis(),takeover,state==STATE_BALANCING && !startupGate.maintenance && btgamepad_connected());
+    if(previousNavState!=navigation.state && navigation.token)
+        Serial.printf("[NAV] state=%u token=%lu\n",(unsigned)navigation.state,(unsigned long)navigation.token);
+    if(navigation.granted) {
+        const float scale=P.maxDriveV+autoClimb.referenceBlend*(P.climbVel-P.maxDriveV);
+        cmdFwd=scale>0?clampf(navigation.velocity/scale,-1,1):0;
+        cmdSteer=clampf(navigation.yawRate*P.trackW*P.stepsPerM/(2.0f*P.maxSteerSt),-1,1);
+    } else if(navigation.token) {
+        // A cancelled session latches manual priority; stale host commands may
+        // not resume driving when the operator centres the stick again.
+        cmdFwd=joyFresh?manualFwd:0;cmdSteer=joyFresh?manualSteer:0;
+    } else if (radxaFresh) {
         cmdFwd = radxaFwd;  cmdSteer = radxaSteer;
     } else if (joyFresh) {
         // Dual speed mode (LB = LOW, RB = HIGH): scales the pad's authority
@@ -619,11 +851,13 @@ void loop() {
 
     // Optional ToF constraint applies to EVERY drive source, including gestures.
     // Reverse/steering and balance-recovery authority are unchanged.
-    cmdFwd = tofGuard.apply(cmdFwd, climbMode ? P.climbVel : P.maxDriveV, millis());
+    // The optional manual-drive ToF guard does not gate autonomous routes.
+    if(!navigation.granted)
+        cmdFwd = tofGuard.apply(cmdFwd,P.maxDriveV+autoClimb.referenceBlend*(P.climbVel-P.maxDriveV),millis());
 
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {
-        if (motorsRequested && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
+        if (motorsRequested && !startupGate.maintenance && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
             resetController();
             steppers.enable();
             state = STATE_BALANCING;
@@ -650,7 +884,7 @@ void loop() {
         li.steer        = cmdSteer;
         li.velF         = velF;
         li.pitchF       = pitchF;
-        li.ex           = posM - xRef;
+        li.ex           = posM - (autoClimb.blend>=.5f?climbXRef:xRef);
         li.stiffHold    = stiffHold;
         li.climbMode    = climbMode;
         li.gestActive   = (gestSeq != nullptr);
@@ -661,6 +895,13 @@ void loop() {
 
     // ---- 4. odometry stream to Radxa, 50 Hz, always on ----
     uint32_t nowMs = millis();
+    static uint32_t lastNavMs=0;
+    if(nowMs-lastNavMs>=100) {
+        lastNavMs=nowMs;
+        Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u\n",(unsigned long)nowMs,(unsigned long)navigation.token,
+                      (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
+                      (unsigned)btgamepad_connected(),0u);
+    }
     if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM) {
         lastOdomMs = nowMs;
         Serial.printf("O,%lu,%lld,%lld,%.2f,%.2f\n",
@@ -669,18 +910,31 @@ void loop() {
                       imu.getPitch(), imu.getYaw());
     }
 
-    // ---- 5. optional human-readable debug, 10 Hz ----
+    // ---- 5. optional controller debug, nominal 100 Hz ----
      if (DEBUG_STREAM && nowMs - lastDbgMs >= DEBUG_PERIOD_MS) {
         lastDbgMs = nowMs;
         // D,ms,pF,w,u,v,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,state,fwd,str
         Serial.printf("D,%lu,%.2f,%.1f,%.2f,%.3f,%.3f,%.0f,%.0f,%u,%u,%lu,%u,%u,%.2f,%.2f,"
-                      "%.3f,%.3f,%.2f,%u,%lu\n",
-                      (unsigned long)nowMs, pitchF, rateF, uOut, velF, posM - xRef,
-                      vCmd * P.stepsPerM, steerSteps, satV, satA,
+                       "%.3f,%.3f,%.2f,%u,%lu,%.3f,%.2f,%u,%.3f,%.3f,%.3f,%.2f,%.0f,%.0f,"
+                       "%u,%u,%u,%.2f,%.3f,%.2f,%.3f,%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,"
+                       "%u,%.2f,%u,%.2f,%.3f,%.3f,%.3f,%u,%.3f,%.3f\n",
+                       (unsigned long)nowMs, pitchF, rateF, uOut, velF,posM-(autoClimb.blend>=.5f?climbXRef:xRef),
+                       vCmd * P.stepsPerM, appliedSteerSteps, satV, satA,
                       (unsigned long)loopMaxUs, (unsigned)joySpeedHigh,
                       (unsigned)(state == STATE_BALANCING), cmdFwd, cmdSteer,
                       TERR.accelMag, TERR.rough, TERR.soften,
-                      (unsigned)TERR.state, (unsigned long)TERR.drops);
+                      (unsigned)TERR.state, (unsigned long)TERR.drops,
+                      fallPrevention.risk,fallPrevention.predictedTilt,(unsigned)fallPrevention.reasons,
+                      requestedDriveV,fallPrevention.operatorRef,fallPrevention.effectiveRef,
+                       appliedBalanceScale,wheelTargetL,wheelTargetR,
+                       (unsigned)autoClimb.enabled,(unsigned)autoClimb.state,(unsigned)autoClimb.policy,
+                       autoClimb.blend,autoClimb.trackingError,autoClimb.pitchBias,autoClimb.followingError,
+                       (unsigned)autoClimb.flags,climbIntegral,posM-climbXRef,climbDriveRef,
+                       fallPrevention.hazardRisk,climbRecovery,autoClimb.stableSeconds,
+                       (unsigned)autoClimb.kind,autoClimb.exitPending?autoClimb.probeSeconds:autoClimb.flatSeconds,
+                       (unsigned)autoClimb.exitBlock,autoClimb.cooldownSeconds,
+                       descentGuard.limit,descentGuard.excess,descentGuard.scale,(unsigned)descentGuard.active,
+                       descentGuard.goal,autoClimb.overspeed);
         loopMaxUs = 0;
     }
 }

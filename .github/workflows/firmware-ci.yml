@@ -38,9 +38,17 @@ on:
     branches: [main, 'system/**']
     paths:
       - 'firmware/**'
+      - 'scripts/firmware/**'
+      - 'scripts/versioning.py'
+      - 'software/radxa/console/console/versioning.py'
+      - 'VERSION'
   pull_request:
     paths:
       - 'firmware/**'
+      - 'scripts/firmware/**'
+      - 'scripts/versioning.py'
+      - 'software/radxa/console/console/versioning.py'
+      - 'VERSION'
 
 jobs:
 
@@ -51,6 +59,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Check project version policy
+        run: python3 scripts/versioning.py --check
 
       - name: Install arduino-cli
         uses: arduino/setup-arduino-cli@v2

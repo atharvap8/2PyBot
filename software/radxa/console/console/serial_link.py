@@ -37,6 +37,13 @@ class SerialLink:
         self.params: Dict[str, Param] = {}
         self.derived: Dict[str, float] = {}
         self.dump_complete = False
+        self._expected_param_count = 0
+        self.maintenance = False
+        self._serial_paused = False
+        self._release_flash_lock = False
+        self.nav={"token":0,"state":0,"pad":False,"last_rx":0}
+        self.pose_epoch=0
+        self.last_odom_monotonic=0.0
         self.log = collections.deque(maxlen=400)
 
         # live telemetry
@@ -63,6 +70,11 @@ class SerialLink:
         s.exclusive = True
         s.open()
         self.ser = s
+        self._prev_enc = None  # MCU reset/reconnect must not inject an odometry jump
+        self.pose_epoch+=1;self.tel["pose_epoch"]=self.pose_epoch
+        self.nav={"token":0,"state":0,"pad":False,"last_rx":0}
+        self.tel["v_ms"] = 0.0
+        self._release_flash_lock = True
         self.derived.clear()
         self.tel["host_ready"] = False
         self.connected = True
@@ -75,14 +87,53 @@ class SerialLink:
 
     # ---------------- outbound ----------------
     def send(self, line: str):
-        if not self.ser:
+        if not self.ser or self.maintenance:
             return False
         if not line.endswith("\n"):
             line += "\n"
         self.ser.write(line.encode())
         return True
 
+    async def begin_firmware_maintenance(self):
+        if not self.connected or self.tel.get("stale",True) or self.tel.get("balancing"):
+            raise ValueError("Stop with local SELECT and wait for fresh IDLE telemetry")
+        if self.derived.get("FLASHLOCK")!=1:
+            raise ValueError("Install FLASHLOCK-capable controller firmware once before app reflashing")
+        self.maintenance=True  # inhibit all ordinary writers, but keep reading acknowledgements
+        self.tel["firmware_lock"]=False
+        try:
+            self.ser.write(b"FU,1\n");self.ser.flush()
+            deadline=time.monotonic()+3
+            while time.monotonic()<deadline:
+                if self.tel.get("firmware_lock") and not self.tel.get("balancing"):break
+                await asyncio.sleep(.02)
+            else:raise ValueError("Controller did not acknowledge the maintenance/arming lock")
+            self.dump_complete=False;self.params.clear()
+            self.ser.write(b"P?\nBR,0\n");self.ser.flush()
+            deadline=time.monotonic()+5
+            retry_at=time.monotonic()+1
+            while time.monotonic()<deadline:
+                if self.dump_complete and not self.tel.get("host_ready"):
+                    self.hold_for_firmware();return
+                if time.monotonic()>=retry_at:
+                    self.ser.write(b"P?\nBR,0\n");self.ser.flush();retry_at=time.monotonic()+1
+                await asyncio.sleep(.02)
+            raise ValueError("Locked controller snapshot/readiness acknowledgement timed out")
+        except BaseException:
+            self.maintenance=False;self._release_flash_lock=True;raise
+
+    def hold_for_firmware(self):
+        self.maintenance=True;self._serial_paused=True
+        self.close();self.ser=None;self.debug={}
+        self.tel.update(stale=True,rx_hz=0.0,startup_state="FLASHING",startup_ready=False)
+
+    def resume_after_firmware(self):
+        self._serial_paused=False;self.maintenance=False;self._release_flash_lock=True
+        self._prev_enc=None;self.dump_complete=False
+        self.tel.update(stale=True,v_ms=0.0,host_ready=False,startup_ready=False)
+
     def request_dump(self):
+        if self.maintenance:return False
         self.dump_complete = False
         self.params.clear()
         self.send("P?")
@@ -116,12 +167,17 @@ class SerialLink:
     def _odometry(self, encL, encR, pitch, yaw, ms):
         """Differential-drive dead reckoning for the map view."""
         from .config import TRACK_WIDTH_M
+        if self._prev_enc is not None and ms<self.tel["ms"]-1000:
+            self._prev_enc=None;self.pose_epoch+=1;self.tel["pose_epoch"]=self.pose_epoch
+            self.tel["v_ms"]=0.0
         cpm = self.derived.get("COUNTSM") or (ENCODER_CPR / (2 * math.pi * 0.05))
         if self._prev_enc is not None:
-            dL = (encL - self._prev_enc[0]) / cpm
-            dR = (encR - self._prev_enc[1]) / cpm
+            sign=self.params["ENCSGN"].value if "ENCSGN" in self.params else 1
+            track=self.params["TRACKW"].value if "TRACKW" in self.params else TRACK_WIDTH_M
+            dL = sign*(encL - self._prev_enc[0]) / cpm
+            dR = sign*(encR - self._prev_enc[1]) / cpm
             d = (dL + dR) / 2.0
-            dth = (dR - dL) / TRACK_WIDTH_M
+            dth = (dR - dL) / max(.05,track)
             self._pose[2] += dth
             self._pose[0] += d * math.cos(self._pose[2])
             self._pose[1] += d * math.sin(self._pose[2])
@@ -137,6 +193,7 @@ class SerialLink:
                         heading=round(math.degrees(self._pose[2]) % 360, 1))
 
     def reset_pose(self):
+        self.pose_epoch+=1;self.tel["pose_epoch"]=self.pose_epoch
         self._pose = [0.0, 0.0, 0.0]
         self._prev_enc = None
         self.path.clear()
@@ -145,17 +202,38 @@ class SerialLink:
         if not line:
             return
         try:
+            if line.startswith("AN!,") or line.startswith("AN?,"):
+                self.nav.update(token=int(line[4:]),state=1 if line.startswith("AN!") else 9,last_rx=time.time(),received_monotonic=time.monotonic())
+                return
+            if line.startswith("NR,"):
+                _,ms,token,state,sequence,age,pad,_reserved=line.split(",")
+                self.nav={"ms":int(ms),"token":int(token),"state":int(state),"sequence":int(sequence),
+                           "age_ms":int(age),"pad":bool(int(pad)),"last_rx":time.time(),"received_monotonic":time.monotonic()}
+                self._publish({"type":"navigation","nav":self.nav})
+                return
+            if line in ("FU!,1","FU!,0"):
+                self.tel["firmware_lock"]=line.endswith("1")
+                return
             if line == "BR!,1":
                 self.tel["host_ready"] = True
                 return
             if line == "BR?,0":
                 self.tel["host_ready"] = False
                 return
+            if line.startswith("BS,"):
+                phase = line[3:]
+                if phase in ("WAIT_HOST", "INITIALIZING", "CALIBRATING", "READY", "ERROR"):
+                    self.tel["startup_state"] = phase
+                    self.tel["startup_ready"] = phase == "READY"
+                    self._log("[startup] " + phase)
+                    self._publish({"type": "startup", "state": phase})
+                return
             if line.startswith("O,"):
                 p = line.split(",")
                 if len(p) >= 6:
                     self._odometry(int(p[2]), int(p[3]), float(p[4]), float(p[5]), int(p[1]))
                     now = time.time()
+                    self.last_odom_monotonic=time.monotonic()
                     self._rx_times.append(now)
                     self.tel["last_rx"] = now
                     if len(self._rx_times) > 5:
@@ -167,17 +245,24 @@ class SerialLink:
                 f = line.split(",")[1:]
                 names = ["ms", "pF", "w", "u", "v", "ex", "vCmd", "steer",
                          "satV", "satA", "loopMax", "spdHi", "bal", "fwd", "str",
-                         "accelMag", "roughness", "soften", "terrainState", "drops"]
+                         "accelMag", "roughness", "soften", "terrainState", "drops",
+                         "fpRisk", "fpPred", "fpFlags", "driveReq", "driveRef", "driveEff",
+                         "balScale", "wheelL", "wheelR",
+                         "acEnabled", "acState", "acPolicy", "acBlend", "acError", "acBias", "acFollow",
+                         "acFlags", "clZ", "clEx", "clRef", "fpHazard", "clRecover", "acStable",
+                         "acKind", "acExit", "acExitBlock", "acCooldown", "dsLimit", "dsExcess", "dsScale",
+                         "dsActive", "dsGoal", "acOverspeed"]
                 self.debug = {n: float(x) for n, x in zip(names, f) if x not in ("", None)}
                 self.tel["balancing"] = bool(self.debug.get("bal", 0))
                 return
 
             if line.startswith("P#,"):
                 self.dump_complete = False
+                self._expected_param_count=int(line[3:])
                 self.params.clear()
                 return
             if line == "P.":
-                self.dump_complete = True
+                self.dump_complete = self._expected_param_count>0 and len(self.params)==self._expected_param_count
                 self._publish({"type": "params", "params": self.params_list(),
                                "derived": self.derived})
                 return
@@ -220,7 +305,7 @@ class SerialLink:
         next_open = 0.0
         next_dump = 0.0
         while True:
-            if not self.connected and time.monotonic() >= next_open:
+            if not self._serial_paused and not self.connected and time.monotonic() >= next_open:
                 try:
                     self.open()
                     await asyncio.sleep(0.3)
@@ -231,7 +316,7 @@ class SerialLink:
                     self.close()
                     self.ser = None
                     next_open = time.monotonic() + 3
-            if self.connected:
+            if self.connected and not self._serial_paused:
                 try:
                     # A reset-held ESP32 may discard the first request before
                     # Serial.begin()/sensor calibration. Retry until P. arrives.
@@ -244,6 +329,9 @@ class SerialLink:
                         while b"\n" in buf:
                             raw, buf = buf.split(b"\n", 1)
                             self._handle(raw.decode(errors="replace").strip())
+                    if self._release_flash_lock and self.dump_complete and self.tel.get("startup_ready") and not self.maintenance:
+                        if self.derived.get("FLASHLOCK")==1:self.send("FU,0")
+                        self._release_flash_lock=False
                 except Exception as e:
                     self._log(f"[console] serial error: {e}")
                     self.connected = False
@@ -254,6 +342,8 @@ class SerialLink:
                     self.ser = None
                     buf = b""
                     next_open = time.monotonic() + 2
+
+            if self._serial_paused:buf=b""
 
             now = time.time()
             if now - last_tel >= 0.1:         # 10 Hz telemetry push

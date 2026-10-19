@@ -11,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 class BotViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -20,10 +22,17 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
 
     val snack = MutableStateFlow<String?>(null)
     val trail = MutableStateFlow<List<Pair<Float, Float>>>(emptyList())
+    val firmwareStarting = MutableStateFlow(false)
 
     init {
         repo.start()
         viewModelScope.launch { repo.refreshStatus(); repo.refreshParams() }
+        viewModelScope.launch {
+            while (isActive) {
+                repo.refreshFirmware()
+                delay(if(repo.firmware.value.busy) 1000 else 5000)
+            }
+        }
     }
 
     fun setHost(h: String) {
@@ -34,6 +43,19 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toast(m: String) { snack.value = m }
     fun clearToast() { snack.value = null }
+
+    fun refreshFirmware() = viewModelScope.launch { repo.refreshFirmware() }
+    fun reflashLatest() = viewModelScope.launch {
+        val current=repo.firmware.value
+        if(firmwareStarting.value || !current.canRequestFlash())return@launch
+        val build=current.latest ?: return@launch
+        firmwareStarting.value=true
+        try {
+            repo.reflashLatest(build.buildId).fold(
+                { toast("Firmware update started on the bot") },
+                { toast("Update request: ${it.message}. Refresh status before retrying."); repo.refreshFirmware() })
+        } finally { firmwareStarting.value=false }
+    }
 
     fun setParam(key: String, v: Float) = viewModelScope.launch {
         repo.setParam(key, v).onFailure { toast(it.message ?: "rejected by robot") }

@@ -34,6 +34,8 @@ data class Telemetry(
     val armed: Boolean = false, val balancing: Boolean = false,
     @SerialName("rx_hz") val rxHz: Float = 0f,
     val stale: Boolean = true,
+    @SerialName("startup_state") val startupState: String = "",
+    @SerialName("startup_ready") val startupReady: Boolean = true,
 )
 
 @Serializable
@@ -137,6 +139,8 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
         .readTimeout(0, TimeUnit.MILLISECONDS)      // websocket needs no read timeout
         .pingInterval(10, TimeUnit.SECONDS)
         .build()
+    private val firmwareHttp = http.newBuilder().readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS).build()
 
     private val _host = MutableStateFlow(initialHost)
     val host: StateFlow<String> = _host
@@ -158,6 +162,8 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
     val unsaved = MutableStateFlow(false)
     val stream = MutableStateFlow(StreamStatus())
     val tof = MutableStateFlow(ToFPayload())
+    val firmware = MutableStateFlow(FirmwareStatus())
+    val firmwareError = MutableStateFlow("")
 
     val pad: StateFlow<PadMirror> = combine(debug, connected) { d, c ->
         PadMirror(
@@ -171,10 +177,10 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
     private val scope get() = repoScope   // used by the ws + http helpers
 
     // ---------- HTTP ----------
-    private suspend fun req(r: Request): String = suspendCoroutine { cont ->
+    private suspend fun req(r: Request, client: OkHttpClient = http): String = suspendCoroutine { cont ->
         val requestBody = okio.Buffer().also { r.body?.writeTo(it) }.readUtf8()
         recorder.record("http_request", """{"method":"${r.method}","path":${JsonPrimitive(r.url.encodedPath)},"body":${JsonPrimitive(requestBody)}}""")
-        http.newCall(r).enqueue(object : Callback {
+        client.newCall(r).enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {
                 recorder.record("http_error", JsonPrimitive("${r.url.encodedPath}: ${e.message}").toString())
                 cont.resumeWithException(e)
@@ -196,6 +202,22 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
         Request.Builder().url(base() + path)
             .post(body.toRequestBody("application/json".toMediaType())).build()
     )
+
+    suspend fun refreshFirmware() = withContext(Dispatchers.IO) {
+        runCatching {
+            json.decodeFromString<FirmwareStatus>(req(Request.Builder().url(base()+"/api/firmware/status").build(),firmwareHttp))
+                .also { firmware.value=it; firmwareError.value="" }
+        }.onFailure { firmwareError.value=it.message ?: "Cannot reach firmware service" }
+    }
+
+    suspend fun reflashLatest(buildId: String) = withContext(Dispatchers.IO) {
+        runCatching {
+            val body=JsonObject(mapOf("build_id" to JsonPrimitive(buildId))).toString()
+            val request=Request.Builder().url(base()+"/api/firmware/reflash")
+                .post(body.toRequestBody("application/json".toMediaType())).build()
+            json.decodeFromString<FirmwareStatus>(req(request,firmwareHttp)).also { firmware.value=it; firmwareError.value="" }
+        }
+    }
 
     suspend fun refreshParams() = withContext(Dispatchers.IO) {
         runCatching {
@@ -333,6 +355,9 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
         runCatching {
             val o = json.parseToJsonElement(text) as JsonObject
             when (o["type"]?.toString()?.trim('"')) {
+                "startup" -> o["state"]?.jsonPrimitive?.contentOrNull?.let { phase ->
+                    telemetry.value=telemetry.value.copy(startupState=phase,startupReady=phase=="READY")
+                }
                 "hello" -> o["status"]?.let {
                     val status = json.decodeFromJsonElement(StatusPayload.serializer(), it)
                     telemetry.value = status.telemetry; debug.value = status.debug
@@ -341,6 +366,7 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
                 "tof" -> o["tof"]?.let { tof.value = json.decodeFromJsonElement(ToFPayload.serializer(), it) }
                 "telemetry" -> {
                     o["tel"]?.let { telemetry.value = json.decodeFromJsonElement(Telemetry.serializer(), it) }
+                    connected.value = !telemetry.value.stale // serial reconnect after a firmware job keeps the same WS
                     o["debug"]?.let {
                         debug.value = json.decodeFromJsonElement(FloatMap, it)
                     }

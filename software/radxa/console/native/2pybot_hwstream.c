@@ -28,6 +28,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/crc.h>
 #include <libavutil/mathematics.h>
 #include <libswscale/swscale.h>
 #include <vencoder.h>
@@ -530,15 +531,35 @@ static int latest_frame(struct Capture *camera, struct v4l2_buffer *latest, uint
     return have_frame;
 }
 
-static void snapshot(const char *path, const unsigned char *data, size_t size) {
+static void snapshot(const char *path, const unsigned char *data, size_t size,
+                     int64_t capture_us, uint32_t sequence, uint64_t frame,
+                     bool hardware_timestamp) {
     char temporary[4096];
     if (snprintf(temporary, sizeof(temporary), "%s.tmp", path) >= (int)sizeof(temporary)) return;
     FILE *file = fopen(temporary, "wb");
     if (!file) return;
     bool written = fwrite(data, 1, size, file) == size;
     if (fclose(file) != 0) written = false;
-    if (written) rename(temporary, path);
-    else unlink(temporary);
+    if (!written || rename(temporary, path) != 0) { unlink(temporary); return; }
+    char metadata_path[4096], metadata_temporary[4096];
+    if (snprintf(metadata_path, sizeof(metadata_path), "%s.meta.json", path) >= (int)sizeof(metadata_path) ||
+        snprintf(metadata_temporary, sizeof(metadata_temporary), "%s.meta.json.tmp", path) >= (int)sizeof(metadata_temporary)) return;
+    FILE *metadata = fopen(metadata_temporary, "wb");
+    if (!metadata) return;
+    uint32_t crc = av_crc(av_crc_get_table(AV_CRC_32_IEEE_LE), UINT32_MAX, data, size) ^ UINT32_MAX;
+    struct timespec wall;
+    clock_gettime(CLOCK_REALTIME, &wall);
+    bool recorded = fprintf(metadata,
+        "{\"schema\":\"2pybot-camera-frame/1\",\"publisher_pid\":%ld,\"sequence\":%u,"
+        "\"frame\":%" PRIu64 ",\"capture_monotonic_ns\":%" PRId64 ","
+        "\"published_monotonic_ns\":%" PRId64 ",\"published_wall_ns\":%" PRId64 ","
+        "\"jpeg_size\":%zu,\"jpeg_crc32\":%u,\"timestamp_source\":\"%s\"}\n",
+        (long)getpid(), sequence, frame, capture_us * 1000, mono_us() * 1000,
+        (int64_t)wall.tv_sec * 1000000000 + wall.tv_nsec, size, crc,
+        hardware_timestamp ? "v4l2_monotonic" : "host_monotonic_fallback") > 0;
+    if (fclose(metadata) != 0) recorded = false;
+    if (recorded) rename(metadata_temporary, metadata_path);
+    else unlink(metadata_temporary);
 }
 
 static void progress(uint64_t frames, uint64_t dropped, uint64_t timestamp_fallbacks, int64_t pts,
@@ -722,9 +743,11 @@ int main(int argc, char **argv) {
         if (!ready) continue;
         int64_t now = mono_us();
         int64_t capture_us = (int64_t)capture.timestamp.tv_sec * 1000000 + capture.timestamp.tv_usec;
+        bool hardware_timestamp = true;
         if ((capture.flags & V4L2_BUF_FLAG_TIMESTAMP_MASK) != V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC ||
             capture_us > now || now - capture_us > 5000000) {
             capture_us = now;
+            hardware_timestamp = false;
             ++timestamp_fallbacks;
         }
         int64_t pts = capture_us - started;
@@ -820,7 +843,8 @@ int main(int argc, char **argv) {
             TRY(avcodec_send_frame(jpeg_encoder, jpeg_frame));
             av_packet_unref(snapshot_packet);
             TRY(avcodec_receive_packet(jpeg_encoder, snapshot_packet));
-            snapshot(snapshot_path, snapshot_packet->data, snapshot_packet->size);
+            snapshot(snapshot_path, snapshot_packet->data, snapshot_packet->size,
+                     capture_us, capture.sequence, frames, hardware_timestamp);
             last_snapshot = now;
         }
         VTRY(FlushCacheAllocInputBuffer(encoder, &input));
@@ -854,7 +878,8 @@ int main(int argc, char **argv) {
         now = mono_us();
         double age_ms = (now - capture_us) / 1000.0;
         if (!camera.nv12 && now - last_snapshot >= 1000000) {
-            snapshot(snapshot_path, jpeg->data, jpeg->size);
+            snapshot(snapshot_path, jpeg->data, jpeg->size,
+                     capture_us, capture.sequence, frames, hardware_timestamp);
             last_snapshot = now;
         }
         if (now - last_report >= 1000000) {

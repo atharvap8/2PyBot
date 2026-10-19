@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import `in`.twopybot.app.ui.components.Section
+import `in`.twopybot.app.ui.components.WorkspaceColumns
+import `in`.twopybot.app.ui.components.WorkspaceTitle
 import `in`.twopybot.app.ui.theme.*
 import `in`.twopybot.app.vm.BotViewModel
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +39,8 @@ fun RecorderScreen(vm: BotViewModel) {
             } }.fold({ vm.toast("Session ZIP exported") }, { vm.toast("Export failed: ${it.message}") })
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+    WorkspaceColumns(first={
+        WorkspaceTitle("Session recorder","Capture, annotate & export")
         Section("Terrain recorder", "Captures all received robot JSON, depth frames, debug fields and app commands. " +
             "Saved locally across screen changes. Camera video is separate.") {
             Text(if (connected) "Robot connected" else "Disconnected — connection gaps are recorded", color = if (connected) Green else Amber)
@@ -54,6 +57,7 @@ fun RecorderScreen(vm: BotViewModel) {
                 recording.distanceM, recording.peakSpeed, recording.pitchRms), style = Mono)
             if (recording.error.isNotEmpty()) Text(recording.error, color = Red)
         }
+    },second={
         Section("Saved sessions", "ZIP contains raw JSONL, telemetry CSV, parameter metadata and diagnostics. " +
             "Labels are human annotations; rewards and terminal states remain open for offline RL preparation.") {
             if (sessions.isEmpty()) Text("No sessions yet", color = TextDim)
@@ -64,5 +68,5 @@ fun RecorderScreen(vm: BotViewModel) {
                 }
             }
         }
-    }
+    })
 }

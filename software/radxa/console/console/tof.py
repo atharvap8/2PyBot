@@ -1,5 +1,6 @@
 """Asynchronous depth telemetry and an opt-in forward-reference guard."""
 import asyncio
+import collections
 import json
 import math
 import os
@@ -31,6 +32,7 @@ class ToF:
         self.range_offset_m = 0.0
         self.range_calibrated = False
         self.calibration_error = ""
+        self.history = collections.deque(maxlen=128)
         try:
             saved = json.loads(self.calibration_file.read_text())
             offset = float(saved["offset_m"])
@@ -58,6 +60,9 @@ class ToF:
             and 50 <= frame["distance_mm"][i] <= 4000
             and 0 <= frame["sigma_mm"][i] <= 20 for i in range(64)
         ]
+        for name in ("ambient_per_spad", "signal_per_spad", "reflectance"):
+            if name in frame and (len(frame[name]) != 64 or any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in frame[name])):
+                raise ValueError("Invalid optional depth metadata")
         continuous = self.state == "ranging" and self.received is not None and time.monotonic() - self.received < 0.5
         for i in range(64):
             distance = frame["distance_mm"][i]
@@ -66,6 +71,11 @@ class ToF:
             self._previous[i] = distance if frame["valid"][i] else None
         self.frame = frame
         self.received = time.monotonic()
+        received_ns = time.monotonic_ns()
+        frame["received_monotonic_ns"] = received_ns
+        frame.setdefault("capture_monotonic_ns", received_ns)
+        frame.setdefault("timestamp_source", "host_receive_fallback")
+        self.history.append(frame)
         self.state, self.error = "ranging", ""
 
     def status(self, link=None):
@@ -150,6 +160,14 @@ class ToF:
                              if not stale and not any(valid) else ""),
             "sigma_mm": self.frame.get("sigma_mm", []),
             "targets": self.frame.get("targets", []),
+            "ambient_per_spad": self.frame.get("ambient_per_spad", []),
+            "signal_per_spad": self.frame.get("signal_per_spad", []),
+            "reflectance": self.frame.get("reflectance", []),
+            "sequence": self.frame.get("sequence"),
+            "capture_monotonic_ns": self.frame.get("capture_monotonic_ns"),
+            "received_monotonic_ns": self.frame.get("received_monotonic_ns"),
+            "timestamp_source": self.frame.get("timestamp_source", "unavailable"),
+            "timestamp_uncertainty_ms": self.frame.get("timestamp_uncertainty_ms"),
             "corrected_distance_mm": [round(max(0, d + self.range_offset_m * 1000)) for d in distance],
             "range_calibrated": self.range_calibrated,
             "range_offset_m": round(self.range_offset_m, 4),

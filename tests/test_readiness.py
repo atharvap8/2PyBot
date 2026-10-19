@@ -46,3 +46,17 @@ def test_ready_flag_releases_interlock_without_arming():
         with pytest.raises(asyncio.CancelledError):
             await task
     asyncio.run(scenario())
+
+
+def test_ack_is_sent_while_firmware_has_no_sensor_telemetry_yet():
+    async def scenario():
+        sent = []
+        link = SimpleNamespace(connected=True, derived={"BOOTGATE": 1, "STARTUPACK": 1},
+                               tel={"host_ready": False, "stale": True, "startup_state": "WAIT_HOST"}, send=sent.append)
+        task = asyncio.create_task(module.publish_ready(link, lambda: {"ready": True}))
+        await asyncio.sleep(.01)
+        assert sent == ["BR,1"]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    asyncio.run(scenario())

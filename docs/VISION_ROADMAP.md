@@ -1,7 +1,9 @@
 # 2PyBot vision roadmap
 
-Status: **planned work**, recorded while preparing revision **3.4.0** locally.
-The tasks below have not been implemented or physically calibrated yet.
+Status: calibration-suite software and frame/depth diagnostics are implemented
+in local revisions 3.5.0–3.6.0. Actual camera coefficients and sensor extrinsics
+still require physical target captures and validation. Unchecked tasks below
+remain pending. See [the calibration suite](CAMERA_CALIBRATION.md).
 
 Estimated milestone dates and indicative target versions are recorded in the
 [Revision Table](REVISION_HISTORY.md). These are planning estimates, not promises
@@ -38,16 +40,16 @@ profile and brightness auto-calibration do not correct that geometry.
 
 - [ ] Record the actual IMX708 lens, focus setting, active capture mode, image size,
   crop/binning, output resize and saved ISP profile. Keep focus/mechanics fixed.
-- [ ] Create a measured, flat ChArUco or checkerboard target and a capture workflow
+- [x] Provide printable ChArUco/checkerboard targets and a guided automatic capture workflow
   through the existing capture owner; do not open a competing V4L2 reader.
 - [ ] Collect roughly 30–60 sharp, diverse views spanning corners, edges, distances
   and target angles. Save target dimensions and source-frame metadata.
-- [ ] Fit intrinsics/distortion using OpenCV. Compare a standard radial/tangential
+- [x] Implement intrinsic/distortion fitting using OpenCV. Compare a standard radial/tangential
   model with a fisheye model if the observed lens warrants it; select using
   held-out reprojection and straight-line residuals, not the name “wide angle”.
-- [ ] Export versioned calibration, validation plots, per-view errors and
+- [x] Export versioned calibration, per-view errors, model comparisons and
   coverage maps. Include independent test views, not only fitting images.
-- [ ] Add an undistorted preview with raw/corrected comparison and correct ROI.
+- [x] Add a snapshot-based undistorted preview with raw/corrected comparison and ROI metadata.
 - [ ] Benchmark rectification latency/FPS before integrating it into live video.
   Cache remap tables; preserve the approved colour/exposure pipeline.
 
@@ -68,10 +70,11 @@ optical setting must not silently reuse an incompatible calibration.
   light levels and torch states. Do not loosen quality rules just to fill a grid.
 - [ ] Validate or extend the existing measured-reference bias calibration; use
   manufacturer crosstalk calibration if the diagnosed hardware setup requires it.
-- [ ] Capture frame sequences and monotonic acquisition timestamps for camera and
+- [x] Capture frame sequences and monotonic capture/read timestamps for camera and
   ToF. Record receive time separately from acquisition time and measure delay.
-- [ ] Add synchronized image/depth/IMU/encoder/servo metadata to sessions, with
-  calibration IDs and raw values retained for offline replay.
+- [x] Retain camera/depth pairing, IMU/encoder metadata, calibration IDs and raw
+  values in accepted calibration captures. ToF timing is approximate.
+- [ ] Add actual payload joint-pose telemetry/feedback for moving-camera extrinsics.
 
 **Deliverable:** repeatable depth quality and time-aligned replay samples with
 measured range errors. At present, range bias alone does not solve unusable

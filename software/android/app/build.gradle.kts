@@ -14,7 +14,11 @@ android {
         targetSdk = 34
         val revision = rootProject.file("../../VERSION").readText().trim()
         val parts = revision.split(".").map { it.toInt() }
-        versionCode = parts[0] * 10000 + parts[1] * 100 + parts[2]
+        require(parts.size == 3 && (parts[1] < 10 || parts[1] % 10 == 0 && parts[2] == 0)) {
+            "After 3.10.0 use 3.20.0, 3.30.0, 3.40.0; intermediate minor/patch numbering is not allowed"
+        }
+        require(parts[1] in 0..999 && parts[2] in 0..999)
+        versionCode = parts[0] * 1000000 + parts[1] * 1000 + parts[2]
         val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: revision
         require(Regex("^${Regex.escape(revision)}(?:-rc\\.[1-9][0-9]*)?$").matches(releaseVersion)) {
             "releaseVersion must match VERSION, optionally suffixed with -rc.N"

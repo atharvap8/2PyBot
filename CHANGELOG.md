@@ -3,6 +3,137 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 3.40.0 — Routes landscape rendering fix
+
+- Preserve the active workspace when switching between the bottom bar and rail,
+  including landscape windows narrower than 600 dp.
+- Bind WebView lifecycle handling to its actual instance and release it only
+  when AndroidView releases that instance; use explicit bounded view sizing.
+- Give the embedded route page definite viewport height, a compact landscape
+  layout and scrollable fallback for very short windows. Add native Reload/error state.
+
+## 3.30.0 — adaptive Android cockpit
+
+- Rebuild navigation around five primary destinations and a compact landscape rail.
+- Redesign Drive/Live/Map around a dominant scene and bounded instrument panes;
+  correct live camera framing to 16:9.
+- Add adaptive Camera/Setup/Sessions columns and searchable lazy parameter rows.
+- Open Routes directly, with a responsive embedded map/teaching workspace.
+- Unify surfaces, typography, spacing and insets; preserve the installed controller
+  and original-command replay behavior. See [design notes](docs/ANDROID_COCKPIT_DESIGN.md).
+
+## 3.20.0 — post-3.10 development revision
+
+Numbering follows **3.10.0 → 3.20.0 → 3.30.0**. The prototype features below
+are consolidated into 3.20.0. Existing local artifacts and recorder metadata
+retain their original identifiers for hash verification and rollback.
+
+### Original-command replay and more responsive reference governor
+
+- Record timestamped 20 Hz speed/yaw/odometry samples, preserving reverse,
+  pauses and original timing. Remove the replay-only speed/yaw ceiling, host
+  ramp, duration/length caps and predictive-recovery mission interruptions.
+- Remove the speed selector for recorded replay; old waypoint-only routes need
+  re-teaching to obtain timing that was never stored.
+- Double reference acceleration allowance, triple jerk allowance, reduce
+  prediction horizon and recovery latch, and make mild hazard attenuation quadratic.
+
+### Supervised routes / waypoints
+
+- Teach start-relative wheel-odometry routes, preview them, and explicitly replay
+  them from the marked physical start; include a ready-to-create 2 m straight route.
+- Default cruise target is 0.6 m/s, including climb assistance; dense taught
+  waypoints do not impose a hidden 0.25 m/s limit. Slow for turns and goal approach.
+- Keep ToF advisory only: no depth prerequisite, obstacle hold or distance speed
+  cap for routes. Remove camera/payload-position and payload-input dependencies.
+- Add visible-page supervision, controller watchdog and latched drive-stick takeover.
+- Add native navigation leases and separate 10 Hz navigation feedback; retain
+  all saved parameters, startup gating and local-only motor arming.
+- Expose the route page from Android Auto and the browser console.
+
+### Android latest-build reflash and independent bot worker
+
+- Add Setup firmware controls with compiled version/hash, progress and result.
+- Register validated successful builds and publish over SSH; pin each request
+  to the displayed build ID.
+- Keep camera/API online while an independent unprivileged service flashes
+  only the app, verifies rollback and boot/NVS, restores tuning and checks calibration.
+- Add maintenance arming/raw-drive lock, durable recovery, duplicate/mutation
+  rejection and serial reconnect baseline reset. Updates never auto-arm.
+- Document pitch-gimbal and vibration-isolated camera/ToF pod recommendations.
+
+### Reliable hand-back and controlled descent
+
+- Separate uphill deficit from direction-aware downhill/braking cues, including
+  sustained uncommanded rolling. Add DOWNCLIMB, EXITING and COOLDOWN states.
+- Replace the perfect-sample exit timer with accumulated evidence and monitored
+  normal-controller hand-back. Permit quiet flat-ground neutral release while
+  retaining short pauses on a slope, and reject failed hand-backs.
+- Add a descent-reference governor using saved CLMBV, measured overspeed and
+  gradual recovery. Preserve reverse braking and full wheel balance authority.
+- Append ten exit/descent diagnostic fields; retain all 107 saved parameters.
+
+## 3.10.0 — automatic load-aware climb and retained slope compensation
+
+- Detect sustained speed-reference error and pitch-baseline bias with 0.4 s
+  filters, request confirmation, per-wheel following checks and hysteresis.
+- Blend normal/climb control and speed/steering authority over 0.75 s; preserve
+  compensation during brief neutral stops and confirm flat recovery for 5 s.
+- Give D-pad/H selections a persistent manual override, with AC,1 / H,3 to
+  resume auto and AC,0 to disable it. These commands never arm the robot.
+- Fix the pg-to-home integral regression: mild 25% recovery no longer drains
+  climb compensation; high immediate hazards and velocity saturation still
+  bleed state, with conditional acceleration anti-windup.
+- Add 14 diagnostic fields, an auto-climb control page and recorder/monitor
+  support. Preserve all 107 saved parameters and the startup/calibration gate.
+
+## 3.9.0 — predictive fall-prevention reference governor
+
+- Shape operator speed requests with bounded reference acceleration/jerk and
+  predict near-term tilt and wheel-speed margin before the existing fall cutoff.
+- Prioritize full selected pitch/rate feedback during manoeuvres/recovery,
+  attenuate velocity-tracking error and yaw, and retain stronger stiff-hold gains.
+- Allocate steering from per-wheel speed headroom without reducing common balance
+  acceleration or changing the 107 saved parameters, fall cutoffs or startup gate.
+- Append override/reference/wheel-target debug fields and expose them in the
+  read-only drive monitor and recorder. Add production-controller constraint tests
+  and recorded-state replay; physical fall reduction requires a repeat drive test.
+
+## 3.8.0 — ONNX objects viewer
+
+- Add a bounded snapshot-based SSD-MobileNetV1 INT8 detector, COCO labels,
+  confidence/person filters and temporary class-aware track IDs.
+- Add web/Android Objects viewers and inference/frame-age metrics; saved lens
+  correction can be used without guessing camera–ToF object distances.
+- Provide a fixed checksum-verified model installer and optional ARM64 CPU runtime.
+
+## 3.7.0 — hold firmware initialization until Radxa ACK
+
+- Move IMU/driver/gamepad/payload/LED startup and gyro calibration behind BR,1.
+- Keep serial, safe disabled outputs and read-only parameter discovery available
+  during the hold; host readiness is independent of IMU telemetry.
+- Report WAIT_HOST, INITIALIZING, CALIBRATING, READY and ERROR startup phases.
+- ACK does not arm the bot; calibration must finish before a fresh local START.
+
+## 3.6.0 — frame timing and passive depth diagnostics
+
+- Add checksum-bound camera snapshot metadata with V4L2 monotonic capture time,
+  publisher/sequence identity and publication timing.
+- Record ToF host-read timestamps/uncertainty, sequence, signal/ambient/reflectance
+  and bounded depth history; pair snapshots with nearest depth frames.
+- Show near-field, inconsistent and rejected-zone reasons plus raw depth grid in
+  the calibration GUI. Pairing is time-aware, not claimed hardware synchronization.
+
+## 3.5.0 — guided camera calibration suite
+
+- Add a progressive web/Android wizard with printable ChArUco/checkerboard targets,
+  target detection, sharpness/stability checks, coverage guidance and automatic capture.
+- Automatically compare pinhole/fisheye fits using held-out views, retain sessions,
+  generate raw/corrected previews, and export geometry, captures and PDF reports.
+- Use snapshots from the existing camera owner; no competing capture device or
+  colour/exposure changes. Actual coefficients require physical target captures.
+- Move the live ToF SDK to a managed location before removing the old calibration app.
+
 ## 3.4.0 — remove fixed creep limits and prepare vision roadmap
 
 - Remove fixed 0.20/0.45 m/s unknown/partial-depth caps. Fresh unconfirmed depth

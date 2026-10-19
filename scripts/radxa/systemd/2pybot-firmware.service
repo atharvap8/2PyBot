@@ -1,0 +1,21 @@
+[Unit]
+Description=2PyBot independent firmware reflash worker
+After=network.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO__/software/radxa/console
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=BOT_ESPTOOL_PYTHON=__FLASHER_PYTHON__
+RuntimeDirectory=2pybot-firmware
+RuntimeDirectoryMode=0755
+ExecStart=__VENV__/bin/python3 -m console.firmware_worker
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=300
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

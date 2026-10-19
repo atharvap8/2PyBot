@@ -28,10 +28,22 @@ A dash means the change did not have a separate release version.
 | 16 | Added the first Drive view with the assembled robot model, trail and depth readings. | 3.1.7 | 11 Oct 2026 |
 | 17 | Added the shaded 3D world, touch controls and rear chase view. Corrected the model's movement and tilt. | 3.4.0 | 12 Oct 2026 |
 | 18 | Removed fixed creep limits and added measured-reference ToF range calibration. | 3.4.0 | 12 Oct 2026 |
+| 19 | Added a guided camera calibration wizard with automatic capture, lens fitting, corrected previews and reports. | 3.5.0 (local) | 12 Oct 2026 |
+| 20 | Added camera/depth frame timing, paired capture records and ToF health diagnostics. | 3.6.0 (local) | 12 Oct 2026 |
+| 21 | Held firmware startup/calibration until Radxa acknowledgement, while keeping discovery and safe disabled outputs available. | 3.7.0 (local) | 12 Oct 2026 |
+| 22 | Added ONNX object detection with a corrected viewer, filters and temporary tracks. Validated real fisheye lens calibration. | 3.8.0 (local) | 12 Oct 2026 |
+| 23 | Recorded reversal failures and added a predictive reference governor, full recovery feedback and wheel-headroom steering allocation. | 3.9.0 (local) | 13 Oct 2026 |
+
+Current development numbering advances **3.10.0 → 3.20.0 → 3.30.0**.
+Post-3.10 local prototype changes are consolidated into 3.20.0; historical
+artifact identifiers stay intact for traceability. See [version policy](VERSIONING.md).
 
 The 3.2.0 and 3.3.0 Android builds were local revisions. Their changes were
 included in **3.4.0**, following the **3.4.0-rc.1** release candidate.
 The latest stable release is **3.4.0**.
+Revisions 3.5.0–3.9.0 are local work, not published GitHub releases. Real camera
+target captures produced a saved fisheye solution; full-rate corrected video and
+sensor extrinsics remain pending. Fall prevention requires a repeat drive test.
 
 ## Planned work
 
@@ -41,13 +53,13 @@ task list.
 
 | Sr. No. | Feature Name/Change | Version | Date |
 | ---: | :--- | :--- | :--- |
-| 19 | Calibrate the camera lens and correct the distortion that makes straight lines look curved. | Target: 3.5.0 | 03 Nov 2026 (estimate) |
-| 20 | Improve ToF readings and align camera, depth and telemetry timestamps. | Target: 3.6.0 | 06 Nov 2026 (estimate) |
-| 21 | Calibrate the camera and ToF positions relative to the bot and to each other. | Target: 3.7.0 | 24 Nov 2026 (estimate) |
-| 22 | Show ToF distance readings over the camera feed, with confidence and frame age. | Target: 3.8.0 | 30 Nov 2026 (estimate) |
-| 23 | Add ONNX object detection and tracking, with distance labels where depth is available. | Target: 4.0.0 | 22 Dec 2026 (estimate) |
-| 24 | Build a local obstacle map and improve position tracking with camera and IMU data. | Target: 4.1.0 | 12 Jan 2027 (estimate) |
-| 25 | Use the calibrated perception system for obstacle-aware assistance and waypoint driving. | Target: 4.2.0 | 26 Jan 2027 (estimate) |
+| 24 | Integrate full-rate corrected video using the saved lens calibration. | Target: 3.30.0 | 03 Nov 2026 (estimate) |
+| 25 | Validate measured ToF ranges and timing. | Target: 3.30.0 | 06 Nov 2026 (estimate) |
+| 26 | Calibrate the camera and ToF positions relative to the bot and to each other. | Target: 3.30.0 | 24 Nov 2026 (estimate) |
+| 27 | Show ToF distance readings over the camera feed, with confidence and frame age. | Target: 3.40.0 | 30 Nov 2026 (estimate) |
+| 28 | Increase detection throughput and integrate tracked overlays, with distance labels where depth is available. | Target: 4.0.0 | 22 Dec 2026 (estimate) |
+| 29 | Build a local obstacle map and improve position tracking with camera and IMU data. | Target: 4.1.0 | 12 Jan 2027 (estimate) |
+| 30 | Use the calibrated perception system for obstacle-aware assistance and waypoint driving. | Target: 4.2.0 | 26 Jan 2027 (estimate) |
 
 For smaller changes, see the [changelog](../CHANGELOG.md). Earlier designs and
 experiments are described in [project history](BaseLink/Project_History.md).
