@@ -1,0 +1,4 @@
+# Optional geometric calibration tools; Debian python3-opencv also works (4.5+).
+numpy>=1.19.5
+opencv-contrib-python-headless>=4.5,<5
+reportlab>=3.6,<5

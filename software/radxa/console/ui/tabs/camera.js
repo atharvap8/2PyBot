@@ -2,39 +2,10 @@
  * Playback is WHEP (WebRTC-HTTP Egress) straight from MediaMTX, so there
  * is no MJPEG polling and no extra library: ~100 ms on 5 GHz.
  */
-export default function register(registerTab) {
-  let pc = null;
+import { liveVideo } from '../live_video.js';
 
-  async function whep(video, url) {
-    if (pc) { pc.close(); pc = null; }
-    pc = new RTCPeerConnection({ iceServers: [] });
-    pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
-    // WHEP tracks may be streamless (e.streams is empty). Attach each track
-    // explicitly instead of leaving the video element with a null source.
-    const remoteStream = new MediaStream();
-    video.srcObject = remoteStream;
-    pc.ontrack = (e) => {
-      if (!remoteStream.getTracks().some(t => t.id === e.track.id)) {
-        remoteStream.addTrack(e.track);
-      }
-      video.play().catch(() => {});
-    };
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    // wait briefly for ICE candidates (non-trickle keeps this simple)
-    await new Promise(r => {
-      if (pc.iceGatheringState === 'complete') return r();
-      const t = setTimeout(r, 400);
-      pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); r(); } };
-    });
-    const res = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/sdp' },
-      body: pc.localDescription.sdp
-    });
-    if (!res.ok) throw new Error(`WHEP ${res.status}: is MediaMTX running?`);
-    await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });
-  }
+export default function register(registerTab) {
+  let viewer = null, lumaTimer = null;
 
   return registerTab({
     id: 'camera', title: 'Camera', order: 2,
@@ -53,8 +24,9 @@ export default function register(registerTab) {
         <p class=hint>Auto-exposure is why the frame rate collapses in dim rooms —
           the sensor lengthens exposure instead of dropping brightness. This locks
           exposure, then walks exposure and gain to hit a target mean luma.
-          Exposure first (free but adds motion blur), gain second (keeps the frame
-          rate, adds noise).</p>
+          Exposure first (adds motion blur), gain second (adds noise). CSI exposure
+          is in microseconds and capped to one sensor frame. No calibration is
+          performed until you press the button.</p>
         <div class=bar>
           <button class="act primary" id=bAuto>Auto-calibrate</button>
           <label style="color:var(--dim);font-size:12px">target luma
@@ -75,7 +47,10 @@ export default function register(registerTab) {
       </div>
       <div class=card><h3>Sensor controls</h3>
         <p class=hint>Enumerated live from v4l2 — these are the controls your
-          specific camera actually exposes, not a guess.</p>
+          specific camera actually exposes. CSI controls go through the owning
+          publisher, so tuning works while live video is running. Changes persist
+          across restarts. rpi_imx708 uses sensor-specific Raspberry Pi colour
+          matrices and gamma in the ISP; Kelvin changes the white point and matrix.</p>
         <div id=ctrls></div>
         <div class=bar>
           <input id=profName placeholder="profile name" style="background:rgba(255,255,255,.06);
@@ -85,13 +60,16 @@ export default function register(registerTab) {
       </div>`;
 
       const vid = el.querySelector('#vid');
+      const live = liveVideo(vid, value => c.msg(value));
+      viewer = live;
       const st = await c.API.get('/api/stream').catch(() => ({}));
+      if (!el.isConnected) return;
       el.querySelector('#cStream').textContent =
         st.running ? `${st.mode?.w}x${st.mode?.h} ${st.encoder}` : (st.error || 'stopped');
       el.querySelector('#bPlay').onclick = async () => {
-        try { await whep(vid, `http://${location.hostname}:8889${st.whep || '/cam/whep'}`); c.msg('WebRTC connected'); }
-        catch (e) { c.msg(e.message, true); }
+        await live.start();
       };
+      live.start();
       el.querySelector('#bSnap').onclick = () => window.open('/api/camera/snapshot', '_blank');
       el.querySelector('#bRestart').onclick = async () => {
         c.msg('restarting pipeline…');
@@ -104,6 +82,7 @@ export default function register(registerTab) {
 
       // v4l2 controls
       const d = await c.API.get('/api/camera/controls').catch(() => null);
+      if (!el.isConnected) return;
       if (d) {
         el.querySelector('#fmtInfo').innerHTML = (d.formats || []).slice(0, 6)
           .map(f => `${f.fmt} <b>${f.w}x${f.h}</b> @${Math.max(...(f.fps || [0]))}`).join(' · ');
@@ -114,7 +93,7 @@ export default function register(registerTab) {
           const row = document.createElement('div');
           row.className = 'row';
           const lo = ctl.min ?? 0, hi = ctl.max ?? 1;
-          row.innerHTML = `<label>${ctl.name}<small>${ctl.type}${ctl.flags ? ' · ' + ctl.flags : ''}</small></label>
+          row.innerHTML = `<label>${ctl.name}<small>${ctl.unit || ctl.type}${ctl.flags ? ' · ' + ctl.flags : ''}</small></label>
             <input type=range min=${lo} max=${hi} step=${ctl.step || 1} value=${v ?? lo}>
             <input type=number min=${lo} max=${hi} step=${ctl.step || 1} value=${v ?? lo}>`;
           const [r1, n1] = row.querySelectorAll('input');
@@ -161,11 +140,12 @@ export default function register(registerTab) {
         } catch (e) { log.textContent = e.message; c.msg(e.message, true); }
       };
 
-      setInterval(async () => {
+      lumaTimer = setInterval(async () => {
         try { const l = await c.API.get('/api/camera/luma');
               const e = el.querySelector('#cLuma');
               if (e && l.luma != null) e.textContent = `luma ${l.luma.toFixed(0)}`; } catch {}
       }, 4000);
-    }
+    },
+    onLeave() { viewer?.stop(); viewer = null; clearInterval(lumaTimer); }
   });
 }

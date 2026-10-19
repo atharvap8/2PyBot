@@ -29,6 +29,7 @@ class Plan:
     rules: bool = False
     camera: bool = False
     monitor: bool = False
+    boot: bool = False
 
 
 def plan_changes(paths, first=False):
@@ -38,7 +39,7 @@ def plan_changes(paths, first=False):
             plan.dependencies = plan.console = True
         elif path.startswith(APP + "console/") and path.endswith(".py"):
             plan.console = True
-        elif path.startswith(APP + "ui/") and path.endswith((".js", ".html", ".css")):
+        elif path.startswith(APP + "ui/") and path.endswith((".js", ".html", ".css", ".json")):
             plan.console = True
         elif path.startswith(APP + "native/") and (
             path.endswith((".c", ".h")) or path.endswith("/Makefile")
@@ -54,6 +55,9 @@ def plan_changes(paths, first=False):
             plan.camera = plan.console = True
         elif path == APP + "native/99-2pybot-encoder.rules":
             plan.rules = plan.console = True
+        elif path in (APP + "40-tof.conf", APP + "45-boot-ready.conf", "scripts/radxa/boot_gate.py",
+                      MONITOR + "2pybot-boot-gate.service", MONITOR + "86-2pybot-boot-gate.rules"):
+            plan.boot = plan.console = True
         elif path in (MONITOR + "2pybot-deploy.service", MONITOR + "2pybot-deploy.timer"):
             plan.monitor = True
     return plan
@@ -143,6 +147,9 @@ class Deployment:
         return self.write_bytes(self.system_root / destination.lstrip("/"), Path(source).read_bytes())
 
     def prepare(self, plan):
+        if plan.boot:
+            source = self.repo / "scripts/radxa/boot_gate.py"
+            compile(source.read_text(encoding="utf-8"), str(source), "exec")
         if plan.console:
             for source in (self.app / "console").glob("*.py"):
                 compile(source.read_text(encoding="utf-8"), str(source), "exec")
@@ -183,8 +190,23 @@ class Deployment:
         if reload_needed:
             self.run(["systemctl", "restart", "2pybot-deploy.timer"])
 
+    def install_boot(self):
+        content = (self.repo / MONITOR / "2pybot-boot-gate.service").read_text(encoding="utf-8")
+        for token, value in {"__USER__": self.user, "__REPO__": str(self.repo), "__VENV__": str(self.venv)}.items():
+            content = content.replace(token, value)
+        changed = self.write_bytes(self.system_root / "etc/systemd/system/2pybot-boot-gate.service", content.encode("utf-8"))
+        for name in ("40-tof.conf", "45-boot-ready.conf"):
+            changed |= self.install_file(self.app / name, "/etc/systemd/system/2pybot-console.service.d/" + name)
+        rule_changed = self.install_file(self.repo / MONITOR / "86-2pybot-boot-gate.rules",
+                                         "/etc/udev/rules.d/86-2pybot-boot-gate.rules")
+        if rule_changed:
+            self.run(["udevadm", "control", "--reload-rules"])
+        return changed
+
     def apply(self, plan):
         reload_needed = False
+        if plan.boot:
+            reload_needed |= self.install_boot()
         if plan.units:
             content = (self.app / "systemd/2pybot-console.service").read_text(encoding="utf-8")
             content = content.replace("__USER__", self.user).replace("__DIR__", str(self.app))
@@ -218,6 +240,9 @@ class Deployment:
                 self.run(["udevadm", "control", "--reload-rules"])
         if reload_needed:
             self.run(["systemctl", "daemon-reload"])
+        if plan.boot:
+            # Arm the next boot; do not reset an ESP32 owned by the live console.
+            self.run(["systemctl", "enable", "2pybot-boot-gate.service"])
         if plan.mediamtx:
             self.run(["systemctl", "enable", "2pybot-mediamtx.service"])
             self.run(["systemctl", "restart", "2pybot-mediamtx.service"])

@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +39,7 @@ fun LiveScreen(vm: BotViewModel) {
     val whep = remember { WhepClient(ctx) }
     var videoState by remember { mutableStateOf("idle") }
     var renderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
+    var showControls by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         whep.onState = { videoState = it }
@@ -45,7 +47,8 @@ fun LiveScreen(vm: BotViewModel) {
     }
 
     // ---- pieces, so portrait and landscape can arrange the same content ----
-    val videoPane: @Composable (Modifier) -> Unit = { mod ->
+    // Keep the native video renderer alive when rotation moves it between panes.
+    val videoPane = remember(whep) { movableContentOf<Modifier> { mod ->
         Box(mod.clip(RoundedCornerShape(16.dp)).background(Ink)
                .border(1.dp, Line, RoundedCornerShape(16.dp))) {
             AndroidView(
@@ -64,7 +67,7 @@ fun LiveScreen(vm: BotViewModel) {
                      modifier = Modifier.align(Alignment.Center))
             Row(Modifier.align(Alignment.TopStart).padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("WebRTC", style = Mono.copy(fontSize = 10.sp), color = TextDim,
+                Text("LIVE / WebRTC · 16:9", style = Mono.copy(fontSize = 10.sp), color = TextHi,
                      modifier = Modifier.clip(RoundedCornerShape(6.dp))
                         .background(Ink.copy(alpha = .65f)).padding(horizontal = 6.dp, vertical = 2.dp))
             }
@@ -82,20 +85,20 @@ fun LiveScreen(vm: BotViewModel) {
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = Panel.copy(alpha = .9f), contentColor = TextHi)
-                ) { Text("Stop", fontSize = 12.sp) }
+                ) { Text("Stop video", fontSize = 12.sp) }
             }
         }
-    }
+    } }
 
     val gauges: @Composable (Modifier) -> Unit = { mod ->
         Row(mod, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(Modifier.weight(1f)) {
                 Text("ATTITUDE", fontSize = 9.sp, letterSpacing = 1.sp, color = TextDim)
-                AttitudeGauge(tel.pitch, dbg["w"] ?: 0f, Modifier.fillMaxWidth().aspectRatio(1f))
+                AttitudeGauge(tel.pitch, dbg["w"] ?: 0f, Modifier.fillMaxWidth().height(96.dp))
             }
             Column(Modifier.weight(1f)) {
                 Text("PAD (MIRROR)", fontSize = 9.sp, letterSpacing = 1.sp, color = TextDim)
-                StickMirror(pad, Modifier.fillMaxWidth().aspectRatio(1f))
+                StickMirror(pad, Modifier.fillMaxWidth().height(96.dp))
             }
         }
     }
@@ -125,36 +128,21 @@ fun LiveScreen(vm: BotViewModel) {
         )) { vm.command(it) }
     }
 
-    if (isLandscape()) {
-        // Sideways: the video takes the left 58% at full height and the
-        // instruments stack on the right. Nothing scrolls, nothing is cropped.
-        Row(Modifier.fillMaxSize().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            videoPane(Modifier.weight(0.58f).fillMaxHeight())
-            Column(Modifier.weight(0.42f).fillMaxHeight().verticalScroll(rememberScrollState())) {
-                StatusStrip(tel, conn, unsaved)
-                Spacer(Modifier.height(8.dp))
-                gauges(Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                numbers()
-                Spacer(Modifier.height(8.dp))
-                gestures()
-            }
+    AdaptiveWorkspace(portraitRatio=16f/9f,primary=videoPane,tools={
+        WorkspaceTitle("Live view","Camera-first control workspace")
+        StatusStrip(tel,conn,unsaved)
+        Spacer(Modifier.height(4.dp))
+        numbers()
+        InstrumentRow("Heading","%.0f°".format(tel.heading))
+        InstrumentRow("Camera link",videoState,if(videoState=="connected") Green else TextDim)
+        TextButton(onClick={showControls=!showControls},modifier=Modifier.fillMaxWidth()) {
+            Text(if(showControls) "Hide instruments & actions" else "Instruments & actions",fontSize=12.sp)
         }
-    } else {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
-            StatusStrip(tel, conn, unsaved)
-            Spacer(Modifier.height(10.dp))
-            videoPane(Modifier.fillMaxWidth().aspectRatio(4f / 3f))
-            Spacer(Modifier.height(12.dp))
+        if(showControls) {
             gauges(Modifier.fillMaxWidth())
-            Spacer(Modifier.height(12.dp))
-            numbers()
-            Spacer(Modifier.height(12.dp))
-            Section("Expressions", "Gestures run through the firmware's gesture engine, so " +
-                    "balancing and every safety limit stay in charge throughout.") { gestures() }
-            Spacer(Modifier.height(70.dp))
+            Section("Robot actions") {gestures()}
         }
-    }
+    })
 }
 
 @Composable

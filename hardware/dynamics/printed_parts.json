@@ -1,0 +1,14 @@
+{
+  "method": "Bambu Studio 02.08.02.61 CLI, flattened H2S 0.4 mm / 0.20 mm Standard / eSUN PLA+ profiles, auto orientation, 2 walls, 15% infill, 5 top / 3 bottom layers, supports disabled",
+  "density_g_cm3": 1.25,
+  "notes": "Re-sliced estimates, not the original print jobs. Includes brim/purge in reported grams; print orientation and H2S/P1S differences add uncertainty. Charger parts excluded. CAD centroids and inertia assume uniform effective density, not exact toolpath material distribution.",
+  "mass_g": {
+    "2pybot_base_B.stl": 25.18,
+    "2pybot_base_F.stl": 24.05,
+    "2pybot_face.stl": 16.81,
+    "2pybot_motor_L.stl": 41.30,
+    "2pybot_motor_R.stl": 41.31,
+    "2pybot_shell.stl": 211.61,
+    "beam_D.stl": 5.50
+  }
+}

@@ -159,10 +159,11 @@
 // ============================================================
 //  BALANCE CONTROL — Package B: LQR (LQI)
 // ============================================================
-// Designed for: L_eff (CoM height) = 0.15 m, wheel R = 42.5 mm.
+// Printed-body estimate: J_axle/(m*h) = 0.152858 m (old model: 0.15 m).
+// This is not generally the same as static CoM height.
 // Simulation shows the design tolerates >= +/-30 % error in L_eff
 // with the SAME gains, so a rough estimate is fine. To redesign,
-// edit L_EFF/Q/R in tools/simulate_controllers.py and rerun it.
+// use scripts/lqr_design.py with measured mass properties/effective length.
 //
 // States (SI units, forward-positive):
 //   x  position (m)      v  velocity (m/s)
@@ -170,14 +171,15 @@
 //   z  Integral(x - xRef) (m*s)   <- kills steady-state drift/bias
 // Input: u = wheel linear acceleration (m/s^2)
 //
-// Riccati solution (Q = diag(20, 6, 90, 1.5, 6), R = 0.30):
-#define LQR_K1   (-7.0547f)   // per m       (x - xRef)
-#define LQR_K2   (-6.5334f)   // per m/s     (v)
-#define LQR_K3   (-34.5881f)   // per rad     (pitch)
-#define LQR_K4   (-4.2854f)   // per rad/s   (pitch rate)
+// Q=diag(10,4,52.5,8,2), R=0.45. Increased pitch/rate weights retain
+// sampled-loop stability with terrain softening and added actuator delay.
+#define LQR_K1   (-7.3234f)   // per m       (x - xRef)
+#define LQR_K2   (-7.4495f)   // per m/s     (v)
+#define LQR_K3   (-42.9506f)   // per rad     (pitch)
+#define LQR_K4   (-6.6862f)   // per rad/s   (pitch rate)
 #define LQR_K5   (-2.1082f)   // per m*s     (position integral)
-// Closed-loop poles: -17.55, -7.75, -1.73 +/- 0.87j, -0.58  (all LHP)
-// Drive mode uses the K2..K4 subset — verified poles: -16.1, -7.2, -6.1
+// Full pole/uncertainty and acceleration-limited recovery results:
+// hardware/dynamics/lqr_candidate.json; scripts/lqr_design.py regenerates them.
 #define Z_INT_LIM        0.5f   // integral anti-windup clamp (m*s)
 // BALANCE > POSITION safeguards:
 #define EX_CLAMP_M       0.15f  // max position error fed to the LQR (m)
@@ -200,10 +202,10 @@
 // clamp at ~2.3 cm displacement instead of ~3.9 cm. Previous set for
 // fallback: -35.5636 -21.1461 -65.5197 -8.1273 -14.1421.
 // Auto-suspended while driving; cleared on disable.
-#define LQR_S1               (-59.9721f)
-#define LQR_S2               (-30.9190f)
-#define LQR_S3               (-81.4373f)
-#define LQR_S4               (-10.0906f)
+#define LQR_S1               (-60.0226f)
+#define LQR_S2               (-31.0364f)
+#define LQR_S3               (-82.0431f)
+#define LQR_S4               (-10.2571f)
 #define LQR_S5               (-25.8199f)
 //
 // CLIFF / CLIMB MODE ("H,2" / D-pad DOWN): slope gain set + a control-
@@ -213,7 +215,7 @@
 // the equilibrium pitch shifts by asin((r/L)*sin(slope)) — ~4.6 deg at
 // 20 deg — and cancelling it needs more integral state than Z_INT_LIM
 // allows, so climb mode gets its own wider clamp.
-// Weights Q=diag(50,30,160,3,20), R=0.30 — same CARE / plant as the
+// Weights Q=diag(50,30,160,20,20), R=0.30 — same CARE / plant as the
 // other sets (model verified to reproduce them before re-weighting).
 // Poles all real, all LHP: -24.7, -7.3, -3.4, -1.1, -0.8. Simulated
 // 10/20/25 deg climbs track to mm-level with pitch at the geometric
@@ -239,10 +241,10 @@
 // TAP LB BEFORE EVERY CREST OR DIP. Raising MOTOR_ACCEL_LIMIT
 // (after fixing driver current) widens this envelope directly.
 // Toggle OFF on flat ground (the wound integral re-clamps on exit).
-#define LQR_C1               (-21.5836f)
-#define LQR_C2               (-18.3212f)
-#define LQR_C3               (-66.5207f)
-#define LQR_C4               ( -8.3370f)
+#define LQR_C1               (-22.2369f)
+#define LQR_C2               (-20.0745f)
+#define LQR_C3               (-81.3063f)
+#define LQR_C4               (-12.7029f)
 #define LQR_C5               ( -8.1650f)
 #define CLIMB_Z_INT_LIM      2.0f     // climb integral clamp (m*s)
 #define CLIMB_VEL_MS         0.25f    // full-stick reference ramp (m/s)
@@ -302,6 +304,7 @@
 // ============================================================
 #define RADXA_TIMEOUT_MS     600      // 'V' line freshness window
 #define JOY_TIMEOUT_MS_CFG   200      // ESP-NOW freshness window
+#define HOST_BOOT_WAIT       1.0f    // wait for Radxa readiness before local arming
 #define ARM_ANGLE_DEG        5.0f     // must be this upright to start
 #define MAX_TILT_ANGLE       55.0f    // fall cutoff (deg)
 #define MAX_PITCH_RATE_SAFETY 450.0f  // spike cutoff (deg/s)

@@ -12,8 +12,18 @@ android {
         applicationId = "in.twopybot.app"
         minSdk = 26                 // WebRTC prebuilts need 21+, Compose likes 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        val revision = rootProject.file("../../VERSION").readText().trim()
+        val parts = revision.split(".").map { it.toInt() }
+        require(parts.size == 3 && (parts[1] < 10 || parts[1] % 10 == 0 && parts[2] == 0)) {
+            "After 3.10.0 use 3.20.0, 3.30.0, 3.40.0; intermediate minor/patch numbering is not allowed"
+        }
+        require(parts[1] in 0..999 && parts[2] in 0..999)
+        versionCode = parts[0] * 1000000 + parts[1] * 1000 + parts[2]
+        val releaseVersion = providers.gradleProperty("releaseVersion").orNull ?: revision
+        require(Regex("^${Regex.escape(revision)}(?:-rc\\.[1-9][0-9]*)?$").matches(releaseVersion)) {
+            "releaseVersion must match VERSION, optionally suffixed with -rc.N"
+        }
+        versionName = releaseVersion
         // Default robot address: the Radxa's own hotspot gateway.
         buildConfigField("String", "DEFAULT_HOST", "\"10.42.0.1\"")
     }
@@ -38,6 +48,7 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)

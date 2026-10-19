@@ -36,13 +36,20 @@ Compiled normal gains:
 
 | Gain | Default |
 | :--- | :--- |
-| K1 | -7.0547 |
-| K2 | -6.5334 |
-| K3 | -34.5881 |
-| K4 | -4.2854 |
+| K1 | -7.3234 |
+| K2 | -7.4495 |
+| K3 | -42.9506 |
+| K4 | -6.6862 |
 | K5 | -2.1082 |
 
 These negative gains are used with the leading minus sign shown above. Their effect depends on the sensor and motor sign conventions. NVS settings can replace the defaults.
+
+The printed-body estimate and fixed-gain filtering/latency validation are in
+[hardware/dynamics](../../hardware/dynamics/README.md). These updated weights
+increase normal/climb pitch-rate damping; stiff hold retains its original weights
+with the updated effective-length estimate. The saved application report records
+the model assumptions and NVS verification. No physical balancing trial is
+implied by the model tests.
 
 ## Velocity tracking
 

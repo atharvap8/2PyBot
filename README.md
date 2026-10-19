@@ -18,7 +18,7 @@
 - Encoder-differential heading hold and slew-limited steering.
 - Normal hold, stiff hold, velocity tracking, and climb reference tracking.
 - Terrain roughness, airborne, and landing detection with pitch-gain softening.
-- 106 runtime parameters with per-value bounds and NVS save/load.
+- 107 runtime parameters with per-value bounds and NVS save/load.
 - Auto-tuning routines for wobble, trim, radius, and stall speed, with current limitations documented in the tuning guide.
 - WS2812 status ring, camera pan/zoom servos, and PWM torch.
 
@@ -86,11 +86,39 @@ Saved NVS parameters take precedence over compiled defaults. `PD` restores defau
 | `tools/tuner/tuner.html` | Legacy Web Serial PID tuner; not a current parameter-store client |
 | `firmware/Controller/Controller.ino` | Legacy ESP-NOW transmitter; current BaseLink has no ESP-NOW receiver |
 
-The current console package was imported from the Cubie A7A. See its [setup and API guide](software/radxa/console/README.md) and [deployment layout](software/radxa/README.md). Its debug parser reads the original 15 fields; terrain telemetry and a terrain parameter tab remain pending.
+The current console package was imported from the Cubie A7A. See its [setup and API guide](software/radxa/console/README.md) and [deployment layout](software/radxa/README.md). Its debug parser reads the 20 controller/terrain fields plus nine appended fall-prevention fields; a terrain parameter tab remains pending. **Driving view** shows the assembled CAD, measured VL53L5CX returns, trail and optional forward-reference guard, off by default. Live camera is available separately in that view and in Camera.
+
+Local revision **3.9.0** adds a [predictive fall-prevention reference governor](docs/diagnostics/fall-prevention.md) with full recovery feedback and balance-priority steering allocation. Its read-only monitor is `/ui/drive-monitor.html`; a repeat physical reversal test is needed to measure fall reduction.
+Local revision **3.10.0** adds [automatic load-aware climb](docs/diagnostics/auto-climb.md), gradual controller handover and a fix for mild-recovery integral washout. Automatic/manual controls are at `/ui/auto-climb.html`; the recorder includes actual climb-integral and detector state.
+Current development revision **3.40.0** fixes Routes landscape rendering in the [adaptive Android cockpit](docs/ANDROID_COCKPIT_DESIGN.md), with a compact landscape rail, larger driving/video views and direct **Routes** access. [Route autopilot](docs/ROUTE_AUTOPILOT.md) replays newly taught speed/turn commands with original timing. [Compiled-build reflashing](docs/FIRMWARE_REFLASH.md) is under **More → Setup → Controller firmware**. [Revision numbers](docs/VERSIONING.md) advance by ten: 3.20.0, 3.30.0, 3.40.0. [Camera stabilisation](docs/CAMERA_STABILISATION.md) covers the proposed pitch gimbal and isolated sensor pod.
+
+[Boot coordination](scripts/radxa/BOOT_COORDINATION.md) holds the ESP32's USB reset until the Radxa camera, API and hotspot are ready, then releases a firmware startup interlock. A deliberate local START request is still required. [Printed mass and LQI calculations](hardware/dynamics/README.md) contain re-sliced estimates and updated estimated gains validated against geometry, filtering, latency and acceleration limits.
 
 The older Radxa brain provides GUARD/FOLLOW modes. It owns the camera and serial port, so it cannot run alongside the console. See its [setup guide](software/runtime/vision_controller/README_RADXA.md).
 
-The [Android app](software/android/README.md) has Live, Map, Tune, Auto, Camera, and Setup screens. It defaults to the Radxa hotspot address `10.42.0.1`. Its Tune screen includes all groups reported by firmware, including TERRAIN. APK build instructions and CI artifacts are documented with the app.
+The [Android app](software/android/README.md) has Drive, Live, Map, Tune, Auto, Camera, Data and Setup screens. It defaults to the Radxa hotspot address `10.42.0.1`. Drive uses a touch-navigable shaded world; Data records labelled terrain sessions; Map and Setup export reports. Its Tune screen includes all groups reported by firmware, including TERRAIN. See [terrain sessions and Drive](docs/terrain-sessions.md) for current behaviour.
+
+## Next vision milestones
+
+The [Objects viewer and SLAM notes](docs/ML_AND_SLAM.md) describe the lightweight
+ONNX detector, temporary tracks, and the calibration/telemetry needed for later mapping.
+
+The [guided camera calibration suite](docs/CAMERA_CALIBRATION.md) provides
+target printing, automatic capture/analysis and corrected previews, with depth
+health and frame timing. It is available in the console's Calibration tab and
+Android Camera screen. Real target views are needed to obtain actual coefficients.
+
+The [vision roadmap](docs/VISION_ROADMAP.md) tracks camera distortion/intrinsic
+calibration, sensor extrinsics, synchronized camera/ToF distance overlays and
+later ONNX detection/tracking. Camera geometric calibration is separate from
+the existing colour/exposure tuning. The first proposed milestone is a measured
+intrinsic calibration and validated undistorted preview.
+
+## Revision Table
+
+The [Revision Table](docs/REVISION_HISTORY.md) covers the main releases and
+features, along with estimated dates for upcoming work. Smaller fixes are grouped
+together. See the [vision roadmap](docs/VISION_ROADMAP.md) for the detailed task list.
 
 ## Updating the bot
 
@@ -124,6 +152,9 @@ The existing simplified STEP model remains in `models/2pybot_simplified.step`; i
 | [Serial protocol](firmware/BaseLink/PROTOCOL.md) | Commands, parameter records, telemetry fields |
 | [Radxa console](software/radxa/console/README.md) | Browser UI, Android API, camera pipeline, deployment |
 | [Android app](software/android/README.md) | Build, host connection, screens, parameter and video transport |
+| [Vision roadmap](docs/VISION_ROADMAP.md) | Planned lens calibration, sensor geometry, depth fusion and ONNX perception |
+| [Camera calibration](docs/CAMERA_CALIBRATION.md) | Guided capture, lens fitting, reports, depth health and frame timing |
+| [Terrain sessions and Drive](docs/terrain-sessions.md) | Recording, 3D world coordinates, guard and range calibration |
 | [Radxa deployment](scripts/radxa/README.md) | Git updates, selective restarts, systemd timer, health checks |
 | [Enclosure CAD](hardware/cad/enclosure/rev5/README.md) | Revision-5 source, exports, dimensions, and current print status |
 | [System architecture](docs/BaseLink/System_Architecture.md) | Sensors, control, actuation, host links |

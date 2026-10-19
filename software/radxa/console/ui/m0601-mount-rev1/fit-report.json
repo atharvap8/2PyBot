@@ -1,0 +1,223 @@
+{
+  "schema": "2pybot-m0601-mount/1",
+  "units": "mm",
+  "status": "CAD-checked prototype; physical fit/load test pending",
+  "chassis_interface_source": "Current models/*.stl geometry plus estimated rev5 30 x 30 mm anchor pattern",
+  "unverified_dimensions": [
+    "PCB four-anchor centre spacing/location",
+    "existing axle drop",
+    "actual motor profile/cable/connector envelope"
+  ],
+  "parameters": {
+    "board_width": 150,
+    "anchor_center_x": 23,
+    "anchor_center_y": 45,
+    "strut_pitch_x": 30,
+    "strut_pitch_y": 30,
+    "axle_drop": 65,
+    "frame_size": 43.4,
+    "frame_depth": 10,
+    "frame_rail": 10,
+    "tray_ledge_inner_x": 2.2,
+    "tray_ledge_lower_z": -7,
+    "tray_ledge_clearance": 0.4,
+    "stator_face_x": 24,
+    "socket_lip_x": 11,
+    "socket_depth": 13,
+    "face_plate_thickness": 6,
+    "socket_diameter": 19.45,
+    "socket_flat_radius": 8.4,
+    "socket_outer_diameter": 34,
+    "bolt_circle": 15.2,
+    "bolt_clearance": 2.9,
+    "thread_depth": 5,
+    "wheel_diameter": 100.7,
+    "wheel_diameter_min": 99.2,
+    "wheel_diameter_max": 102.2,
+    "overall_width": 65.5,
+    "overall_width_max": 66,
+    "stator_projection": 15,
+    "stator_projection_min": 14.45,
+    "socket_diameter_clearance": 0.4,
+    "socket_flat_clearance": 0.25,
+    "motor_clock_deg": 0,
+    "cable_direction": 1
+  },
+  "exports": {
+    "m0601_mount_L.stl": {
+      "bounds_mm": [
+        [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        [
+          43.4,
+          82.0,
+          43.4
+        ]
+      ],
+      "size_mm": [
+        43.4,
+        82.0,
+        43.4
+      ],
+      "volume_mm3": 57454.718,
+      "triangles": 5708,
+      "watertight": true,
+      "sha256": "e585705316755f8b8b8bd3f2b5a74a072553412ab8ebe4025a106f4814ecc342"
+    },
+    "m0601_mount_R.stl": {
+      "bounds_mm": [
+        [
+          0.0,
+          0.0,
+          -0.0
+        ],
+        [
+          43.4,
+          82.0,
+          43.4
+        ]
+      ],
+      "size_mm": [
+        43.4,
+        82.0,
+        43.4
+      ],
+      "volume_mm3": 57447.622,
+      "triangles": 6092,
+      "watertight": true,
+      "sha256": "94f4c1894ad35204709cbeff11d5b9850cecfdef58b5568b9835c1672f6efed6"
+    },
+    "chassis_fit_gauge.stl": {
+      "size_mm": [
+        43.4,
+        43.4,
+        2.4
+      ],
+      "volume_mm3": 2623.359,
+      "watertight": true,
+      "sha256": "ac438b07f1c11a9786d64dd6e8bdf5390537d0e07a3f1fbea07536b1ba80e56f"
+    },
+    "motor_fit_gauge.stl": {
+      "size_mm": [
+        34.0,
+        34.0,
+        19.0
+      ],
+      "volume_mm3": 12078.55,
+      "watertight": true,
+      "sha256": "e7a115930f9bb149cea3408cae1a9a9aba12077c4a6a5955a77766af3b3084c9"
+    }
+  },
+  "intersection_checks": [
+    {
+      "pair": "L mount / maximum rotating wheel",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L mount / maximum stator profile",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L mount / 2pybot_base_F",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L maximum wheel / 2pybot_base_F",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L mount / 2pybot_base_B",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L maximum wheel / 2pybot_base_B",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L mount / 2pybot_shell",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L maximum wheel / 2pybot_shell",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L mount / 2pybot_face",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L maximum wheel / 2pybot_face",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L mount / beam_D",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "L maximum wheel / beam_D",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / maximum rotating wheel",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / maximum stator profile",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / 2pybot_base_F",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R maximum wheel / 2pybot_base_F",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / 2pybot_base_B",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R maximum wheel / 2pybot_base_B",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / 2pybot_shell",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R maximum wheel / 2pybot_shell",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / 2pybot_face",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R maximum wheel / 2pybot_face",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R mount / beam_D",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "R maximum wheel / beam_D",
+      "intersection_mm3": 0.0
+    },
+    {
+      "pair": "left / right mounts",
+      "intersection_mm3": 0.0
+    }
+  ],
+  "minimum_axial_wheel_socket_clearance_mm": 1.45,
+  "maximum_wheel_to_tray_floor_vertical_clearance_mm": 4.9,
+  "nominal_total_width_mm": 233.0,
+  "approximate_tread_center_track_mm": 182.5,
+  "minimum_mount_ground_clearance_mm": 32.6,
+  "motor_screw_engagement_mm": 3.5,
+  "verification": "Closed meshes, positive volume, single connected body, screw-bore probes and manifold intersections with current chassis and maximum motor envelopes. Not structural FEA or measured hardware fit."
+}

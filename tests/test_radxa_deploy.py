@@ -168,6 +168,33 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), b"original")
         self.assertEqual(target.read_bytes(), b"second replacement")
 
+    def test_boot_and_tof_assets_are_selected_for_repo_deployment(self):
+        for path in (deploy.APP + "40-tof.conf", deploy.APP + "45-boot-ready.conf",
+                     "scripts/radxa/boot_gate.py", deploy.MONITOR + "2pybot-boot-gate.service",
+                     deploy.MONITOR + "86-2pybot-boot-gate.rules"):
+            plan = deploy.plan_changes([path])
+            self.assertTrue(plan.boot and plan.console, path)
+            self.assertFalse(plan.native or plan.mediamtx, path)
+
+    def test_boot_install_resolves_paths_without_resetting_live_robot(self):
+        instance = self.instance([])
+        instance.commit = "b" * 40
+        monitor = instance.repo / deploy.MONITOR
+        monitor.mkdir(parents=True)
+        instance.app.mkdir(parents=True)
+        (monitor / "2pybot-boot-gate.service").write_text("User=__USER__\nExecStart=__VENV__/bin/python3 __REPO__/scripts/radxa/boot_gate.py\n")
+        (monitor / "86-2pybot-boot-gate.rules").write_text('ACTION=="add"\n')
+        for name in ("40-tof.conf", "45-boot-ready.conf"):
+            (instance.app / name).write_text("[Service]\n")
+        instance.run = lambda command, **kwargs: instance.events.append(list(command))
+        deploy.Deployment.apply(instance, deploy.Plan(boot=True))
+        unit = (instance.system_root / "etc/systemd/system/2pybot-boot-gate.service").read_text()
+        self.assertIn("User=radxa", unit)
+        self.assertNotIn("__REPO__", unit)
+        self.assertIn(str(instance.venv), unit)
+        self.assertIn(["systemctl", "enable", "2pybot-boot-gate.service"], instance.events)
+        self.assertFalse(any("start" in command or "restart" in command for command in instance.events))
+
     def test_root_monitor_reads_git_as_checkout_owner(self):
         instance = deploy.Deployment(self.temporary.name, "radxa", Path(self.temporary.name) / "state", "http://localhost")
         completed = subprocess.CompletedProcess([], 0, "commit\n", "")

@@ -1,7 +1,8 @@
 <!doctype html><html lang=en><head>
 <meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>2PyBot Console</title><link rel=stylesheet href=/ui/style.css>
+<title>2PyBot Console</title><link rel=stylesheet href=/ui/style.css><link rel=stylesheet href=/ui/calibration.css>
 </head><body>
+<div class=toolbar>
 <header>
   <div class=brand><span class=dot id=dot></span><b>2PyBot</b><small id=sub>console</small></div>
   <div class=chips>
@@ -10,9 +11,12 @@
     <span class=chip id=cVel>0.00 m/s</span>
     <span class=chip id=cRx>— Hz</span>
   </div>
+  <a class=chip href=/ui/autonomy.html>Route autopilot</a>
+  <a class=chip href=/ui/2PyBot-v3.40.0-debug.apk>Android 3.40.0</a>
   <button class=estop onclick="window.API.estop()">■ E-STOP</button>
 </header>
 <nav id=tabs></nav>
+</div>
 <main id=view></main>
 <footer><span id=msg>starting…</span><span id=dirty></span></footer>
 <script src=/ui/app.js type=module></script>

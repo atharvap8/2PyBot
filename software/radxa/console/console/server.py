@@ -5,6 +5,8 @@ that runs on the Radxa's own hotspot, and the Android app.
 Everything the app needs is here; the GUI is just the first consumer.
 """
 import asyncio, json, os, time
+import copy
+import hashlib
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
@@ -12,13 +14,201 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import HTTP_PORT, STREAM_NAME
+from .config import HTTP_PORT, STREAM_NAME, SNAPSHOT_PATH
+from .readiness import HOTSPOT_ADDRESS, publish_ready, readiness
 from .serial_link import link
+from .tof import tof
 from . import camera, stream
+from .calibration import Calibration
+from . import calibration_api
+from . import vision
+from .object_detection import ObjectDetector
+from .firmware import FirmwareManager
+from .autonomy import Autonomy
 
 UI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")
 
 app = FastAPI(title="2PyBot Console", version="2.0")
+
+
+def calibration_frame():
+    image, metadata = vision.snapshot_frame(SNAPSHOT_PATH)
+    if image:
+        metadata["tof_pair"] = vision.nearest_depth(tof.history, metadata)
+    return image, metadata
+
+
+def calibration_metadata():
+    return {"device": camera.CAMERA_DEV, "stream": stream.streamer.status(),
+            "telemetry": copy.deepcopy(link.tel), "debug": dict(link.debug),
+            "tof": tof.status(link), "payload_pose": "commanded joint state is not in telemetry"}
+
+
+calibration = Calibration(calibration_frame, calibration_metadata)
+calibration_api.register(app, calibration)
+
+
+def active_intrinsics():
+    try:
+        identifier = json.loads((calibration.directory / "active.json").read_text())["id"]
+        return json.loads((calibration.folder(identifier) / "intrinsics.json").read_text())
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+detector = ObjectDetector(calibration_frame, active_intrinsics)
+
+
+def firmware_snapshot():
+    files={}
+    active=calibration.directory/"active.json"
+    if active.is_file():
+        files[str(active)]=hashlib.sha256(active.read_bytes()).hexdigest()
+        identifier=json.loads(active.read_text())["id"]
+        intrinsics=calibration.folder(identifier)/"intrinsics.json"
+        files[str(intrinsics)]=hashlib.sha256(intrinsics.read_bytes()).hexdigest()
+    native=camera.native_camera.status() or {}
+    return {"params":link.params_list(),"debug":dict(link.debug),"telemetry":copy.deepcopy(link.tel),
+            "camera_profile":native.get("colour_profile"),"calibration":files}
+
+
+firmware=FirmwareManager(link,firmware_snapshot,host_ready=lambda:host_ready().get("ready",False))
+autonomy=Autonomy(link,lambda:tof.status(link),firmware.blocked)
+
+
+@app.get("/api/autonomy/status")
+async def autonomy_status():return autonomy.status()
+
+
+class RouteInput(BaseModel):
+    name: str
+    points: list
+
+
+class TeachInput(BaseModel):
+    name: str
+
+
+class ReplayInput(BaseModel):
+    route_id: str
+    speed_mps: Optional[float]=None
+
+
+class SupervisionInput(BaseModel):
+    mission_id: str
+    lease_key: str
+
+
+@app.post("/api/autonomy/routes")
+async def autonomy_save(body: RouteInput):
+    try:return autonomy.save(body.name,body.points)
+    except ValueError as error:raise HTTPException(400,str(error)) from error
+
+
+@app.post("/api/autonomy/teach/start")
+async def autonomy_teach(body: TeachInput):
+    try:autonomy.begin_teach(body.name);return autonomy.status()
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/autonomy/teach/point")
+async def autonomy_teach_point():
+    try:autonomy.add_teach_point();return autonomy.status()
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/autonomy/teach/save")
+async def autonomy_teach_save():
+    try:return autonomy.finish_teach()
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/autonomy/teach/cancel")
+async def autonomy_teach_cancel():autonomy.teach=None;return autonomy.status()
+
+
+@app.post("/api/autonomy/start")
+async def autonomy_start(body: ReplayInput):
+    try:return await autonomy.start(body.route_id,body.speed_mps)
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/autonomy/resume")
+async def autonomy_resume():
+    try:return await autonomy.resume()
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/autonomy/heartbeat")
+async def autonomy_heartbeat(body: SupervisionInput):
+    try:autonomy.heartbeat(body.mission_id,body.lease_key);return {"ok":True}
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/autonomy/pause")
+async def autonomy_pause():autonomy.pause();return autonomy.status()
+
+
+@app.post("/api/autonomy/stop")
+async def autonomy_stop():autonomy.stop();return autonomy.status()
+
+
+@app.middleware("http")
+async def firmware_mutation_gate(request,call_next):
+    if request.method not in ("GET","HEAD","OPTIONS") and request.url.path not in ("/api/firmware/reflash","/api/estop") and firmware.blocked():
+        return JSONResponse({"detail":"Controller firmware maintenance is in progress"},status_code=409)
+    return await call_next(request)
+
+
+@app.get("/api/firmware/status")
+def firmware_status():return firmware.status()
+
+
+class FirmwareRequest(BaseModel):
+    build_id: str
+
+
+@app.post("/api/firmware/reflash")
+async def firmware_reflash(body: FirmwareRequest):
+    try:return await firmware.start(body.build_id)
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+class DetectionOptions(BaseModel):
+    enabled: bool
+    threshold: float = .50
+    people_only: bool = False
+    corrected: bool = True
+
+
+@app.get("/api/ml/status")
+def detection_status():
+    return detector.status()
+
+
+@app.post("/api/ml/configure")
+def detection_configure(body: DetectionOptions):
+    try:
+        return detector.configure(body.enabled, body.threshold, body.people_only, body.corrected)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/ml/preview.jpg")
+def detection_preview():
+    image = detector.preview
+    if not image:
+        image, _ = calibration_frame()
+    if not image:raise HTTPException(404, "Camera preview is unavailable")
+    return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/vision/diagnostics")
+def vision_diagnostics():
+    _, frame = calibration_frame()
+    return {"camera_frame": frame, "depth": vision.depth_diagnostics(tof.status(link)),
+            "intrinsics_available": (calibration.directory / "active.json").exists(),
+            "extrinsics_available": False}
 
 
 # ============================================================
@@ -26,12 +216,23 @@ app = FastAPI(title="2PyBot Console", version="2.0")
 # ============================================================
 @app.on_event("startup")
 async def _startup():
-    asyncio.create_task(link.run())
-    asyncio.create_task(stream.streamer.supervise())
+    app.state.background_tasks = [asyncio.create_task(link.run()),
+                                  asyncio.create_task(stream.streamer.supervise()),
+                                  asyncio.create_task(tof.acquire()),
+                                  asyncio.create_task(tof.publish(link)),
+                                  asyncio.create_task(calibration.run()),
+                                   asyncio.create_task(detector.run()),
+                                   asyncio.create_task(firmware.monitor()),
+                                   asyncio.create_task(autonomy.run()),
+                                  asyncio.create_task(publish_ready(link, host_ready))]
+    app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
 
 
 @app.on_event("shutdown")
 async def _shutdown():
+    for task in app.state.background_tasks:
+        task.cancel()
+    await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
     stream.streamer.stop()
     link.close()
 
@@ -49,7 +250,14 @@ def status():
         "derived": link.derived,
         "stream": stream.streamer.status(),
         "param_count": len(link.params),
+        "tof": tof.status(link),
+        "host": host_ready(),
     }
+
+
+@app.get("/api/ready")
+def host_ready():
+    return readiness(stream.streamer.status(), SNAPSHOT_PATH, HOTSPOT_ADDRESS)
 
 
 @app.get("/api/params")
@@ -88,7 +296,7 @@ class Cmd(BaseModel):
 
 # Commands the app/GUI may send. A remote link may STOP the robot but
 # never START it, so 'E' (enable) is deliberately NOT in this list.
-ALLOWED_CMDS = {"X", "C", "S", "L", "R", "P?", "PS", "PL", "PD"}
+ALLOWED_CMDS = {"X", "C", "S", "L", "R", "N", "P?", "PS", "PL", "PD", "AC,0", "AC,1"}
 ALLOWED_PREFIX = ("G,", "H,", "A,", "AT,", "K1=", "K2=", "K3=", "K4=", "K5=", "T=", "M=", "P,")
 
 
@@ -97,18 +305,22 @@ def command(body: Cmd):
     line = body.line.strip()
     if line not in ALLOWED_CMDS and not line.startswith(ALLOWED_PREFIX):
         raise HTTPException(403, f"'{line}' is not permitted from a remote client")
+    if line not in {"N","S","L","P?"}:
+        autonomy.pause("operator controller command")
     link.send(line)
     return {"ok": True, "sent": line}
 
 
 @app.post("/api/estop")
 def estop():
+    autonomy.stop("operator E-STOP","aborted")
     link.send("X")
     return {"ok": True}
 
 
 @app.post("/api/pose/reset")
 def pose_reset():
+    autonomy.stop("operator reset odometry","aborted")
     link.reset_pose()
     return {"ok": True}
 
@@ -124,14 +336,52 @@ def get_log(n: int = 200):
     return {"log": list(link.log)[-n:]}
 
 
+@app.get("/api/tof")
+def tof_status():
+    return tof.status(link)
+
+
+class ToFCalibration(BaseModel):
+    reference_m: float
+
+
+@app.post("/api/tof/calibrate")
+def tof_calibrate(body: ToFCalibration):
+    try:
+        tof.calibrate(body.reference_m)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, "Could not persist ToF calibration") from exc
+    return tof.status(link)
+
+
+class ToFGuard(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/tof/guard")
+async def tof_guard(body: ToFGuard):
+    if body.enabled and (not link.connected or link.derived.get("TOFGUARD") != 1):
+        raise HTTPException(409, "Install ToF-guard firmware and connect the ESP32 first")
+    tof.guard_enabled = body.enabled
+    if not body.enabled:
+        link.send("TG,0,0")
+    else:
+        link.send(f"TG,1,{tof.status(link)['forward_limit_mps']:.3f}")
+    return tof.status(link)
+
+
 # ============================================================
 #  camera
 # ============================================================
 @app.get("/api/camera/controls")
 def cam_controls():
+    native = camera.native_camera.status() or {}
     return {"device": camera.CAMERA_DEV, "controls": camera.list_controls(),
             "values": camera.current_values(),
-            "profiles": list(camera.PROFILES) + list(camera.load_profiles()),
+            "colour_profile": native.get("colour_profile"), "ccm_enabled": native.get("ccm_enabled"),
+            "profiles": camera.profile_names(),
             "formats": stream.probe_formats()}
 
 
@@ -148,10 +398,22 @@ def cam_set(body: CamCtrl):
     return {"ok": True}
 
 
+class SaveProfile(BaseModel):
+    name: str
+
+
+@app.post("/api/camera/profile/save")
+def cam_profile_save(body: SaveProfile):
+    camera.save_profile(body.name, camera.current_values())
+    return {"ok": True, "saved": body.name}
+
+
 @app.post("/api/camera/profile/{name}")
 def cam_profile(name: str):
     user = camera.load_profiles()
     if name in user:
+        if camera.native_camera.status():
+            return {"ok": True, **camera.native_camera.apply_values(user[name])}
         applied = {}
         for k, v in user[name].items():
             ok, _ = camera.set_control(k, v)
@@ -162,16 +424,6 @@ def cam_profile(name: str):
     if not ok:
         raise HTTPException(404, res.get("error", "unknown profile"))
     return {"ok": True, **res}
-
-
-class SaveProfile(BaseModel):
-    name: str
-
-
-@app.post("/api/camera/profile/save")
-def cam_profile_save(body: SaveProfile):
-    camera.save_profile(body.name, camera.current_values())
-    return {"ok": True, "saved": body.name}
 
 
 @app.post("/api/camera/autocalibrate")

@@ -1,0 +1,1566 @@
+{
+  "status": "estimated CAD design; sampled-loop validated",
+  "assumptions": {
+    "base_rigid_body_mass_kg": 1.34,
+    "base_com_height_m": 0.06,
+    "base_effective_length_m": 0.15,
+    "axle_y_mm": 45.0,
+    "axle_z_mm": -64.15,
+    "baseline_all_up_mass_kg": 1.5,
+    "estimated_wheel_mass_kg": 0.16,
+    "note": "Estimates, not measured mass properties. Subtract 160 g of wheels from the operator's 1.5 kg all-up baseline. Estimate 60 mm baseline body COM from heavy motors at the axle and battery/electronics above it. Current STL cavity dimensions match enclosure source: 40 mm standoffs, 3 mm bracket, 42.3 mm NEMA17 body imply axle Z=-64.15 mm. The 0.15 m baseline effective length reproduces the existing controller. Uncertainty is assessed with FIXED updated gains."
+  },
+  "mass_source": {
+    "method": "Bambu Studio 02.08.02.61 CLI, flattened H2S 0.4 mm / 0.20 mm Standard / eSUN PLA+ profiles, auto orientation, 2 walls, 15% infill, 5 top / 3 bottom layers, supports disabled",
+    "density_g_cm3": 1.25,
+    "notes": "Re-sliced estimates, not the original print jobs. Includes brim/purge in reported grams; print orientation and H2S/P1S differences add uncertainty. Charger parts excluded. CAD centroids and inertia assume uniform effective density, not exact toolpath material distribution.",
+    "mass_g": {
+      "2pybot_base_B.stl": 25.18,
+      "2pybot_base_F.stl": 24.05,
+      "2pybot_face.stl": 16.81,
+      "2pybot_motor_L.stl": 41.3,
+      "2pybot_motor_R.stl": 41.31,
+      "2pybot_shell.stl": 211.61,
+      "beam_D.stl": 5.5
+    }
+  },
+  "cad_assembly": {
+    "parts": [
+      {
+        "name": "2pybot_base_B.stl",
+        "mass_g": 25.18,
+        "cad_com_mm": [
+          74.85876564539774,
+          77.02031535150459,
+          -3.916141560520371
+        ],
+        "height_above_assumed_axle_m": 0.060233858439479634,
+        "pitch_inertia_about_assumed_axle_kg_m2": 0.00012358447197927133
+      },
+      {
+        "name": "2pybot_base_F.stl",
+        "mass_g": 24.05,
+        "cad_com_mm": [
+          75.31733617329536,
+          12.41503294660337,
+          -4.039999854062537
+        ],
+        "height_above_assumed_axle_m": 0.06011000014593747,
+        "pitch_inertia_about_assumed_axle_kg_m2": 0.00011839848250944784
+      },
+      {
+        "name": "2pybot_face.stl",
+        "mass_g": 16.81,
+        "cad_com_mm": [
+          75.65511518730304,
+          -0.9224357856542922,
+          85.63614956148963
+        ],
+        "height_above_assumed_axle_m": 0.14978614956148964,
+        "pitch_inertia_about_assumed_axle_kg_m2": 0.0004156322101015818
+      },
+      {
+        "name": "2pybot_motor_L.stl",
+        "mass_g": 41.3,
+        "cad_com_mm": [
+          29.612044021876713,
+          45.06652140848016,
+          -57.07269052026023
+        ],
+        "height_above_assumed_axle_m": 0.007077309479739774,
+        "pitch_inertia_about_assumed_axle_kg_m2": 5.556750044179266e-05
+      },
+      {
+        "name": "2pybot_motor_R.stl",
+        "mass_g": 41.31,
+        "cad_com_mm": [
+          120.38963418608928,
+          45.063551485694965,
+          -57.07018507694755
+        ],
+        "height_above_assumed_axle_m": 0.007079814923052453,
+        "pitch_inertia_about_assumed_axle_kg_m2": 5.55834934856569e-05
+      },
+      {
+        "name": "2pybot_shell.stl",
+        "mass_g": 211.61,
+        "cad_com_mm": [
+          73.49874552078924,
+          50.901442488916295,
+          76.24446357346245
+        ],
+        "height_above_assumed_axle_m": 0.14039446357346247,
+        "pitch_inertia_about_assumed_axle_kg_m2": 0.004936118702977355
+      },
+      {
+        "name": "beam_D.stl",
+        "mass_g": 5.5,
+        "cad_com_mm": [
+          75.00313038230362,
+          -14.394355668755397,
+          -11.674730867046119
+        ],
+        "height_above_assumed_axle_m": 0.05247526913295388,
+        "pitch_inertia_about_assumed_axle_kg_m2": 3.738592890253018e-05
+      }
+    ],
+    "body_mass_kg": 1.70576,
+    "com_height_m": 0.06827600933668321,
+    "pitch_inertia_about_axle_kg_m2": 0.017802270790397635,
+    "effective_length_m": 0.15285841346692242
+  },
+  "design_effective_length_m": 0.15285841346692242,
+  "candidate": {
+    "normal": {
+      "Q": [
+        10,
+        4,
+        52.5,
+        8,
+        2
+      ],
+      "R": 0.45,
+      "gains": {
+        "K1": -7.3234,
+        "K2": -7.4495,
+        "K3": -42.9506,
+        "K4": -6.6862,
+        "K5": -2.1082
+      },
+      "hold_poles": [
+        [
+          -29.775037,
+          0.0
+        ],
+        [
+          -2.716305,
+          0.0
+        ],
+        [
+          -1.666523,
+          0.897565
+        ],
+        [
+          -1.666523,
+          -0.897565
+        ],
+        [
+          -0.466896,
+          0.0
+        ]
+      ],
+      "velocity_poles": [
+        [
+          -29.488966,
+          0.0
+        ],
+        [
+          -3.401159,
+          2.155135
+        ],
+        [
+          -3.401159,
+          -2.155135
+        ]
+      ],
+      "sampled_max_pole_magnitude": 0.997668490496607,
+      "terrain_0.55_hold_poles": [
+        [
+          -12.807245,
+          0.0
+        ],
+        [
+          -1.336602,
+          5.405823
+        ],
+        [
+          -1.336602,
+          -5.405823
+        ],
+        [
+          -0.563732,
+          0.151263
+        ],
+        [
+          -0.563732,
+          -0.151263
+        ]
+      ],
+      "terrain_0.55_velocity_poles": [
+        [
+          -12.432686,
+          0.0
+        ],
+        [
+          -2.087613,
+          5.839188
+        ],
+        [
+          -2.087613,
+          -5.839188
+        ]
+      ],
+      "nominal_linear_stable": true
+    },
+    "stiff": {
+      "Q": [
+        600,
+        40,
+        90,
+        1.5,
+        200
+      ],
+      "R": 0.3,
+      "gains": {
+        "S1": -60.0226,
+        "S2": -31.0364,
+        "S3": -82.0431,
+        "S4": -10.2571,
+        "S5": -25.8199
+      },
+      "hold_poles": [
+        [
+          -19.695219,
+          0.0
+        ],
+        [
+          -7.74234,
+          0.0
+        ],
+        [
+          -4.022056,
+          1.559487
+        ],
+        [
+          -4.022056,
+          -1.559487
+        ],
+        [
+          -0.583955,
+          0.0
+        ]
+      ],
+      "velocity_poles": [
+        [
+          -13.98867,
+          7.111787
+        ],
+        [
+          -13.98867,
+          -7.111787
+        ],
+        [
+          -8.088285,
+          0.0
+        ]
+      ],
+      "sampled_max_pole_magnitude": 0.9970845286121575,
+      "terrain_0.55_hold_poles": [
+        [
+          2.239606,
+          13.880288
+        ],
+        [
+          2.239606,
+          -13.880288
+        ],
+        [
+          -8.028004,
+          0.0
+        ],
+        [
+          -1.710466,
+          0.0
+        ],
+        [
+          -0.610454,
+          0.0
+        ]
+      ],
+      "terrain_0.55_velocity_poles": [
+        [
+          1.076231,
+          15.720417
+        ],
+        [
+          1.076231,
+          -15.720417
+        ],
+        [
+          -8.022176,
+          0.0
+        ]
+      ],
+      "nominal_linear_stable": true
+    },
+    "climb": {
+      "Q": [
+        50,
+        30,
+        160,
+        20,
+        20
+      ],
+      "R": 0.3,
+      "gains": {
+        "C1": -22.2369,
+        "C2": -20.0745,
+        "C3": -81.3063,
+        "C4": -12.7029,
+        "C5": -8.165
+      },
+      "hold_poles": [
+        [
+          -55.394656,
+          0.0
+        ],
+        [
+          -0.791171,
+          0.0
+        ],
+        [
+          -1.090822,
+          0.0
+        ],
+        [
+          -2.875657,
+          1.640544
+        ],
+        [
+          -2.875657,
+          -1.640544
+        ]
+      ],
+      "velocity_poles": [
+        [
+          -54.941548,
+          0.0
+        ],
+        [
+          -4.043208,
+          2.664847
+        ],
+        [
+          -4.043208,
+          -2.664847
+        ]
+      ],
+      "sampled_max_pole_magnitude": 0.996054494864105,
+      "terrain_0.55_hold_poles": [
+        [
+          -17.857526,
+          0.0
+        ],
+        [
+          -3.245732,
+          6.923851
+        ],
+        [
+          -3.245732,
+          -6.923851
+        ],
+        [
+          -0.641435,
+          0.300631
+        ],
+        [
+          -0.641435,
+          -0.300631
+        ]
+      ],
+      "terrain_0.55_velocity_poles": [
+        [
+          -16.53171,
+          0.0
+        ],
+        [
+          -4.550076,
+          7.564859
+        ],
+        [
+          -4.550076,
+          -7.564859
+        ]
+      ],
+      "nominal_linear_stable": true
+    }
+  },
+  "old_length_reproduction": {
+    "normal": {
+      "Q": [
+        10,
+        4,
+        17.5,
+        0.3,
+        2
+      ],
+      "R": 0.45,
+      "gains": {
+        "K1": -7.0547,
+        "K2": -6.5334,
+        "K3": -34.5881,
+        "K4": -4.2854,
+        "K5": -2.1082
+      },
+      "hold_poles": [
+        [
+          -10.183343,
+          0.0
+        ],
+        [
+          -7.705892,
+          0.0
+        ],
+        [
+          -1.839681,
+          0.612377
+        ],
+        [
+          -1.839681,
+          -0.612377
+        ],
+        [
+          -0.467359,
+          0.0
+        ]
+      ],
+      "velocity_poles": [
+        [
+          -6.693998,
+          2.144457
+        ],
+        [
+          -6.693998,
+          -2.144457
+        ],
+        [
+          -8.64796,
+          0.0
+        ]
+      ],
+      "sampled_max_pole_magnitude": 0.9976661709748691,
+      "terrain_0.55_hold_poles": [
+        [
+          -8.108065,
+          0.0
+        ],
+        [
+          0.067403,
+          6.742616
+        ],
+        [
+          0.067403,
+          -6.742616
+        ],
+        [
+          -0.603255,
+          0.100402
+        ],
+        [
+          -0.603255,
+          -0.100402
+        ]
+      ],
+      "terrain_0.55_velocity_poles": [
+        [
+          -0.537153,
+          7.240626
+        ],
+        [
+          -0.537153,
+          -7.240626
+        ],
+        [
+          -8.105463,
+          0.0
+        ]
+      ],
+      "nominal_linear_stable": true
+    },
+    "stiff": {
+      "Q": [
+        600,
+        40,
+        90,
+        1.5,
+        200
+      ],
+      "R": 0.3,
+      "gains": {
+        "S1": -59.9721,
+        "S2": -30.919,
+        "S3": -81.4373,
+        "S4": -10.0906,
+        "S5": -25.8199
+      },
+      "hold_poles": [
+        [
+          -19.962052,
+          0.0
+        ],
+        [
+          -7.740084,
+          0.0
+        ],
+        [
+          -4.032778,
+          1.565957
+        ],
+        [
+          -4.032778,
+          -1.565957
+        ],
+        [
+          -0.583955,
+          0.0
+        ]
+      ],
+      "velocity_poles": [
+        [
+          -14.079477,
+          6.97037
+        ],
+        [
+          -14.079477,
+          -6.97037
+        ],
+        [
+          -8.192692,
+          0.0
+        ]
+      ],
+      "sampled_max_pole_magnitude": 0.9970845284924994,
+      "terrain_0.55_hold_poles": [
+        [
+          2.178274,
+          13.929677
+        ],
+        [
+          2.178274,
+          -13.929677
+        ],
+        [
+          -8.109546,
+          0.0
+        ],
+        [
+          -1.716656,
+          0.0
+        ],
+        [
+          -0.610208,
+          0.0
+        ]
+      ],
+      "terrain_0.55_velocity_poles": [
+        [
+          1.010993,
+          15.765886
+        ],
+        [
+          1.010993,
+          -15.765886
+        ],
+        [
+          -8.101847,
+          0.0
+        ]
+      ],
+      "nominal_linear_stable": true
+    },
+    "climb": {
+      "Q": [
+        50,
+        30,
+        160,
+        3,
+        20
+      ],
+      "R": 0.3,
+      "gains": {
+        "C1": -21.5836,
+        "C2": -18.3212,
+        "C3": -66.5207,
+        "C4": -8.337,
+        "C5": -8.165
+      },
+      "hold_poles": [
+        [
+          -24.672395,
+          0.0
+        ],
+        [
+          -7.283528,
+          0.0
+        ],
+        [
+          -3.409777,
+          0.0
+        ],
+        [
+          -1.103131,
+          0.0
+        ],
+        [
+          -0.789998,
+          0.0
+        ]
+      ],
+      "velocity_poles": [
+        [
+          -23.177105,
+          0.0
+        ],
+        [
+          -7.040862,
+          1.457465
+        ],
+        [
+          -7.040862,
+          -1.457465
+        ]
+      ],
+      "sampled_max_pole_magnitude": 0.9960601841925092,
+      "terrain_0.55_hold_poles": [
+        [
+          -1.311854,
+          10.876085
+        ],
+        [
+          -1.311854,
+          -10.876085
+        ],
+        [
+          -8.280243,
+          0.0
+        ],
+        [
+          -0.671925,
+          0.293058
+        ],
+        [
+          -0.671925,
+          -0.293058
+        ]
+      ],
+      "terrain_0.55_velocity_poles": [
+        [
+          -2.005532,
+          11.893238
+        ],
+        [
+          -2.005532,
+          -11.893238
+        ],
+        [
+          -8.236737,
+          0.0
+        ]
+      ],
+      "nominal_linear_stable": true
+    }
+  },
+  "sensitivity": [
+    {
+      "base_height_m": 0.04,
+      "axle_z_mm": -55.0,
+      "print_mass_scale": 0.9,
+      "length_m": 0.15222802006739808,
+      "gains": {
+        "K1": -7.0582,
+        "K2": -6.5451,
+        "K3": -34.6957,
+        "K4": -4.3293,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.04,
+      "axle_z_mm": -55.0,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15251545789267737,
+      "gains": {
+        "K1": -7.0587,
+        "K2": -6.5466,
+        "K3": -34.7095,
+        "K4": -4.335,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.04,
+      "axle_z_mm": -63.75,
+      "print_mass_scale": 0.9,
+      "length_m": 0.15341516850900264,
+      "gains": {
+        "K1": -7.0601,
+        "K2": -6.5513,
+        "K3": -34.7528,
+        "K4": -4.3527,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.04,
+      "axle_z_mm": -63.75,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.1538391577250271,
+      "gains": {
+        "K1": -7.0608,
+        "K2": -6.5536,
+        "K3": -34.7732,
+        "K4": -4.3611,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.04,
+      "axle_z_mm": -75.0,
+      "print_mass_scale": 0.9,
+      "length_m": 0.15565576105029943,
+      "gains": {
+        "K1": -7.0636,
+        "K2": -6.563,
+        "K3": -34.8603,
+        "K4": -4.3968,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.04,
+      "axle_z_mm": -75.0,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.156325469563971,
+      "gains": {
+        "K1": -7.0646,
+        "K2": -6.5665,
+        "K3": -34.8923,
+        "K4": -4.41,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.06,
+      "axle_z_mm": -55.0,
+      "print_mass_scale": 0.9,
+      "length_m": 0.1516844234469652,
+      "gains": {
+        "K1": -7.0574,
+        "K2": -6.5422,
+        "K3": -34.6695,
+        "K4": -4.3186,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.06,
+      "axle_z_mm": -55.0,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15193519285676768,
+      "gains": {
+        "K1": -7.0578,
+        "K2": -6.5436,
+        "K3": -34.6816,
+        "K4": -4.3236,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.06,
+      "axle_z_mm": -63.75,
+      "print_mass_scale": 0.9,
+      "length_m": 0.1526032202238621,
+      "gains": {
+        "K1": -7.0588,
+        "K2": -6.5471,
+        "K3": -34.7138,
+        "K4": -4.3367,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.06,
+      "axle_z_mm": -63.75,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15297944189438722,
+      "gains": {
+        "K1": -7.0594,
+        "K2": -6.549,
+        "K3": -34.7319,
+        "K4": -4.3441,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.06,
+      "axle_z_mm": -75.0,
+      "print_mass_scale": 0.9,
+      "length_m": 0.15435388737907355,
+      "gains": {
+        "K1": -7.0616,
+        "K2": -6.5562,
+        "K3": -34.7979,
+        "K4": -4.3712,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.06,
+      "axle_z_mm": -75.0,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15496031616116557,
+      "gains": {
+        "K1": -7.0625,
+        "K2": -6.5594,
+        "K3": -34.827,
+        "K4": -4.3831,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.1,
+      "axle_z_mm": -55.0,
+      "print_mass_scale": 0.9,
+      "length_m": 0.15113203250978727,
+      "gains": {
+        "K1": -7.0565,
+        "K2": -6.5393,
+        "K3": -34.6428,
+        "K4": -4.3077,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.1,
+      "axle_z_mm": -55.0,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15132424158958732,
+      "gains": {
+        "K1": -7.0568,
+        "K2": -6.5403,
+        "K3": -34.6521,
+        "K4": -4.3115,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.1,
+      "axle_z_mm": -63.75,
+      "print_mass_scale": 0.9,
+      "length_m": 0.1517643026217467,
+      "gains": {
+        "K1": -7.0575,
+        "K2": -6.5427,
+        "K3": -34.6733,
+        "K4": -4.3202,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.1,
+      "axle_z_mm": -63.75,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15205781477460525,
+      "gains": {
+        "K1": -7.058,
+        "K2": -6.5442,
+        "K3": -34.6875,
+        "K4": -4.326,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.1,
+      "axle_z_mm": -75.0,
+      "print_mass_scale": 0.9,
+      "length_m": 0.15298135742286614,
+      "gains": {
+        "K1": -7.0594,
+        "K2": -6.5491,
+        "K3": -34.732,
+        "K4": -4.3442,
+        "K5": -2.1082
+      }
+    },
+    {
+      "base_height_m": 0.1,
+      "axle_z_mm": -75.0,
+      "print_mass_scale": 1.0936132983377078,
+      "length_m": 0.15346478619000786,
+      "gains": {
+        "K1": -7.0602,
+        "K2": -6.5516,
+        "K3": -34.7552,
+        "K4": -4.3537,
+        "K5": -2.1082
+      }
+    }
+  ],
+  "serial_candidate": [
+    "P,K1,-7.3234",
+    "P,K2,-7.4495",
+    "P,K3,-42.9506",
+    "P,K4,-6.6862",
+    "P,K5,-2.1082",
+    "P,S1,-60.0226",
+    "P,S2,-31.0364",
+    "P,S3,-82.0431",
+    "P,S4,-10.2571",
+    "P,S5,-25.8199",
+    "P,C1,-22.2369",
+    "P,C2,-20.0745",
+    "P,C3,-81.3063",
+    "P,C4,-12.7029",
+    "P,C5,-8.1650"
+  ],
+  "validation": {
+    "normal": {
+      "cases": 240,
+      "stable": true,
+      "worst_sampled_pole_magnitude": 0.99860112458052,
+      "worst_case": {
+        "length_m": 0.2,
+        "lag_s": 0.015,
+        "delay_cycles": 1,
+        "velocity": false,
+        "soften": 0.55
+      }
+    },
+    "stiff": {
+      "cases": 60,
+      "stable": true,
+      "worst_sampled_pole_magnitude": 0.9970834573532266,
+      "worst_case": {
+        "length_m": 0.2,
+        "lag_s": 0.015,
+        "delay_cycles": 1,
+        "velocity": false,
+        "soften": 1
+      }
+    },
+    "climb": {
+      "cases": 120,
+      "stable": true,
+      "worst_sampled_pole_magnitude": 0.9968258813182789,
+      "worst_case": {
+        "length_m": 0.11,
+        "lag_s": 0,
+        "delay_cycles": 0,
+        "velocity": false,
+        "soften": 0.55
+      }
+    }
+  },
+  "validation_model": {
+    "effective_length_range_m": [
+      0.11,
+      0.2
+    ],
+    "control_hz": 200,
+    "pitch_filter": "two cascaded 50 Hz firmware EMAs",
+    "velocity_filter": "15 Hz firmware EMA",
+    "actuator_lag_s": [
+      0,
+      0.005,
+      0.015
+    ],
+    "additional_delay_cycles": [
+      0,
+      1
+    ],
+    "note": "Small-signal model checks include normal drive and terrain softening. Saturation, traction, slope and lost steps require physical balance testing; they are not established by eigenvalues."
+  },
+  "disturbance_tests": [
+    {
+      "mode": "normal",
+      "length_m": 0.11,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0126310926564543,
+      "peak_speed_mps": 0.053693677672316815,
+      "final_pitch_deg": -0.0002092849001356399,
+      "final_position_error_m": -0.0001631583245707254,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.11,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0266372653986298,
+      "peak_speed_mps": 0.06956703278387882,
+      "final_pitch_deg": -0.00015913760644398385,
+      "final_position_error_m": -9.37258701900185e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.11,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0126310926564543,
+      "peak_speed_mps": 0.053693677672316815,
+      "final_pitch_deg": 0.0002092849001356399,
+      "final_position_error_m": 0.0001631583245707254,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.11,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0266372653986298,
+      "peak_speed_mps": 0.06956703278387882,
+      "final_pitch_deg": 0.00015913760644398385,
+      "final_position_error_m": 9.37258701900185e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.11,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 0.5189552391483726,
+      "peak_speed_mps": 0.06657225263767622,
+      "final_pitch_deg": -0.0001442926271243435,
+      "final_position_error_m": -0.00011249033025631894,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.11,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 1.295271895194206,
+      "peak_speed_mps": 0.06973067061329506,
+      "final_pitch_deg": -0.0001097271558983613,
+      "final_position_error_m": -6.406221472211305e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0090975407816885,
+      "peak_speed_mps": 0.06672522056145704,
+      "final_pitch_deg": -0.00020644004215334904,
+      "final_position_error_m": -0.000160922677027773,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0194922963593767,
+      "peak_speed_mps": 0.08821699711317639,
+      "final_pitch_deg": -0.00015771519200376348,
+      "final_position_error_m": -9.218822089822645e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0090975407816885,
+      "peak_speed_mps": 0.06672522056145704,
+      "final_pitch_deg": 0.00020644004215334904,
+      "final_position_error_m": 0.000160922677027773,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0194922963593767,
+      "peak_speed_mps": 0.08821699711317639,
+      "final_pitch_deg": 0.00015771519200376348,
+      "final_position_error_m": 9.218822089822645e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 0.7632642684331002,
+      "peak_speed_mps": 0.08933878390965988,
+      "final_pitch_deg": -0.0002027617371658305,
+      "final_position_error_m": -0.00015805406880807054,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.217686040943375,
+      "peak_speed_mps": 0.10644380385369431,
+      "final_pitch_deg": -0.00015466900190857225,
+      "final_position_error_m": -8.998597482774049e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.2,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0069568546188763,
+      "peak_speed_mps": 0.08182999109935402,
+      "final_pitch_deg": -0.0002032847447860289,
+      "final_position_error_m": -0.00015846635679349388,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.2,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.4203928412106976,
+      "peak_speed_mps": 0.12593368273599923,
+      "final_pitch_deg": -0.006327237263874025,
+      "final_position_error_m": -1.3519794548968618e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.2,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0069568546188763,
+      "peak_speed_mps": 0.08182999109935402,
+      "final_pitch_deg": 0.0002032847447860289,
+      "final_position_error_m": 0.00015846635679349388,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.2,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.4203928412106976,
+      "peak_speed_mps": 0.12593368273599923,
+      "final_pitch_deg": 0.006327237263874025,
+      "final_position_error_m": 1.3519794548968618e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.2,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 1.0798915408774281,
+      "peak_speed_mps": 0.11877255845272988,
+      "final_pitch_deg": -0.00026706971531069543,
+      "final_position_error_m": -0.000208186887812131,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "normal",
+      "length_m": 0.2,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 3.5415428563852545,
+      "peak_speed_mps": 0.17851671234765568,
+      "final_pitch_deg": 0.0019002047327349456,
+      "final_position_error_m": -8.812461384441273e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.11,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0070250116449,
+      "peak_speed_mps": 0.07460058833934605,
+      "final_pitch_deg": -1.1329904930287359e-05,
+      "final_position_error_m": -5.659811215393565e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.11,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0070250116449,
+      "peak_speed_mps": 0.07460058833934605,
+      "final_pitch_deg": 1.1329904930287359e-05,
+      "final_position_error_m": 5.659811215393565e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.11,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 1.0554933741916994,
+      "peak_speed_mps": 0.08530179093773374,
+      "final_pitch_deg": -1.0086178040779795e-05,
+      "final_position_error_m": -5.038512145228092e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0050540023056094,
+      "peak_speed_mps": 0.09969954556720165,
+      "final_pitch_deg": -1.1106164408179374e-05,
+      "final_position_error_m": -5.541199152653782e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0050540023056094,
+      "peak_speed_mps": 0.09969954556720165,
+      "final_pitch_deg": 1.1106164408179374e-05,
+      "final_position_error_m": 5.541199152653782e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 1.8433053702728035,
+      "peak_speed_mps": 0.12312497201533285,
+      "final_pitch_deg": -1.4165294514032564e-05,
+      "final_position_error_m": -7.067491086341277e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.2,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0544207252984177,
+      "peak_speed_mps": 0.13667991235551244,
+      "final_pitch_deg": -1.0837988601764853e-05,
+      "final_position_error_m": -5.400056028636183e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.2,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.0544207252984177,
+      "peak_speed_mps": 0.13667991235551244,
+      "final_pitch_deg": 1.0837988601764853e-05,
+      "final_position_error_m": 5.400056028636183e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "stiff",
+      "length_m": 0.2,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 3.3242880710177607,
+      "peak_speed_mps": 0.18502788080128044,
+      "final_pitch_deg": -1.860191734590403e-05,
+      "final_position_error_m": -9.268453732560084e-06,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.11,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.007042056759011,
+      "peak_speed_mps": 0.060912108775848024,
+      "final_pitch_deg": -4.596622895618869e-05,
+      "final_position_error_m": -1.2522433369302432e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.11,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0123235991852244,
+      "peak_speed_mps": 0.06358082967438766,
+      "final_pitch_deg": -3.793295687482651e-05,
+      "final_position_error_m": 1.1510182462796502e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.11,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.007042056759011,
+      "peak_speed_mps": 0.060912108775848024,
+      "final_pitch_deg": 4.596622895618869e-05,
+      "final_position_error_m": 1.2522433369302432e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.11,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0123235991852244,
+      "peak_speed_mps": 0.06358082967438766,
+      "final_pitch_deg": 3.793295687482651e-05,
+      "final_position_error_m": -1.1510182462796502e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.11,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 0.601861893594979,
+      "peak_speed_mps": 0.08075960114142067,
+      "final_pitch_deg": -3.1494651480439244e-05,
+      "final_position_error_m": -8.559968901392037e-06,
+      "acceleration_saturated_cycles": 3
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.11,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 1.2083579561649016,
+      "peak_speed_mps": 0.0764894007628743,
+      "final_pitch_deg": -2.5002786619310124e-05,
+      "final_position_error_m": 4.172643288502466e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.005066268324239,
+      "peak_speed_mps": 0.07476075734584427,
+      "final_pitch_deg": -4.490979381967833e-05,
+      "final_position_error_m": -1.223887197032086e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0088769207965798,
+      "peak_speed_mps": 0.08801136697155698,
+      "final_pitch_deg": -3.707909632082641e-05,
+      "final_position_error_m": 2.6293217308051766e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.005066268324239,
+      "peak_speed_mps": 0.07476075734584427,
+      "final_pitch_deg": 4.490979381967833e-05,
+      "final_position_error_m": 1.223887197032086e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.0088769207965798,
+      "peak_speed_mps": 0.08801136697155698,
+      "final_pitch_deg": 3.707909632082641e-05,
+      "final_position_error_m": -2.6293217308051766e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 0.8549162693936739,
+      "peak_speed_mps": 0.10533305140669405,
+      "final_pitch_deg": -4.403784686604269e-05,
+      "final_position_error_m": -1.1984507565460494e-05,
+      "acceleration_saturated_cycles": 4
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.15285841346692242,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.161079178038039,
+      "peak_speed_mps": 0.11440243944595585,
+      "final_pitch_deg": -3.527434527968278e-05,
+      "final_position_error_m": 5.665306482613307e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.2,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.003871490162452,
+      "peak_speed_mps": 0.09162543783052174,
+      "final_pitch_deg": -4.374441373860907e-05,
+      "final_position_error_m": -1.1927843428287341e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.2,
+      "initial_pitch_deg": 2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.3213765686308574,
+      "peak_speed_mps": 0.11985118821726971,
+      "final_pitch_deg": -7.418828881543296e-05,
+      "final_position_error_m": 6.217503412736545e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.2,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 2.003871490162452,
+      "peak_speed_mps": 0.09162543783052174,
+      "final_pitch_deg": 4.374441373860907e-05,
+      "final_position_error_m": 1.1927843428287341e-05,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.2,
+      "initial_pitch_deg": -2,
+      "initial_rate_deg_s": 0,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 2.3213765686308574,
+      "peak_speed_mps": 0.11985118821726971,
+      "final_pitch_deg": 7.418828881543296e-05,
+      "final_position_error_m": -6.217503412736545e-07,
+      "acceleration_saturated_cycles": 0
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.2,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 1,
+      "recovered": true,
+      "peak_pitch_deg": 1.1964167349813055,
+      "peak_speed_mps": 0.13652109683083732,
+      "final_pitch_deg": -5.787000055434867e-05,
+      "final_position_error_m": -1.5771827419067475e-05,
+      "acceleration_saturated_cycles": 4
+    },
+    {
+      "mode": "climb",
+      "length_m": 0.2,
+      "initial_pitch_deg": 0,
+      "initial_rate_deg_s": 20,
+      "soften": 0.55,
+      "recovered": true,
+      "peak_pitch_deg": 3.7281235736797207,
+      "peak_speed_mps": 0.17259635494298972,
+      "final_pitch_deg": -0.00010175157895707336,
+      "final_position_error_m": 1.0081176705744934e-06,
+      "acceleration_saturated_cycles": 0
+    }
+  ],
+  "application": {
+    "state": "applied and verified by NVS load",
+    "timestamp": "2026-10-11T03:20:41.471989",
+    "previous_parameters": "/home/radxa/archives/before-lqr-update-20261011-032038/params.json",
+    "physical_balance_test": false
+  }
+}

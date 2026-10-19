@@ -7,6 +7,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,7 +53,9 @@ fun TuneScreen(vm: BotViewModel) {
 
     val groups = remember(params) { params.map { it.group }.distinct() }
     var sel by remember(groups) { mutableStateOf(groups.firstOrNull() ?: "") }
-    val shown = params.filter { it.group == sel }
+    var query by rememberSaveable { mutableStateOf("") }
+    val shown = params.filter { (query.isNotBlank() || it.group==sel) &&
+        (query.isBlank() || "${it.key} ${it.desc} ${it.group}".contains(query,ignoreCase=true)) }
 
     Column(Modifier.fillMaxSize()) {
 
@@ -62,6 +67,11 @@ fun TuneScreen(vm: BotViewModel) {
         }
 
         val land = isLandscape()
+        OutlinedTextField(query,{query=it},modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp,vertical=6.dp),
+            singleLine=true,placeholder={Text("Find a parameter across all groups",fontSize=12.sp)},
+            leadingIcon={Icon(Icons.Default.Search,null,Modifier.size(20.dp))},
+            trailingIcon={Text("${shown.size}",fontSize=12.sp,color=TextDim,modifier=Modifier.padding(end=12.dp))},
+            textStyle=Mono.copy(fontSize=13.sp))
 
         // The group list is NOT hardcoded: it is whatever the firmware's P?
         // dump reported. Add a tunable in params.h and it shows up here.
@@ -88,10 +98,14 @@ fun TuneScreen(vm: BotViewModel) {
                                 style = Mono.copy(fontSize = 11.sp), color = Cyan)
                             Spacer(Modifier.height(8.dp))
                         }
-                        shown.forEach { p -> ParamSlider(p) { v -> vm.setParam(p.key, v) } }
                     }
                 }
-                item { Spacer(Modifier.height(if (land) 12.dp else 90.dp)) }
+                items(shown.size,key={shown[it].key}) { index ->
+                    val p=shown[index]
+                    ParamSlider(p) {v->vm.setParam(p.key,v)}
+                    HorizontalDivider(color=Line.copy(alpha=.5f))
+                }
+                item { Spacer(Modifier.height(14.dp)) }
             }
         }
 

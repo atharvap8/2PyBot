@@ -3,16 +3,17 @@
  * Table, bounds and protocol live here; params.h only declares.
  */
 #include "params.h"
+#include "nvs_defaults_v3_1_0.h"
 
 Params P = {
-#define X(f, k, d, lo, hi, g, desc)  (float)(d),
+#define X(f, k, d, lo, hi, g, desc)  captured_default_310(k, (float)(d)),
     PARAM_TABLE(X)
 #undef X
     0, 0, 0, 0
 };
 
 const ParamMeta PARAM_META[] = {
-#define X(f, k, d, lo, hi, g, desc) { k, offsetof(Params, f), (float)(d), (float)(lo), (float)(hi), g, desc },
+#define X(f, k, d, lo, hi, g, desc) { k, offsetof(Params, f), captured_default_310(k, (float)(d)), (float)(lo), (float)(hi), g, desc },
     PARAM_TABLE(X)
 #undef X
 };
@@ -106,6 +107,14 @@ void params_dump() {
     Serial.printf("PR,COUNTSM,%.2f\n", P.countsPerM);
     Serial.printf("PR,VMAX,%.4f\n",    P.vMax);
     Serial.printf("PR,AMAX,%.4f\n",    P.aMax);
+    Serial.println("PR,TOFGUARD,1");
+    Serial.println("PR,BOOTGATE,1");
+    Serial.println("PR,STARTUPACK,1");
+    Serial.println("PR,FALLPREVENT,1");
+    Serial.println("PR,AUTOCLIMB,1");
+    Serial.println("PR,AUTODESCENT,1");
+    Serial.println("PR,FLASHLOCK,1");
+    Serial.println("PR,NAVIGATION,1");
     Serial.println("P.");
 }
 

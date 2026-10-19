@@ -38,11 +38,7 @@ jobs:
 
       - name: Build BaseLink
         run: |
-          arduino-cli compile \
-            --fqbn esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app \
-            --warnings default \
-            --output-dir build/BaseLink \
-            firmware/BaseLink/BaseLink.ino
+          python3 scripts/firmware/build.py --output-dir build/BaseLink
 
       - name: Build legacy Controller
         run: |
@@ -61,6 +57,7 @@ jobs:
           cp build/BaseLink/BaseLink.ino.bootloader.bin "release/BaseLink-${BUILD_TAG}.bootloader.bin"
           cp build/BaseLink/BaseLink.ino.partitions.bin "release/BaseLink-${BUILD_TAG}.partitions.bin"
           cp build/BaseLink/BaseLink.ino.elf "release/BaseLink-${BUILD_TAG}.elf"
+          cp build/BaseLink/manifest.json "release/BaseLink-${BUILD_TAG}.manifest.json"
           cp build/Controller/Controller.ino.bin "release/Controller-${BUILD_TAG}.bin"
           arduino-cli core list --format json > "release/core-versions-${BUILD_TAG}.json"
           arduino-cli lib list --format json > "release/library-versions-${BUILD_TAG}.json"
@@ -112,6 +109,19 @@ jobs:
             ## 2PyBot ${{ github.ref_name }}
 
             Tagged source: `${{ github.sha }}`.
+
+            Tags containing a suffix such as `-rc.1` are prerelease candidates.
+            [Revision Table](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/REVISION_HISTORY.md)
+            records historical features and estimated future milestones.
+            [Vision roadmap](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/VISION_ROADMAP.md)
+            tracks calibration, camera/ToF fusion and later ONNX perception work.
+
+            ### Android outputs
+
+            The Android Build workflow attaches `2PyBot-${{ github.ref_name }}-debug.apk`
+            (debug-signed, directly installable), an unsigned release APK and APK checksums.
+            Terrain sessions, exports and the driving view are documented in
+            [Terrain sessions](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/terrain-sessions.md).
 
             BaseLink uses ESP32 LQR/LQI control, direct Bluepad32 gamepad input,
             TMC2226 drivers, runtime parameters, terrain adaptation, and camera payload controls.
