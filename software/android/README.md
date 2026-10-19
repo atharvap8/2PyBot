@@ -1,6 +1,9 @@
 # 2PyBot Android App
 
-Revision **3.40.0** fixes Routes rendering across rotation and short landscape
+Revision **4.0.0** targets the [BLDC hardware branch](../../docs/BLDC_V4.md).
+Tune shows the MOTOR group and fixed wiring-polarity values as read-only.
+
+Revision **3.40.0** fixed Routes rendering across rotation and short landscape
 windows, with instance-owned WebView lifecycle, explicit viewport sizing and Reload.
 
 Revision **3.30.0** introduced the [adaptive cockpit](../../docs/ANDROID_COCKPIT_DESIGN.md):

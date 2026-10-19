@@ -25,6 +25,7 @@ def manifest(directory):
     except subprocess.CalledProcessError:commit="";dirty=True
     payload=dict(details,build_id=details["sha256"],schema=1,version=version,
                  built_at=datetime.now(timezone.utc).isoformat(),source_commit=commit,source_dirty=dirty,
+                 hardware="m0601-rs485",parameter_schema="bldc-v4",
                  fqbn="esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app",app_offset=0x10000,partition_bytes=0x300000)
     (directory/"manifest.json").write_text(json.dumps(payload,indent=2)+"\n")
     return payload

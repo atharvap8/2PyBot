@@ -17,7 +17,8 @@ The current [Radxa console](../../software/radxa/console/README.md) uses 460800 
 | Record | Default rate | Meaning |
 | :--- | :--- | :--- |
 | `O` | 50 Hz | Encoder odometry and IMU orientation; emitted in both states |
-| `D` | Nominal 100 Hz | Controller and terrain debug; enabled at boot, toggled by `L` |
+| `D` | Nominal 50 Hz | Controller and terrain debug; enabled at boot, toggled by `L` |
+| `HM` | 10 Hz | Hub currents, raw RPM, idle temperatures, faults and link/mode state |
 | `[TAG] ...` | On events | Boot, state, gamepad, driver, and tuning logs |
 | `A,...` | During auto-tune | Progress, completion, abort, or status |
 
@@ -27,7 +28,23 @@ The current [Radxa console](../../software/radxa/console/README.md) uses 460800 
 O,ms,encL,encR,pitchDeg,yawDeg
 ```
 
-`encL` and `encR` are signed 64-bit encoder counts from `StepperControl`; the right getter already negates its hardware count. They do not include `P.encSign`. Pitch is filtered `imu.getPitch()`, before balance trim/sign correction. Yaw is tilt-compensated compass heading in degrees.
+`encL` and `encR` are signed 64-bit counts from the unwrapped M0601 absolute
+position, converted to 4096 counts/revolution and per-wheel forward signs.
+`ENCSGN` is fixed at +1. Pitch is filtered `imu.getPitch()`, before balance
+trim/sign correction. Yaw is tilt-compensated compass heading in degrees.
+
+### Hub feedback (v4)
+
+```text
+HM,ms,iCmdL,iCmdR,iMeasL,iMeasR,rpmL,rpmR,tempL,tempR,faultL,faultR,saturated,linkOk,modeOk
+```
+
+Commands are robot-forward amps; measured currents and RPM retain motor-wire
+signs. `RPMSGN=-1` maps raw RPM to position direction; `LDIR`/`RDIR` then map
+to robot forward. Temperatures are last idle-query values (-1 until known);
+there are no temperature queries during armed DRIVE polling. Faults are bit
+masks. Link/mode and saturation fields are booleans. The host stores these in
+`telemetry.hub`, separate from the append-compatible `D` record.
 
 ### Debug
 
@@ -41,7 +58,7 @@ D,ms,pitchF,rateF,uOut,velF,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,
 | `pitchF`, `rateF` | Forward-positive degrees and degrees/s |
 | `uOut`, `velF` | Acceleration in m/s², filtered velocity in m/s |
 | `ex` | Normal reference error, or climb reference error once blend ≥0.5, metres; use `clEx` for unambiguous climb state |
-| `vCmdSteps`, `steerSteps` | Common and allocated differential step rates, microsteps/s |
+| `vCmdSteps`, `steerSteps` | Common and allocated differential rates, encoder counts/s in v4 |
 | `satV`, `satA` | Velocity/acceleration clamp flags |
 | `loopMaxUs` | Largest measured loop interval since the previous debug record |
 | `speedHi`, `balancing` | HIGH-speed flag and balance-state flag, 0 or 1 |
@@ -69,7 +86,7 @@ D,ms,pitchF,rateF,uOut,velF,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,
 
 The nine fall-prevention fields are appended in local revision 3.9.0; hosts accept
 shorter records from older firmware. These targets are not measurements of actual
-ISR-applied motor rates. When idle, controller/reference fields retain the last
+measured motor rates. When idle, controller/reference fields retain the last
 balancing evaluation, except the explicit wheel targets are zeroed on disable.
 `soften` remains the terrain proposal; `balScale` reports the selected multiplier.
 See [fall prevention](../../docs/diagnostics/fall-prevention.md).
@@ -105,12 +122,15 @@ Parse comma-separated fields. Do not use the legacy tab-separated PID telemetry 
 Other hardware/log records can appear before a parameter-command reply.
 
 ```text
-P#,107
+P#,n
 P,key,value,min,max,group,description
 PR,STEPSM,value
 PR,COUNTSM,value
 PR,VMAX,value
 PR,AMAX,value
+PR,VNOLOAD,value
+PR,HUBMOTOR,1
+PR,HUBSCHEMA,4
 PR,TOFGUARD,1
 PR,BOOTGATE,1
 PR,STARTUPACK,1
@@ -125,7 +145,7 @@ Split a parameter row at its first six commas; descriptions may contain commas. 
 | Group | Parameters |
 | :--- | :--- |
 | BALANCE | 15 |
-| STEPPER | 9 |
+| MOTOR | 21 |
 | DRIVE | 17 |
 | YAW | 10 |
 | SAFETY | 6 |
@@ -134,13 +154,19 @@ Split a parameter row at its first six commas; descriptions may contain commas. 
 | LED | 3 |
 | PAYLOAD | 17 |
 | TERRAIN | 8 |
-| **Total** | **107** |
+| **Total** | **119** |
 
 `params.h` is the complete key/bounds reference. The current Radxa console builds parameter rows from this metadata. It has tabs for nine parameter groups; TERRAIN parameters are exposed by the API but do not yet have a tab. The legacy desktop GUI does not implement this protocol.
 
 The [Android app](../../software/android/README.md) receives parameters through the console API and derives its group list dynamically, including TERRAIN.
 
-Writes reject unknown keys and out-of-range values. Numeric text is parsed with `atof`, so malformed text may become zero. Bounds are per parameter and do not enforce relationships between settings. `TORCH_MAX_PCT` remains a compile-time cap, not a runtime parameter.
+Parameter writes reject unknown keys, malformed numeric text and out-of-range
+values. `ISGN`/`RPMSGN` are fixed at -1; `ENCSGN` is fixed at +1. Direction
+signs must be exactly ±1 and drive/source selectors exactly 0 or 1. NVS
+save/load/default operations and mode/direction/radius/source changes require
+stopped motors. `P?` is nonblocking, one row per cycle; records can interleave
+with telemetry and repeated requests do not restart an unfinished dump.
+`TORCH_MAX_PCT` remains a compile-time cap. See [v4 defaults](../../docs/BLDC_V4.md).
 
 ## Startup hold and Radxa acknowledgement
 

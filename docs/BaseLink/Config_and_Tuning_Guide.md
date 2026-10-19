@@ -1,5 +1,8 @@
 # Configuration and Tuning Guide
 
+This is the v3 stepper tuning reference. For v4 BLDC wiring, fixed polarity,
+velocity source, motor parameters and persistence, use the [v4 guide](../BLDC_V4.md).
+
 Reference: [config.h](../../firmware/BaseLink/config.h), [params.h](../../firmware/BaseLink/params.h), [params.cpp](../../firmware/BaseLink/params.cpp), and [BaseLink.ino](../../firmware/BaseLink/BaseLink.ino).
 
 ## Defaults, live settings, and saved settings

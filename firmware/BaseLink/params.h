@@ -54,11 +54,28 @@
   X(s3,        "S3",      LQR_S3,           -140.0f,   0.0f, "BALANCE", "stiff: pitch gain")            \
   X(s4,        "S4",      LQR_S4,            -25.0f,   0.0f, "BALANCE", "stiff: pitch-rate gain")       \
   X(s5,        "S5",      LQR_S5,            -40.0f,   0.0f, "BALANCE", "stiff: integral gain")         \
-  /* ---------- STEPPER / GEOMETRY ---------- */                                              \
-  X(wheelR,    "WHEELR",  WHEEL_RADIUS_M,      0.020f, 0.120f,"STEPPER", "LOADED wheel radius (m)")     \
-  X(maxSpdSt,  "MAXSPD",  MAX_SPEED_STEPS,   500.0f,15000.0f,"STEPPER", "speed ceiling (usteps/s)")     \
-  X(motAccel,  "MAXACC",  MOTOR_ACCEL_LIMIT,1000.0f,40000.0f,"STEPPER", "accel ceiling (usteps/s^2)")   \
-  X(motorMa,   "CURRENT", MOTOR_CURRENT_MA,  300.0f, 2000.0f,"STEPPER", "RMS current (mA) - applied live")\
+  /* ---------- BLDC MOTOR / GEOMETRY ---------- */                                           \
+  X(wheelR,    "WHEELR",  WHEEL_RADIUS_M,      0.020f, 0.120f,"MOTOR", "loaded wheel radius (m)")       \
+  X(maxSpdSt,  "MAXSPD",  MAX_SPEED_STEPS,     0.0f,25000.0f,"MOTOR", "counts/s; 0 = supply no-load speed") \
+  X(motAccel,  "MAXACC",  MOTOR_ACCEL_LIMIT,1000.0f,150000.0f,"MOTOR","balance acceleration (counts/s^2)") \
+  X(motorMa,   "CURRENT", MOTOR_CURRENT_MA,  300.0f,MOTOR_CURRENT_MAX_MA,"MOTOR","per-motor torque current limit (mA)") \
+  X(supplyV,   "SUPPLYV", SUPPLY_V,            7.0f, 24.0f,"MOTOR", "motor supply (V)")             \
+  X(drvMode,   "DRVMODE", HUB_DRIVE_MODE,      0.0f,  1.0f,"MOTOR", "1 current balance; 0 bench velocity") \
+  X(hubKp,     "HUBKP",   HUB_KP,              0.0f, 40.0f,"MOTOR", "common velocity P (A per m/s)") \
+  X(hubKi,     "HUBKI",   HUB_KI,              0.0f,100.0f,"MOTOR", "common velocity I (A per m)")   \
+  X(hubIntLim, "HUBILIM", HUB_INT_LIM,         0.0f,  3.0f,"MOTOR", "common integral limit (A)")   \
+  X(hubKff,    "HUBKFF",  HUB_KFF,             0.0f,  2.0f,"MOTOR", "common acceleration feed-forward") \
+  X(hubMass,   "HUBMASS", HUB_MASS_KG,         0.3f, 10.0f,"MOTOR", "robot mass for feed-forward (kg)") \
+  X(hubVSrc,   "HUBVSRC", HUB_VEL_SOURCE,      0.0f,  1.0f,"MOTOR", "0 corrected rpm; 1 position velocity") \
+  X(hubAcc,    "HUBACC",  HUB_VEL_ACCEL_BYTE,  0.0f,255.0f,"MOTOR", "bench velocity ramp byte")    \
+  X(dirL,      "LDIR",    LEFT_MOTOR_DIR,     -1.0f,  1.0f,"MOTOR", "left direction (+1/-1)")      \
+  X(dirR,      "RDIR",    RIGHT_MOTOR_DIR,    -1.0f,  1.0f,"MOTOR", "right direction (+1/-1)")     \
+  X(curSign,   "ISGN",    HUB_CURRENT_SIGN,   -1.0f, -1.0f,"MOTOR", "confirmed current polarity (-1)") \
+  X(rpmSign,   "RPMSGN",  HUB_RPM_SIGN,       -1.0f, -1.0f,"MOTOR", "confirmed rpm polarity (-1)") \
+  X(hubYawKp,  "HUBYAWKP",HUB_YAW_KP,         0.0f, 10.0f,"MOTOR", "differential velocity P (A per m/s)") \
+  X(hubYawKi,  "HUBYAWKI",HUB_YAW_KI,         0.0f, 30.0f,"MOTOR", "differential velocity I (A per m)") \
+  X(hubYawLim, "HUBYAWIL",HUB_YAW_INT_LIM,    0.0f,  1.0f,"MOTOR", "turn integral limit (A)")     \
+  X(hubYawSlew,"HUBYAWSL",HUB_YAW_CURRENT_SLEW,0.5f,30.0f,"MOTOR", "turn current slew (A/s)")     \
   /* ---------- DRIVE INPUT ---------- */                                                     \
   X(maxDriveV, "DRIVEV",  MAX_DRIVE_VEL_MS,    0.05f,  3.0f, "DRIVE",   "full-stick speed (m/s)")       \
   X(driveDb,   "DRIVEDB", DRIVE_DEADBAND,      0.0f,   0.3f, "DRIVE",   "stick deadband -> position hold")\
@@ -73,8 +90,8 @@
   X(expoSteer, "EXPOSTR", EXPO_STEER,          0.0f,   1.0f, "DRIVE",   "steer expo (0 lin, 1 cubic)")  \
   X(expoDrive, "EXPODRV", EXPO_DRIVE,          0.0f,   1.0f, "DRIVE",   "drive expo")                   \
   /* ---------- YAW / STEERING ---------- */                                                  \
-  X(maxSteerSt,"MAXSTR",  MAX_STEER_STEPS,   200.0f, 9000.0f,"YAW",     "max differential (usteps/s)")  \
-  X(steerSlew, "STRSLEW", STEER_SLEW,       1000.0f,40000.0f,"YAW",     "steer slew (usteps/s^2)")      \
+  X(maxSteerSt,"MAXSTR",  MAX_STEER_STEPS,   200.0f, 9000.0f,"YAW",     "max differential (counts/s)")  \
+  X(steerSlew, "STRSLEW", STEER_SLEW,       1000.0f,40000.0f,"YAW",     "steer slew (counts/s^2)")      \
   X(steerDb,   "STRDB",   STEER_DEADBAND,      0.0f,   0.3f, "YAW",     "steer deadband")               \
   X(yawKp,     "YAWKP",   YAW_HOLD_KP,         0.0f,  20.0f, "YAW",     "heading hold P (steps/s per count)")\
   X(yawKd,     "YAWKD",   YAW_HOLD_KD,         0.0f,   1.0f, "YAW",     "heading hold D")               \
@@ -95,7 +112,7 @@
   X(mahonyKp,  "MAHKP",   MAHONY_KP,           0.0f,  20.0f, "IMU",     "Mahony Kp")                    \
   X(mahonyKi,  "MAHKI",   MAHONY_KI,           0.0f,   1.0f, "IMU",     "Mahony Ki")                    \
   X(pitchSign, "PITCHSGN",PITCH_FWD_SIGN,     -1.0f,   1.0f, "IMU",     "pitch sign (+1/-1)")           \
-  X(encSign,   "ENCSGN",  ENC_FWD_SIGN,       -1.0f,   1.0f, "IMU",     "encoder sign (+1/-1)")         \
+  X(encSign,   "ENCSGN",  ENC_FWD_SIGN,        1.0f,   1.0f, "IMU",     "hub forward frame (fixed +1)") \
   X(rateSign,  "RATESGN", RATE_FWD_SIGN,      -1.0f,   1.0f, "IMU",     "gyro-rate sign (+1/-1)")       \
   /* ---------- CLIMB MODE ---------- */                                                      \
   X(climbZLim, "CLMBZ",   CLIMB_Z_INT_LIM,     0.1f,  10.0f, "CLIMB",   "climb integral clamp (m*s)")   \
@@ -118,12 +135,6 @@
   X(c3,        "C3",      LQR_C3,           -140.0f,   0.0f, "CLIMB",   "climb: pitch gain")            \
   X(c4,        "C4",      LQR_C4,            -25.0f,   0.0f, "CLIMB",   "climb: pitch-rate gain")       \
   X(c5,        "C5",      LQR_C5,            -30.0f,   0.0f, "CLIMB",   "climb: integral gain")         \
-  /* ---------- TMC driver tuning (pushed over UART on write) ---------- */  \
-  X(sgthrsL,   "SGTHRSL", SGTHRS_LEFT,         0.0f, 255.0f, "STEPPER", "StallGuard threshold, left")   \
-  X(sgthrsR,   "SGTHRSR", SGTHRS_RIGHT,        0.0f, 255.0f, "STEPPER", "StallGuard threshold, right")  \
-  X(tcoolthrs, "TCOOL",   DRV_TCOOLTHRS,       0.0f,1048575.0f,"STEPPER","SG/CoolStep speed threshold") \
-  X(csSemin,   "CSSEMIN", COOLSTEP_SEMIN,      0.0f,  15.0f, "STEPPER", "CoolStep lower limit (0=off)") \
-  X(csSemax,   "CSSEMAX", COOLSTEP_SEMAX,      0.0f,  15.0f, "STEPPER", "CoolStep upper limit")         \
   /* ---------- magnetometer calibration ---------- */                       \
   X(magOffX,   "MAGOFFX", MAG_OFFSET_X,    -3000.0f,3000.0f, "IMU",     "hard-iron offset X")           \
   X(magOffY,   "MAGOFFY", MAG_OFFSET_Y,    -3000.0f,3000.0f, "IMU",     "hard-iron offset Y")           \
@@ -172,6 +183,7 @@ struct Params {
 #undef X
     // ---- derived, never set directly ----
     float stepsPerM, countsPerM, vMax, aMax;
+    float vNoLoad, maxSpdEff;
 };
 
 struct ParamMeta {
@@ -191,6 +203,7 @@ extern const size_t      PARAM_COUNT;
 // Implemented by the sketch: pushes changed values into hardware
 // (driver current, IMU filter, LED brightness...). See BaseLink.ino.
 void params_applyHardware(bool currentChanged);
+bool params_motionActive();
 
 void   params_recompute();
 float* params_ptr(size_t i);
@@ -200,6 +213,7 @@ void   params_defaults();
 void   params_save();
 void   params_load();
 void   params_dump();
+void   params_service();
 bool   params_handleLine(char* line);
 void   params_begin();
 

@@ -1,16 +1,13 @@
 /*
  * ============================================================
- *  BaseLink_LQR.ino — 2PyBot firmware, Package B (LQR / LQI)
-
-                            LATESTT
+ *  BaseLink.ino — 2PyBot v4.0.0, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
  *  integral (LQI) that nulls drift from the unknown CoG offset.
- *  =]`1
  *      u = -( K1*(x-xRef) + K2*v + K3*pitch + K4*pitchRate + K5*z )
  *      z = Integral(x - xRef),   u = wheel acceleration
- *      vCmd += u*dt  ->  stepper ISR (steps/s)
+ *      vCmd += u*dt  ->  common/differential current loops -> RS485
  *
  *  Gains were computed offline by solving the continuous-time 
  *  algebraic Riccati equation (see scripts/lqr_design.py,
@@ -46,10 +43,10 @@
 #include "descent_guard.h"
 #include "navigation_lease.h"
 #include "imu_sensor.h"
-#include "stepper_control.h"
+#include "hub_drive.h"
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
 #include "led_ring.h"      // WS2812 16-LED expression ring on GPIO 15
-#include "payload.h"       // 2x MG90S servo (GPIO 0/12) + torch MOSFET (GPIO 2)
+#include "payload.h"       // servos GPIO 26/0 + torch MOSFET GPIO 2
 
 IMUSensor imu;
 
@@ -78,6 +75,7 @@ float xRef = 0.0f;          // position hold target (m)
 float uOut = 0.0f;          // last acceleration command (m/s^2)
 float steerSteps = 0.0f;    // current differential (steps/s)
 float diffTarget = 0.0f;    // heading-hold encoder diff target
+hub_control::Steering yawControl;
 
 // ---- telemetry instrumentation (read-only, no control effect) ----
 uint8_t  satV = 0, satA = 0;     // clamp hit this cycle: velocity cap / accel limit
@@ -147,13 +145,12 @@ bool ledState = false;
 //  Hooks the auto-tune routines need from the sketch
 // ============================================================
 bool at_isBalancing() { return state == STATE_BALANCING; }
-void at_motorsOff()   { steppers.setSpeeds(0, 0); steppers.disable(); }
+void at_motorsOff()   { hub.disable(); }
+bool params_motionActive() { return hub.isEnabled() || motorsRequested; }
 void at_setWheelSpeed(float stepsPerSec) {
     if(startupGate.maintenance)return;
-    // Raw drive, used only by the stall search with the wheels off the ground.
-    if (!steppers.isEnabled()) steppers.enable();
-    int32_t v = (int32_t)stepsPerSec;
-    steppers.setSpeeds(v, v);
+    if (!hub.isEnabled()) hub.enable();
+    hub.setSpeeds(stepsPerSec, stepsPerSec);
 }
 
 // ============================================================
@@ -165,8 +162,8 @@ void at_setWheelSpeed(float stepsPerSec) {
 void params_applyHardware(bool currentChanged) {
     if (!hardwareReady) return;        // NVS/metadata remain usable before hardware begin()
     imu.setFilterCutoff(P.imuCutoff);
-    steppers.applyTuning();                 // SGTHRS / TCOOLTHRS / CoolStep
-    if (currentChanged) steppers.setCurrent((uint16_t)P.motorMa);
+    (void)currentChanged;
+    hub.applyTuning();
 }
 
 // ============================================================
@@ -189,6 +186,7 @@ void resetController() {
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
     xRef = posM;
     steerSteps = 0.0f; diffTarget = encDiff;
+    yawControl.reset(encDiff);
     gestSeq = nullptr;stiffHold=autoClimb.policy==AutoClimb::FORCE_STIFF;climbMode=false;lookCmd=0.0f;
 }
 
@@ -218,9 +216,8 @@ void requestDisable(const char* why) {
     // disable (FELL / RATE SPIKE) left the pad still believing it was armed,
     // so the next START press produced no edge and appeared to do nothing.
     btgamepad_syncArmed(false);
-    if (state == STATE_BALANCING) {
-        steppers.setSpeed(0);
-        steppers.disable();
+    if (state == STATE_BALANCING || hub.isEnabled()) {
+        hub.disable();
         state = STATE_IDLE;
     }
     wheelTargetL=wheelTargetR=appliedSteerSteps=0.0f;
@@ -311,7 +308,7 @@ void handleLine(char* line) {
 
     if (line[0] == 'V' && line[1] == ',') {
         float f = 0, s = 0; int en = 0;
-        if (sscanf(line + 2, "%f,%f,%d", &f, &s, &en) == 3) {
+        if (sscanf(line + 2, "%f,%f,%d", &f, &s, &en) == 3 && isfinite(f) && isfinite(s)) {
             radxaFwd   = clampf(f, -1.0f, 1.0f);
             radxaSteer = clampf(s, -1.0f, 1.0f);
             radxaEn    = en ? 1 : 0;
@@ -372,7 +369,7 @@ void handleLine(char* line) {
         else if (cmd == 'K' && line[1] == '4') { k4 = val; Serial.printf("[TUNE] K4 = %.4f\n", val); }
         else if (cmd == 'K' && line[1] == '5') { k5 = val; Serial.printf("[TUNE] K5 = %.4f\n", val); }
         else if (cmd == 'T') { pitchTrim = val; Serial.printf("[TUNE] Trim = %.3f deg\n", val); }
-        else if (cmd == 'M') { steppers.setCurrent((uint16_t)val); }
+        else if (cmd == 'M') { params_set("CURRENT", val); }
         else if (cmd == 'B') { payload_torchSetPct((int)val); }
         else if (cmd == 'P') { payload_setYaw(val);  Serial.printf("[PAY] Pan  -> %.0f deg\n", payload_yaw());  }
         else if (cmd == 'Z') { payload_setZoom(val); Serial.printf("[PAY] Zoom -> %.0f deg\n", payload_zoom()); }
@@ -393,11 +390,12 @@ void handleLine(char* line) {
         case 'N': payload_center(); break;
         case 'L': DEBUG_STREAM = !DEBUG_STREAM; break;
         case 'S':
+            if (params_motionActive()) { Serial.println("[HUB] Use HM telemetry while balancing; stop for settings"); break; }
             Serial.println("\n---- Package B (LQR / LQI) settings ----");
             Serial.printf("  K1=%.4f  K2=%.4f  K3=%.4f\n", k1, k2, k3);
             Serial.printf("  K4=%.4f  K5=%.4f  Trim=%.3f deg\n", k4, k5, pitchTrim);
             Serial.printf("  Motors: %s  State: %s  PadSpeed: %s  Hold: %s\n",
-                          steppers.isEnabled() ? "ON" : "OFF",
+                          hub.isEnabled() ? "ON" : "OFF",
                           state == STATE_BALANCING ? "BALANCING" : "IDLE",
                           joySpeedHigh ? "HIGH" : "LOW",
                           climbMode ? "CLIMB" : (stiffHold ? "STIFF" : "normal"));
@@ -405,6 +403,7 @@ void handleLine(char* line) {
                           payload_yaw(), payload_zoom(),
                           payload_torchIsOn() ? "ON" : "off",
                           payload_torchPct(), TORCH_MAX_PCT);
+            hub.printStatus();
             Serial.println("----------------------------------------\n");
             break;
         case '?':
@@ -420,7 +419,8 @@ void handleLine(char* line) {
 }
 
 void pollSerial() {
-    while (Serial.available()) {
+    uint16_t budget = 192;
+    while (budget-- && Serial.available()) {
         char c = (char)Serial.read();
         if (c == '\n' || c == '\r') {
             if (rxLen > 0) { rxBuf[rxLen] = '\0'; handleLine(rxBuf); rxLen = 0; }
@@ -562,9 +562,9 @@ void runController(float dt) {
 
     satA = (fabsf(uOut) > P.aMax) ? 1 : 0;
     uOut = clampf(uOut, -P.aMax, P.aMax);
-    float vNext = vCmd + uOut * dt;
-    satV = (fabsf(vNext) > P.vMax) ? 1 : 0;
-    vCmd = clampf(vNext, -P.vMax, P.vMax);
+    const float vNext = vCmd + uOut * dt;
+    satV = fabsf(vNext) > P.vMax;
+    vCmd = clampf(vNext,-P.vMax,P.vMax);
 
     // BALANCE > POSITION: if the speed command saturates, the tilt
     // terms lose their actuator and the robot falls. Give up ground:
@@ -584,33 +584,17 @@ void runController(float dt) {
     // ---- yaw: commanded turn or encoder-differential heading hold ----
     float steerIn = cmdSteer*(1.0f+autoClimb.blend*(P.climbStr-1.0f));
     const bool navigationTurning=navigation.granted && fabsf(navigation.yawRate)>.005f;
-    if (navigationTurning || fabsf(steerIn) > P.steerDb) {
-        // Navigation is in rad/s, not stick units: small planned turns must
-        // bypass the gamepad deadband and retain their calibrated yaw scale.
-        float target = navigationTurning ? navigation.yawRate*P.trackW*P.stepsPerM*.5f : steerIn * P.maxSteerSt;
-        float slew = P.steerSlew * dt;
-        steerSteps += clampf(target - steerSteps, -slew, slew);
-        diffTarget = encDiff;                       // re-latch heading
-    } else {
-        // Sustained "look": yaw offset in encoder-diff counts.
-        float lookCounts = lookCmd * (P.lookMaxDeg * DEG_TO_RAD) * P.trackW * P.countsPerM;
-        float dErr = (diffTarget + lookCounts) - encDiff;
-        // Big error = wheel slip, not rotation: accept the new heading
-        // instead of unwinding it (that's what caused the 360 spins).
-        // Also re-latch during large tilts: recovery footwork is not
-        // a heading change worth correcting.
-        if (fabsf(dErr) > P.yawRelatch || fabsf(pitchF) > P.yawTiltSus) {
-            diffTarget = encDiff - lookCounts;
-            dErr = 0.0f;
-        }
-        steerSteps = clampf(dErr * P.yawKp - diffRateF * P.yawKd,
-                            -P.yawMaxSt, P.yawMaxSt);
-    }
-
-    appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,P.maxSpdSt);
+    const bool turning = navigationTurning || fabsf(steerIn) > P.steerDb;
+    const float target = navigationTurning ? navigation.yawRate*P.trackW*P.stepsPerM*.5f : steerIn*P.maxSteerSt;
+    const float room = fmaxf(0,P.maxSpdEff-fabsf(baseSteps));
+    steerSteps = yawControl.update(clampf(target,-P.maxSteerSt,P.maxSteerSt),turning,encDiff,diffRateF,
+        lookCmd*(P.lookMaxDeg*DEG_TO_RAD)*P.trackW*P.countsPerM,P.yawKp,P.yawKd,P.yawMaxSt,
+        P.yawRelatch,fabsf(pitchF)>P.yawTiltSus,P.steerSlew,room,.1f*P.trackW*P.countsPerM,dt);
+    diffTarget = yawControl.heading;
+    appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,P.maxSpdEff);
     wheelTargetL=baseSteps-appliedSteerSteps;
     wheelTargetR=baseSteps+appliedSteerSteps;
-    steppers.setSpeeds((int32_t)wheelTargetL,(int32_t)wheelTargetR);
+    hub.setSpeeds(wheelTargetL,wheelTargetR);
 }
 
 // ============================================================
@@ -627,6 +611,7 @@ void waitForHostStartup() {
     uint32_t lastRequest = millis();
     while (!startupGate.mayInitialize(P.bootWait > 0.5f)) {
         pollSerial();
+        params_service();
         if (millis() - lastRequest >= 1000) {
             Serial.println("BR?,0");
             lastRequest = millis();
@@ -638,17 +623,18 @@ void waitForHostStartup() {
 }
 
 void setup() {
-    digitalWrite(MOTOR_EN_PIN, HIGH); // disable both drivers before any lengthy startup
-    pinMode(MOTOR_EN_PIN, OUTPUT);
+    pinMode(RIGHT_RS485_DE,OUTPUT); digitalWrite(RIGHT_RS485_DE,LOW);
+    pinMode(LEFT_RS485_DE,OUTPUT); digitalWrite(LEFT_RS485_DE,LOW);
     digitalWrite(TORCH_PIN, LOW);
     pinMode(TORCH_PIN, OUTPUT);
+    Serial.setTxBufferSize(1024);
     Serial.begin(SERIAL_BAUD);
     delay(300);
     // GPIO 2 is the torch MOSFET gate now; payload_begin() claims it
     // below and drives it low. The WS2812 ring shows status instead.
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink — Package B: LQR / LQI");
+    Serial.println("     2PyBot BaseLink v4.0.0 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();
@@ -663,8 +649,8 @@ void setup() {
         Serial.println("[MAIN] FATAL: IMU init failed — halting");
         while (true) delay(1000);
     }
-    if (!steppers.begin()) {
-        Serial.println("[MAIN] WARNING: TMC2226 UART unresponsive");
+    if (!hub.begin()) {
+        Serial.println("[MAIN] Hub link unavailable; arming remains blocked");
     }
 
     Serial.printf("[MAIN] Settling sensors %d ms — keep robot still\n", STARTUP_SETTLE_MS);
@@ -714,17 +700,18 @@ void loop() {
                          imu.getAz()*imu.getAz()), rateF, dt);
     rateF  = P.rateSign  *  imu.getPitchRate();
 
-    encRawL = steppers.getPositionL();
-    encRawR = steppers.getPositionR();
+    hub.service(dt);
+    encRawL = hub.getPositionL();
+    encRawR = hub.getPositionR();
     float posL = P.encSign * (float)encRawL;
     float posR = P.encSign * (float)encRawR;
 
     static float posPrev = 0.0f; static bool posInit = false;
     posM = 0.5f * (posL + posR) / P.countsPerM;
-    if (!posInit) { posPrev = posM; posInit = true; }
-    float vRaw = (posM - posPrev) / dt;
-    posPrev = posM;
-    const float aV = 1.0f - expf(-2.0f * PI * 15.0f / LOOP_FREQ_HZ);  // 15 Hz EMA
+    if (!posInit) { posPrev=posM;posInit=true; }
+    float vRaw = (posM-posPrev)/dt;
+    posPrev=posM;
+    const float aV = 1.0f - expf(-2.0f * PI * 15.0f * dt);
     velF += aV * (vRaw - velF);
 
     static float diffPrev = 0.0f; static bool diffInit = false;
@@ -772,19 +759,6 @@ void loop() {
     }
     payload_update(dt, joyPanX, joyZoomY);
 
-#if USE_DIAG_PINS
-    // TMC2226 DIAG stall flags: report only, never auto-act — a false
-    // trip during an aggressive balance recovery must not cut motors.
-    {
-        static uint32_t stallSeenL = 0, stallSeenR = 0, stallMuteMs = 0;
-        uint32_t sl = steppers.stallCountL(), sr = steppers.stallCountR();
-        if ((sl != stallSeenL || sr != stallSeenR) && millis() - stallMuteMs > 250) {
-            Serial.printf("[STALL] wheel stall flags  L=%lu  R=%lu\n",
-                          (unsigned long)sl, (unsigned long)sr);
-            stallSeenL = sl; stallSeenR = sr; stallMuteMs = millis();
-        }
-    }
-#endif
 
     // Speed-mode edge -> ring cue (blue dash = HIGH, green settle = LOW)
     static uint8_t spdPrev = SPEED_BOOT_HIGH;
@@ -857,15 +831,18 @@ void loop() {
 
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {
-        if (motorsRequested && !startupGate.maintenance && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
+        if (motorsRequested && hub.linkOk(HUB_LINK_TIMEOUT_MS) && hub.modeOk() && !hub.faultBits() &&
+            P.drvMode>.5f && !startupGate.maintenance && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
             resetController();
-            steppers.enable();
+            hub.enable();
             state = STATE_BALANCING;
             leds_event(LED_EV_ARM);
             Serial.println("[MAIN] -> BALANCING");
         }
     } else { // BALANCING
-        if (fabsf(pitchF) > P.maxTilt || fabsf(rateF) > P.maxRate) {
+        if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000) {
+            requestDisable(elapsed>20000?"CONTROL LOOP OVERRUN":"MOTOR LINK/MODE/FAULT");
+        } else if (fabsf(pitchF) > P.maxTilt || fabsf(rateF) > P.maxRate) {
             leds_event(LED_EV_FALL);
             requestDisable(fabsf(pitchF) > P.maxTilt ? "FELL" : "RATE SPIKE");
         } else {
@@ -873,7 +850,11 @@ void loop() {
         }
     }
 
-    at_update(dt);          // auto-tune state machine (no-op when idle)
+    if (AT.mode != AT_IDLE && (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000))
+        at_restore("motor feedback/control timing lost");
+    at_update(dt);
+    hub.transmit(dt);       // both UARTs immediately after calculating control
+    params_service();      // incremental output, never blocks motor updates
 
     // ---- 3b. expression ring (rate-limited internally, non-blocking) ----
     {
@@ -896,13 +877,13 @@ void loop() {
     // ---- 4. odometry stream to Radxa, 50 Hz, always on ----
     uint32_t nowMs = millis();
     static uint32_t lastNavMs=0;
-    if(nowMs-lastNavMs>=100) {
+    if(nowMs-lastNavMs>=100 && Serial.availableForWrite()>=96) {
         lastNavMs=nowMs;
         Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u\n",(unsigned long)nowMs,(unsigned long)navigation.token,
                       (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
                       (unsigned)btgamepad_connected(),0u);
     }
-    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM) {
+    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=96) {
         lastOdomMs = nowMs;
         Serial.printf("O,%lu,%lld,%lld,%.2f,%.2f\n",
                       (unsigned long)nowMs,
@@ -910,8 +891,8 @@ void loop() {
                       imu.getPitch(), imu.getYaw());
     }
 
-    // ---- 5. optional controller debug, nominal 100 Hz ----
-     if (DEBUG_STREAM && nowMs - lastDbgMs >= DEBUG_PERIOD_MS) {
+    // ---- 5. optional controller debug, nominal 50 Hz ----
+     if (DEBUG_STREAM && nowMs - lastDbgMs >= DEBUG_PERIOD_MS && Serial.availableForWrite()>=640) {
         lastDbgMs = nowMs;
         // D,ms,pF,w,u,v,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,state,fwd,str
         Serial.printf("D,%lu,%.2f,%.1f,%.2f,%.3f,%.3f,%.0f,%.0f,%u,%u,%lu,%u,%u,%.2f,%.2f,"
@@ -936,5 +917,16 @@ void loop() {
                        descentGuard.limit,descentGuard.excess,descentGuard.scale,(unsigned)descentGuard.active,
                        descentGuard.goal,autoClimb.overspeed);
         loopMaxUs = 0;
+    }
+
+    static uint32_t lastHubMs=0;
+    if (nowMs-lastHubMs>=100 && Serial.availableForWrite()>=256) {
+        lastHubMs=nowMs;
+        const auto& l=hub.left().fb(); const auto& r=hub.right().fb();
+        // HM keeps raw motor feedback; current commands are robot-forward.
+        Serial.printf("HM,%lu,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%u,%u,%u,%u,%u\n",
+            (unsigned long)nowMs,hub.currentCmdL(),hub.currentCmdR(),l.currentA,r.currentA,
+            l.rpm,r.rpm,l.tempC,r.tempC,l.fault,r.fault,(unsigned)hub.saturated(),
+            (unsigned)hub.linkOk(HUB_LINK_TIMEOUT_MS),(unsigned)hub.modeOk());
     }
 }

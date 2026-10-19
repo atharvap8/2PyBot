@@ -50,3 +50,7 @@ Thumbs.db
 # Scripts and local batch files
 upload.bat
 scripts/upload.bat
+
+# Generated Android downloads served by the bot; keep binaries outside source history.
+software/radxa/console/ui/2PyBot-v*-debug.apk
+software/radxa/console/ui/2PyBot-v*-manifest.json

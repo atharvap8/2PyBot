@@ -6,9 +6,9 @@ export default function register(registerTab) {
       el.innerHTML = `
       <div class=card><h3>Derived (read-only, computed by firmware)</h3>
         <div class=grid id=dv></div>
-        <p class=hint>These come from WHEELR and the stepper limits. If STEPSM
+        <p class=hint>These come from WHEELR and the BLDC limits. STEPSM equals COUNTSM in v4. If it
           disagrees with reality the whole control loop is scaled wrong —
-          measure the loaded rolling radius and set WHEELR on the Stepper tab.</p>
+          measure the loaded rolling radius and set WHEELR on the BLDC Motors tab.</p>
       </div>
       <div class=card><h3>Send a command</h3>
         <p class=hint>Whitelisted only. A remote client may STOP the robot but
@@ -31,7 +31,7 @@ export default function register(registerTab) {
       <div class=card><h3>Log</h3><pre class=log id=log></pre></div>`;
 
       const dv = el.querySelector('#dv');
-      const units = { STEPSM: 'steps/m', COUNTSM: 'counts/m', VMAX: 'm/s', AMAX: 'm/s²' };
+      const units = { STEPSM: 'counts/m', COUNTSM: 'counts/m', VMAX: 'm/s', AMAX: 'm/s²' };
       dv.innerHTML = Object.entries(c.state.derived).map(([k, v]) =>
         `<div class=stat><u>${k}</u><b>${Number(v).toFixed(2)}</b>
          <small style="color:var(--dim);font-size:10px">${units[k] || ''}</small></div>`).join('')

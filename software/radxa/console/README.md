@@ -1,5 +1,9 @@
 # 2PyBot Console
 
+v4 uses the **BLDC Motors** tab (`MOTOR` metadata group), position-derived
+hub velocity by default and parsed `HM` motor feedback in `telemetry.hub`.
+See the [v4 hardware notes](../../../docs/BLDC_V4.md) for units and build schema.
+
 Browser tuning interface, telemetry, camera controls, and HTTP/WebSocket API for the Android app. Imported from the running Cubie A7A package at `/home/radxa/2pybot-console`.
 
 The Kotlin/Compose client is in [software/android](../../android/README.md).

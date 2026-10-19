@@ -225,6 +225,7 @@ fun ParamSlider(p: Param, onCommit: (Float) -> Unit) {
                  color = if (p.dirty) Amber else Cyan)
         }
         Slider(
+            enabled = p.lo < p.hi,
             value = shown.coerceIn(p.lo, p.hi),
             onValueChange = { dragging = true; live = it },
             onValueChangeFinished = { dragging = false; onCommit(live) },

@@ -1,5 +1,9 @@
 # Route autopilot — 3.20.0
 
+The v4 BLDC branch retains this host protocol and recording format. The new
+motor firmware applies its configured differential steering limit (default
+1.5 rad/s). Re-teach routes against the new radius/track and steering behaviour.
+
 Open Android **Auto → Autopilot · routes / waypoints**, or
 `http://10.42.0.1:8080/ui/autonomy.html` while connected to the robot.
 Android download: `/ui/2PyBot-v3.20.0-debug.apk`.
@@ -39,8 +43,9 @@ Camera/payload position and camera/torch inputs do not grant/revoke drive author
 
 The visible page sends a keyed supervision heartbeat; three seconds without it
 pauses replay. MCU commands also have an independent 500 ms timeout. Odometry
-resets, disarming, firmware maintenance, balance recovery and no-progress events
-pause/abort the mission. Resuming always requires an explicit action.
+resets, disarming, firmware maintenance and loss of the native lease
+pause/abort the mission. Airborne/recovery diagnostics are advisory at the host;
+the MCU retains its own balance/fall handling. Resuming requires an explicit action.
 
 Routes persist under `/var/lib/2pybot/autonomy/routes/`. Control/status endpoints
 live under `/api/autonomy/`; native protocol is documented in

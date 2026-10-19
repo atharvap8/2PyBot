@@ -1,6 +1,10 @@
-# TMC2226 Driver Migration and Current Setup
+# TMC2226 Driver Migration — v3 history
 
-Reference: [stepper_control.cpp](../../firmware/BaseLink/stepper_control.cpp) and [config.h](../../firmware/BaseLink/config.h).
+This describes the v3 stepper hardware. Current wiring and control are in
+the [v4 BLDC guide](../BLDC_V4.md).
+
+Historical source: [stepper_control.cpp](https://github.com/atharvap8/2PyBot/blob/cc0143f045788911b783c02d40f0b9f2046c2821/firmware/BaseLink/stepper_control.cpp)
+and [config.h](https://github.com/atharvap8/2PyBot/blob/cc0143f045788911b783c02d40f0b9f2046c2821/firmware/BaseLink/config.h).
 
 ## Migration background
 

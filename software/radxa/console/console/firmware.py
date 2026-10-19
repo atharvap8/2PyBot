@@ -95,7 +95,15 @@ def register_build(root,incoming,installed_candidate=False):
 
 
 def public_build(manifest):
-    return {key:manifest[key] for key in ("build_id","version","sha256","size_bytes","built_at","source_commit","source_dirty") if key in manifest}
+    return {key:manifest[key] for key in ("build_id","version","sha256","size_bytes","built_at","source_commit","source_dirty","hardware","parameter_schema") if key in manifest}
+
+
+def hardware_mismatch(manifest,derived):
+    if manifest.get("parameter_schema")=="bldc-v4" and derived.get("HUBSCHEMA")!=4:
+        return "First BLDC installation requires manual commissioning; stepper/experimental tuning cannot be restored into v4"
+    if derived.get("HUBSCHEMA")==4 and manifest.get("parameter_schema")!="bldc-v4":
+        return "Selected image does not target the v4 BLDC parameter schema"
+    return ""
 
 
 class FirmwareManager:
@@ -125,6 +133,7 @@ class FirmwareManager:
         elif busy or self.link.maintenance:problem="Firmware update in progress"
         elif not worker_ready:problem="Firmware worker is unavailable"
         elif not latest:problem=problem or "No compiled firmware build is registered"
+        elif hardware_mismatch(latest,self.link.derived):problem=hardware_mismatch(latest,self.link.derived)
         elif not self.host_ready():problem="Start the camera stream and wait for host READY before reflashing"
         elif not self.link.connected or self.link.tel.get("stale",True):problem="Fresh controller telemetry is required"
         elif self.link.tel.get("balancing"):problem="Press local SELECT and wait for IDLE"
@@ -154,6 +163,7 @@ class FirmwareManager:
             try:
                 await self.link.begin_firmware_maintenance()
                 snapshot["params"]=self.link.params_list() # any raw diagnostic was stopped by FU,1
+                snapshot["derived"]=dict(self.link.derived)
                 atomic_json(folder/"request.json",{"id":identifier,"build":manifest,"snapshot":snapshot,"created_at":self.clock()})
                 job.update(status="queued",stage="queued",progress=3,message="Queued on bot; phone may disconnect",updated_at=self.clock())
                 atomic_json(self.root/"current.json",job)

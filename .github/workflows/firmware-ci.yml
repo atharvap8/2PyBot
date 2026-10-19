@@ -10,8 +10,7 @@
 #  BaseLink builds on esp32-bluepad32:esp32, the Bluepad32 board
 #  package (based on Arduino ESP32 core 2.0.x). It provides
 #  <Bluepad32.h> for the EVOFOX gamepad over Bluetooth Classic.
-#  stepper_control.cpp already handles the 2.x/3.x timer API
-#  split via ESP_ARDUINO_VERSION_MAJOR.
+#  M0601 hubs use one RS485 UART per wheel; no step timer or TMC library.
 #
 #  Controller builds on the stock esp32:esp32 core (3.x). Its
 #  ESP-NOW send callback uses wifi_tx_info_t, a type that does
@@ -35,13 +34,16 @@ name: Firmware CI
 
 on:
   push:
-    branches: [main, 'system/**']
+    branches: [main, 'system/**', 'hardware/**']
     paths:
       - 'firmware/**'
       - 'scripts/firmware/**'
       - 'scripts/versioning.py'
       - 'software/radxa/console/console/versioning.py'
       - 'VERSION'
+      - 'tests/test_bldc*'
+      - 'tests/test_m0601.cpp'
+      - 'tests/stubs/**'
   pull_request:
     paths:
       - 'firmware/**'
@@ -49,6 +51,9 @@ on:
       - 'scripts/versioning.py'
       - 'software/radxa/console/console/versioning.py'
       - 'VERSION'
+      - 'tests/test_bldc*'
+      - 'tests/test_m0601.cpp'
+      - 'tests/stubs/**'
 
 jobs:
 
@@ -77,7 +82,6 @@ jobs:
 
       - name: Install libraries
         run: |
-          arduino-cli lib install "TMCStepper"
           arduino-cli lib install "STM32duino ISM6HG256X"
           arduino-cli lib install "QMC5883LCompass"
           arduino-cli lib install "NeoPixelBus by Makuna"
@@ -89,6 +93,9 @@ jobs:
             --warnings default \
             --output-dir build/BaseLink \
             firmware/BaseLink/BaseLink.ino
+
+      - name: Check BLDC control and wire protocol
+        run: python3 scripts/firmware/check_bldc.py
 
       - name: Upload BaseLink build artifact
         uses: actions/upload-artifact@v4

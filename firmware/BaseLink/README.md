@@ -1,6 +1,9 @@
 # BaseLink Firmware
 
-ESP32 robot firmware with LQR/LQI balancing, direct Bluepad32 gamepad input, runtime parameters, terrain adaptation, a WS2812 ring, and camera payload control.
+ESP32 v4.0.0 firmware for two M0601 BLDC hubs, with LQR/LQI balancing,
+direct Bluepad32 gamepad input, runtime parameters, terrain adaptation, a
+WS2812 ring, and camera payload control. [BLDC integration details](../../docs/BLDC_V4.md)
+cover the control changes and offline checks.
 
 ## Build
 
@@ -21,7 +24,6 @@ esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app
 
 Install these libraries:
 
-- TMCStepper
 - STM32duino ISM6HG256X
 - QMC5883LCompass
 - NeoPixelBus by Makuna
@@ -34,20 +36,17 @@ Values below come from `config.h`.
 
 | Signal | GPIO |
 | :--- | :--- |
-| Right STEP / DIR | 33 / 25 |
-| Left STEP / DIR | 27 / 14 |
-| Shared motor EN | 32, active LOW |
-| Right UART RX / TX | 16 / 17 |
-| Left UART RX / TX | 18 / 19 |
+| Right RS485 TX / RX / DE | 19 / 18 / 23 (Serial2, motor ID 2) |
+| Left RS485 TX / RX / DE | 17 / 16 / 4 (Serial1, motor ID 1) |
 | I2C SDA / SCL | 21 / 22 |
-| Left encoder A / B | 4 / 5 |
-| Right encoder A / B | 13 / 23 |
-| Optional left / right DIAG | 34 / 35 |
 | WS2812 DIN | 15 |
 | Camera pan / zoom | 26 / 0 |
 | Torch MOSFET gate | 2 |
 
-Each driver has a separate UART with a 1 kOhm series resistor on TX. Both drivers use address 0 with MS1/MS2 LOW. Both enable inputs share GPIO 32.
+Each motor has its own RS485 transceiver and UART at 115200 8N1; DE and /RE
+are tied and driven by UART RTS. The supplied harness is ESP32-WROOM (16/17
+would conflict with PSRAM on WROVER). Wheel feedback comes from the hubs.
+`ISGN=-1`, `RPMSGN=-1`, `LDIR=-1`, `RDIR=+1`, and `HUBVSRC=1` are the v4 defaults.
 
 Power the ring and servos from the 5 V rail with common ground. The ring has 16 LEDs, a compiled brightness setting of 200/255, and a 50 Hz refresh setting. GPIO 0 and GPIO 2 are boot-strapping pins; external wiring must preserve their required reset levels.
 
@@ -55,21 +54,25 @@ Power the ring and servos from the 5 V rail with common ground. The ring has 16 
 
 Use USB serial at **460800 baud**, 8N1, with newline termination.
 
-Boot loads NVS parameters, plays the ring animation, initializes sensors and drivers, waits 3000 ms, averages 500 gyro readings, then starts the gamepad and payload. The balance state starts at `STATE_IDLE`.
+Boot loads the `2pybot-bldc4` parameter namespace and waits for host readiness
+when BOOTWAIT is enabled. It then initializes sensors and hubs, settles for
+3000 ms, calibrates the gyro and starts the gamepad/payload. The state is IDLE.
 
 Check for:
 
 ```text
-[PARAM] 107 tunables ...
+[PARAM] ... tunables ...
 [IMU] Initialisation OK
-[STEP] RIGHT TMC2226: OK ... readback 1/8 ...
-[STEP] LEFT TMC2226: OK ... readback 1/8 ...
+[HUB] RIGHT id2 OK; LEFT id1 OK
 [PAD] Bluepad32 ready ...
 ```
 
-Driver communication errors print per-driver `COMM ERROR` messages. They do not halt setup. IMU initialization failure does halt setup.
+Missing motor replies block normal arming. Mode loss, faults or link timeout
+while balancing disarm. IMU initialization failure halts setup.
 
-Send `P?` to inspect the live settings. `PL` reloads NVS and applies driver tuning after initialization. `PD` restores defaults in RAM; `PS` persists the current settings.
+`P?` streams settings incrementally. `PL`, `PD` and `PS` require stopped motors,
+as do mode/direction/feedback-source changes. The old stepper namespaces and
+checkpoint are historical data and are not applied to BLDC motor settings.
 
 ## Gamepad pairing
 
@@ -136,5 +139,5 @@ Torch starts off with a compiled preset of 25%. `_torchApply()` clamps duty to t
 - [Serial protocol](PROTOCOL.md)
 - [Module map](system_architecture.md)
 - [Control theory](../../docs/BaseLink/PID_Theory_and_Math.md)
-- [Configuration and tuning](../../docs/BaseLink/Config_and_Tuning_Guide.md)
+- [BLDC configuration and decisions](../../docs/BLDC_V4.md)
 - [Troubleshooting](../../docs/BaseLink/Troubleshooting_Guide.md)

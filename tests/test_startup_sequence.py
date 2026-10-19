@@ -8,7 +8,7 @@ def test_all_sensor_dependent_setup_occurs_after_host_wait():
     source = (ROOT / "firmware/BaseLink/BaseLink.ino").read_text()
     setup = source[source.index("void setup() {"):source.index("void loop() {")]
     waiting = setup.index("waitForHostStartup();")
-    for call in ("leds_begin();", "imu.begin()", "steppers.begin()", "delay(STARTUP_SETTLE_MS)",
+    for call in ("leds_begin();", "imu.begin()", "hub.begin()", "delay(STARTUP_SETTLE_MS)",
                  "imu.calibrateGyro()", "btgamepad_begin();", "payload_begin();"):
         assert setup.index(call) > waiting, call
     assert setup.index("params_dump();") < waiting

@@ -1,5 +1,10 @@
 # Latest compiled-build reflashing
 
+v4 builds declare `hardware=m0601-rs485`, `parameter_schema=bldc-v4` and
+firmware capability `HUBSCHEMA=4`. Automatic reflashing requires the matching
+schema; first BLDC installation does not restore stepper/experimental tuning.
+See [BLDC commissioning and persistence](BLDC_V4.md).
+
 Android: **Setup → Controller firmware → Reflash latest compiled firmware**.
 Browser: `http://10.42.0.1:8080/ui/firmware.html`.
 

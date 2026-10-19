@@ -41,7 +41,7 @@
 #define AT_WOBBLE_TARGET   0.45f   // deg RMS considered "settled"
 #define AT_TRIM_WINDOW     4000    // ms of averaging
 #define AT_TRIM_PASSES     3
-#define AT_STALL_STEP      250.0f  // usteps/s per ramp tick
+#define AT_STALL_STEP      400.0f  // encoder counts/s per ramp tick
 #define AT_STALL_TICK      120     // ms between ramp ticks
 #define AT_TIMEOUT_MS      45000UL
 
@@ -79,7 +79,7 @@ inline void at_say(const char* fmt, ...) {
 inline void at_restore(const char* why) {
     if (AT.mode == AT_WOBBLE) { P.k3 = AT.k3_0; P.k4 = AT.k4_0; }
     if (AT.mode == AT_TRIM)   { P.pitchTrim = AT.trim_0; }
-    if (AT.mode == AT_STALL)  { at_setWheelSpeed(0); at_motorsOff(); P.maxSpdSt = AT.spd_0; }
+    if (AT.mode == AT_STALL)  { at_setWheelSpeed(0); at_motorsOff(); P.maxSpdSt = AT.spd_0; params_recompute(); }
     at_say("abort,%s", why);
     AT.mode = AT_IDLE;
 }
@@ -175,7 +175,7 @@ inline void at_update(float dt) {
         }
         break;
 
-    // ---------- STALL: ramp until the encoders stop following ----------
+    // ---------- STALL: legacy command name, now measures BLDC free speed ----------
     case AT_STALL: {
         if (now - AT.tWin < AT_STALL_TICK) return;
         AT.tWin = now;
@@ -184,15 +184,15 @@ inline void at_update(float dt) {
         float expected = AT.ramp / P.stepsPerM;          // m/s the wheels should do
         float actual   = fabsf(velF);
         at_say("stall,cmd,%.0f,expect,%.2f,actual,%.2f", AT.ramp, expected, actual);
-        if (AT.ramp > 400 && actual < expected * 0.70f) {
-            float safe = AT.ramp * 0.80f;
-            params_set("MAXSPD", safe, true);
+        if (AT.ramp > 800 && actual < expected * 0.85f) {
+            float measured = actual * P.countsPerM;
+            if (actual < .05f) { at_restore("wheel did not follow -- check motor feedback/polarity"); return; }
+            params_set("MAXSPD", measured, true);
             char s[96];
-            snprintf(s, sizeof(s), "stalled at %.0f usteps/s -> MAXSPD set to %.0f (80%%)",
-                     AT.ramp, safe);
+            snprintf(s, sizeof(s), "free speed %.2f m/s -> MAXSPD %.0f counts/s", actual, measured);
             at_finish(s); return;
         }
-        if (AT.ramp >= P.maxSpdSt * 1.6f || AT.ramp > 14000) {
+        if (AT.ramp > 25000) {
             at_finish("no stall found within the search range");
             return;
         }

@@ -9,16 +9,16 @@
 [![Python Lint](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml)
 [![Docs Check](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml)
 
-2PyBot is an ESP32 self-balancing robot with NEMA 17 steppers, TMC2226 drivers, MT6816 wheel encoders, and an ISM6HG256X IMU. The firmware uses **LQR/LQI state feedback** for balance and position hold. An EVOFOX One S gamepad pairs directly through Bluepad32. USB serial carries host drive commands, telemetry, and parameter tuning.
+2PyBot v4.0.0 is an ESP32 self-balancing robot with two M0601 RS485 BLDC hub motors, integrated wheel feedback, and an ISM6HG256X IMU. The firmware uses **LQR/LQI state feedback** for balance and position hold. An EVOFOX One S gamepad pairs directly through Bluepad32. USB serial carries host drive commands, telemetry, and parameter tuning. See the [BLDC integration notes](docs/BLDC_V4.md) for wiring, polarity and turning changes.
 
 ## Current firmware
 
 - 200 Hz control loop using pitch, pitch rate, wheel position, velocity, and position integral.
-- 20 kHz timer ISR for STEP/DIR pulses; hardware PCNT for encoder counts.
+- One RS485 UART per wheel, with current control and absolute-position feedback.
 - Encoder-differential heading hold and slew-limited steering.
 - Normal hold, stiff hold, velocity tracking, and climb reference tracking.
 - Terrain roughness, airborne, and landing detection with pitch-gain softening.
-- 107 runtime parameters with per-value bounds and NVS save/load.
+- Metadata-driven runtime parameters with bounded writes and separate BLDC NVS storage.
 - Auto-tuning routines for wobble, trim, radius, and stall speed, with current limitations documented in the tuning guide.
 - WS2812 status ring, camera pan/zoom servos, and PWM torch.
 
@@ -28,7 +28,7 @@ The gamepad's left stick drives and steers. The right stick pans and zooms the c
 
 Fresh host `V,<forward>,<steering>,<enable>` commands take priority over gamepad driving. `V` commands do not arm the robot. Use gamepad START or serial `E`. With no fresh input, drive commands become zero and balancing continues.
 
-USB serial runs at **460800 baud**. The firmware emits `O` odometry at 50 Hz and `D` debug telemetry at a nominal 100 Hz. Debug starts enabled; `L` toggles it. See the [serial protocol](firmware/BaseLink/PROTOCOL.md) for fields and commands.
+USB serial runs at **460800 baud**. The firmware emits `O` odometry and `D` debug telemetry at nominal 50 Hz, plus `HM` motor feedback at 10 Hz. Debug starts enabled; `L` toggles it. See the [serial protocol](firmware/BaseLink/PROTOCOL.md) for fields and commands.
 
 ## Repository layout
 
@@ -42,7 +42,9 @@ firmware/
     terrain.h               Roughness, airborne, and landing detection
     bt_gamepad.h            Bluepad32 input mapping
     imu_sensor.h / .cpp      Mahony attitude estimation
-    stepper_control.h / .cpp TMC2226 configuration, PCNT, step ISR
+    m0601.h / .cpp           RS485 framing, CRC and reply ownership
+    hub_drive.h / .cpp       Two hub motors, feedback and mode handshake
+    hub_control.h           Balance-priority common/turn current control
     led_ring.h / .cpp        WS2812 status display
     payload.h               Camera servos and torch
   Controller/               Legacy ESP-NOW joystick transmitter
@@ -70,9 +72,9 @@ assets/                     Project media
 3. Open `firmware/BaseLink/BaseLink.ino`, review the pin assignments in `config.h`, and flash.
 4. Open USB serial at 460800 baud with newline termination. Check the IMU and driver boot messages, then send `P?` to inspect loaded parameters.
 5. Pair the EVOFOX One S in Home+B mode. Leave both sticks centered while calibration completes.
-6. Verify motor and sensor signs using the [configuration guide](docs/BaseLink/Config_and_Tuning_Guide.md), then request arming while upright.
+6. Use the [v4 hardware guide](docs/BLDC_V4.md) for the BLDC pin map, confirmed polarity, parameter schema and offline verification.
 
-Saved NVS parameters take precedence over compiled defaults. `PD` restores defaults in RAM; `PS` saves them.
+Saved v4 NVS parameters take precedence over compiled defaults in `2pybot-bldc4`. `PD` restores defaults in RAM; `PS` saves them with motors stopped. `ISGN` and `RPMSGN` are fixed at -1; `HUBVSRC` defaults to 1.
 
 ## Host software status
 
@@ -90,7 +92,7 @@ The current console package was imported from the Cubie A7A. See its [setup and 
 
 Local revision **3.9.0** adds a [predictive fall-prevention reference governor](docs/diagnostics/fall-prevention.md) with full recovery feedback and balance-priority steering allocation. Its read-only monitor is `/ui/drive-monitor.html`; a repeat physical reversal test is needed to measure fall reduction.
 Local revision **3.10.0** adds [automatic load-aware climb](docs/diagnostics/auto-climb.md), gradual controller handover and a fix for mild-recovery integral washout. Automatic/manual controls are at `/ui/auto-climb.html`; the recorder includes actual climb-integral and detector state.
-Current development revision **3.40.0** fixes Routes landscape rendering in the [adaptive Android cockpit](docs/ANDROID_COCKPIT_DESIGN.md), with a compact landscape rail, larger driving/video views and direct **Routes** access. [Route autopilot](docs/ROUTE_AUTOPILOT.md) replays newly taught speed/turn commands with original timing. [Compiled-build reflashing](docs/FIRMWARE_REFLASH.md) is under **More → Setup → Controller firmware**. [Revision numbers](docs/VERSIONING.md) advance by ten: 3.20.0, 3.30.0, 3.40.0. [Camera stabilisation](docs/CAMERA_STABILISATION.md) covers the proposed pitch gimbal and isolated sensor pod.
+Current development revision **4.0.0** replaces the stepper drive with [M0601 BLDC hubs](docs/BLDC_V4.md). It retains the [adaptive Android cockpit](docs/ANDROID_COCKPIT_DESIGN.md) and [route autopilot](docs/ROUTE_AUTOPILOT.md). [Compiled-build reflashing](docs/FIRMWARE_REFLASH.md) is under **More → Setup → Controller firmware**; its tuning-restore path requires a matching hardware schema. [Camera stabilisation](docs/CAMERA_STABILISATION.md) covers the proposed pitch gimbal and isolated sensor pod.
 
 [Boot coordination](scripts/radxa/BOOT_COORDINATION.md) holds the ESP32's USB reset until the Radxa camera, API and hotspot are ready, then releases a firmware startup interlock. A deliberate local START request is still required. [Printed mass and LQI calculations](hardware/dynamics/README.md) contain re-sliced estimates and updated estimated gains validated against geometry, filtering, latency and acceleration limits.
 
@@ -129,9 +131,9 @@ The console runs from `/home/radxa/projects/2PyBot`. After `git pull --ff-only`,
 | Component | Configuration |
 | :--- | :--- |
 | Robot controller | ESP32 DevKit |
-| Wheel drive | Two NEMA 17 motors, TMC2226 drivers, 1/8 microsteps |
-| Wheel feedback | MT6816 quadrature encoders, 4096 counts/revolution |
-| Wheel radius | 0.050 m compiled default |
+| Wheel drive | Two M0601 BLDC hubs, independent RS485 UARTs, current mode |
+| Wheel feedback | Integrated absolute position; internal 4096-count/revolution units |
+| Wheel radius | 0.052 m compiled default |
 | Attitude | ISM6HG256X accelerometer/gyro, Mahony filter |
 | Compass | QMC5883L, tilt-compensated yaw telemetry |
 | Gamepad | EVOFOX One S through Bluepad32 |

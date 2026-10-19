@@ -28,8 +28,8 @@ import `in`.twopybot.app.vm.BotViewModel
 private val HINTS = mapOf(
     "BALANCE" to "LQR/LQI gains. K4 is gyro-rate damping and its SIGN is the most " +
         "dangerous value on the robot. Change one gain at a time and watch the attitude gauge.",
-    "STEPPER" to "Geometry and driver limits. WHEELR is the LOADED rolling radius — " +
-        "measure it, don't halve the moulded diameter.",
+    "MOTOR" to "M0601 BLDC geometry, common/turn current loops and speed limits. " +
+        "ISGN and RPMSGN are fixed at -1. Stop before saving or changing motor mode/direction.",
     "DRIVE"   to "Speed scaling and stick shaping. SNAPIN is the cone around straight-ahead " +
         "where steering is forced to zero.",
     "YAW"     to "Differential steering and heading hold. YAWKP/YAWKD act on encoder counts, " +
@@ -92,7 +92,7 @@ fun TuneScreen(vm: BotViewModel) {
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 item {
                     Section(sel, HINTS[sel]) {
-                        if (derived.isNotEmpty() && (sel == "STEPPER" || sel == "BALANCE")) {
+                        if (derived.isNotEmpty() && (sel == "MOTOR" || sel == "BALANCE")) {
                             Text(derived.entries.joinToString("   ") {
                                 "${it.key} ${"%.1f".format(it.value)}" },
                                 style = Mono.copy(fontSize = 11.sp), color = Cyan)

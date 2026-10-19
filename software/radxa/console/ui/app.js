@@ -63,12 +63,13 @@ export function renderGroup(el, group, opts = {}) {
   for (const p of list) {
     const row = document.createElement('div');
     row.className = 'row';
-    const step = (p.hi - p.lo) / 500;
+    const step = p.hi > p.lo ? (p.hi - p.lo) / 500 : 1;
     row.innerHTML = `
       <label>${p.key}<small>${p.desc}</small></label>
       <input type=range min=${p.lo} max=${p.hi} step=${step} value=${p.value}>
       <input type=number min=${p.lo} max=${p.hi} step=${step} value=${fmt(p.value)}>`;
     const [rng, num] = row.querySelectorAll('input');
+    rng.disabled = num.disabled = p.lo === p.hi;
 
     const push = async (v) => {
       v = Math.min(p.hi, Math.max(p.lo, Number(v)));
@@ -199,7 +200,7 @@ function paintHeader() {
 }
 
 // ---------------- boot ----------------
-const TAB_FILES = ['telemetry', 'vision', 'camera', 'calibration', 'objects', 'balance', 'stepper', 'drive', 'yaw',
+const TAB_FILES = ['telemetry', 'vision', 'camera', 'calibration', 'objects', 'balance', 'motor', 'drive', 'yaw',
                    'safety', 'imu', 'climb', 'led', 'payload', 'console'];
 
 (async function boot() {

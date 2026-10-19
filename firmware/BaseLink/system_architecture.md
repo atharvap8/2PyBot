@@ -11,7 +11,9 @@ The full [system architecture](../../docs/BaseLink/System_Architecture.md) descr
 | `autotune.h` | Wobble, trim, radius, and stall-search state machine |
 | `terrain.h` | Roughness filter, airborne/landing states, gain multiplier |
 | `imu_sensor.h` / `imu_sensor.cpp` | ISM6HG256X reads, gyro calibration, six-axis Mahony, filtered pitch, compass yaw |
-| `stepper_control.h` / `stepper_control.cpp` | TMC2226 UART setup, live driver tuning, PCNT encoder reads, 20 kHz STEP/DIR ISR |
+| `m0601.h` / `m0601.cpp` | RS485 wire frames, CRC, single-outstanding-request parsing and resynchronisation |
+| `hub_drive.h` / `hub_drive.cpp` | Two hub motors, position feedback, current-mode handshake and transmission |
+| `hub_control.h` | Common/differential current control, balance-priority allocation and slew-limited steering |
 | `bt_gamepad.h` | Bluepad32 pairing, stick shaping/calibration, button events, payload input |
 | `led_ring.h` / `led_ring.cpp` | RMT-driven WS2812 status patterns |
 | `payload.h` | LEDC pan/zoom servo pulses and torch brightness |
@@ -20,7 +22,7 @@ The full [system architecture](../../docs/BaseLink/System_Architecture.md) descr
 ## Interfaces
 
 - `IMUSensor` supplies pitch, gyro pitch rate, acceleration, and yaw.
-- `StepperControl` supplies encoder counts and accepts signed left/right step rates.
+- `HubDrive` supplies forward-positive encoder counts and accepts signed left/right count rates.
 - `P` supplies the live settings used by control and peripheral code.
 - `btgamepad_takeEnableEvent()` supplies START/SELECT events independently of drive priority.
 - `terrain_soften()` supplies the pitch-gain multiplier; `terrain_airborne()` gates integral accumulation.

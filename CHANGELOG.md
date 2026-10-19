@@ -3,6 +3,21 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.0.0 — M0601 BLDC hardware
+
+- Replace STEP/DIR, TMC2226 and PCNT wheel drivers with independent M0601
+  RS485 links using the supplied hub firmware pin map and encoder units.
+- Set confirmed ISGN/RPMSGN to -1 and default HUBVSRC to 1. Retain supplied
+  straight-line/balance gains and limits.
+- Separate balance/turn current, reserve balance current first, remove steering
+  acceleration from common feed-forward, and slew heading hold/turn release.
+- Default full-stick yaw to 1.5 rad/s instead of the supplied ~7.7 rad/s.
+- Track one request per UART, resynchronise late replies, and keep temperature
+  queries out of armed position feedback. Stream parameter dumps without
+  blocking control; keep NVS and drive-mode changes to stopped motors.
+- Add a separate BLDC NVS namespace and update-image hardware schema, a MOTOR
+  tuning group, hub telemetry parsing and offline C++ regression checks.
+
 ## 3.40.0 — Routes landscape rendering fix
 
 - Preserve the active workspace when switching between the bottom bar and rail,

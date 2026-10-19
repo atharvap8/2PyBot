@@ -14,7 +14,7 @@ import urllib.request
 
 import serial
 
-from .firmware import ROOT, HEARTBEAT, atomic_json, inspect_image, load_build, read_json
+from .firmware import ROOT, HEARTBEAT, atomic_json, inspect_image, load_build, read_json, hardware_mismatch
 
 API=os.environ.get("BOT_FIRMWARE_API","http://127.0.0.1:8080")
 ESPTOOL=os.environ.get("BOT_ESPTOOL_PYTHON","/home/radxa/tools/2pybot-flasher/bin/python3")
@@ -175,6 +175,8 @@ class Worker:
             self.progress("checking",5,"Checking selected compiled image",status="running")
             if time.time()-request["created_at"]>120:raise RuntimeError("Queued firmware request expired before execution")
             image=self.folder/"selected.bin";build=request["build"]
+            mismatch=hardware_mismatch(build,snapshot.get("derived",{}))
+            if mismatch:raise RuntimeError(mismatch)
             if inspect_image(image)["sha256"]!=build["sha256"]:raise RuntimeError("Selected application changed")
             # Pause acknowledgement was obtained by the API before queuing.
             live=api("/api/status")

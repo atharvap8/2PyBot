@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 // Reference governor, not a replacement for LQR and not a wheel-velocity stop.
-// Fixed initial settings preserve the existing 107 NVS parameters/gain values.
+// Operator-reference shaping is separate from physical balance acceleration.
 struct FallPrevention {
     enum Reason : uint8_t { SHAPING=1, REVERSAL=2, RECOVERY=4, SPEED_MARGIN=8, AIRBORNE=16, YAW_LIMIT=32 };
     float operatorRef = 0.0f;

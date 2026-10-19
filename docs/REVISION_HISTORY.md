@@ -34,7 +34,8 @@ A dash means the change did not have a separate release version.
 | 22 | Added ONNX object detection with a corrected viewer, filters and temporary tracks. Validated real fisheye lens calibration. | 3.8.0 (local) | 12 Oct 2026 |
 | 23 | Recorded reversal failures and added a predictive reference governor, full recovery feedback and wheel-headroom steering allocation. | 3.9.0 (local) | 13 Oct 2026 |
 
-Current development numbering advances **3.10.0 → 3.20.0 → 3.30.0**.
+Current development is **4.0.0**, the [M0601 BLDC hardware integration](BLDC_V4.md).
+The v3 development sequence advanced **3.10.0 → 3.20.0 → 3.30.0 → 3.40.0**.
 Post-3.10 local prototype changes are consolidated into 3.20.0; historical
 artifact identifiers stay intact for traceability. See [version policy](VERSIONING.md).
 

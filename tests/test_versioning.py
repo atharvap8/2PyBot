@@ -8,7 +8,7 @@ versioning=importlib.import_module("console.versioning")
 
 
 @pytest.mark.parametrize("current,next_value",[("3.9.0","3.10.0"),("3.10.0","3.20.0"),
-    ("3.20.0","3.30.0"),("3.30.0","3.40.0"),("3.90.0","3.100.0")])
+    ("3.20.0","3.30.0"),("3.30.0","3.40.0"),("3.90.0","3.100.0"),("4.0.0","4.1.0")])
 def test_requested_revision_sequence(current,next_value):
     assert versioning.next_revision(current)==next_value
 

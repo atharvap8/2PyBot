@@ -3,7 +3,6 @@ import importlib
 import math
 from pathlib import Path
 import sys
-import time
 
 import pytest
 
@@ -108,16 +107,17 @@ def test_explicit_start_starts_lease_not_arming_and_depth_does_not_hold(tmp_path
     assert m.mission["state"]=="running"
     for _ in range(25):step(m,link,clock)
     assert m.mission["state"]=="running" and m.mission["command_v"]>0
+    link.debug["terrainState"]=2;step(m,link,clock)
+    assert m.mission["state"]=="running" # advisory airborne state does not revoke a native lease
 
 
-@pytest.mark.parametrize("fault",["supervisor","takeover","pose_reset","disarm","airborne"])
+@pytest.mark.parametrize("fault",["supervisor","takeover","pose_reset","disarm"])
 def test_faults_pause_or_abort_without_remote_arm(tmp_path,fault):
     m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]))
     if fault=="supervisor":step(m,link,clock,3.1,False)
     elif fault=="takeover":link.nav["state"]=3;step(m,link,clock)
     elif fault=="pose_reset":link.pose_epoch+=1;step(m,link,clock)
     elif fault=="disarm":link.tel["balancing"]=False;step(m,link,clock)
-    else:link.debug["terrainState"]=2;step(m,link,clock)
     assert m.mission["state"] in ("paused","aborted") and m.mission["command_v"]==0
     assert not any(line=="E" for line in link.sent)
 

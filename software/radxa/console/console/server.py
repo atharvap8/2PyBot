@@ -4,7 +4,7 @@ that runs on the Radxa's own hotspot, and the Android app.
 
 Everything the app needs is here; the GUI is just the first consumer.
 """
-import asyncio, json, os, time
+import asyncio, json, os
 import copy
 import hashlib
 from typing import Optional
@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import HTTP_PORT, STREAM_NAME, SNAPSHOT_PATH
+from .config import HTTP_PORT, SNAPSHOT_PATH
 from .readiness import HOTSPOT_ADDRESS, publish_ready, readiness
 from .serial_link import link
 from .tof import tof
@@ -68,7 +68,7 @@ def firmware_snapshot():
         intrinsics=calibration.folder(identifier)/"intrinsics.json"
         files[str(intrinsics)]=hashlib.sha256(intrinsics.read_bytes()).hexdigest()
     native=camera.native_camera.status() or {}
-    return {"params":link.params_list(),"debug":dict(link.debug),"telemetry":copy.deepcopy(link.tel),
+    return {"params":link.params_list(),"derived":dict(link.derived),"debug":dict(link.debug),"telemetry":copy.deepcopy(link.tel),
             "camera_profile":native.get("colour_profile"),"calibration":files}
 
 

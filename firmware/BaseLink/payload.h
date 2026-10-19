@@ -17,14 +17,13 @@
  *  20 kHz is above the audible range and far above any camera
  *  shutter, so the light does not band on video.
  *
- *  None of this touches the 20 kHz stepper ISR: LEDC is separate
- *  silicon from the general purpose timer that drives the steppers,
- *  and every call below is a register write with no busy waiting.
+ *  LEDC PWM is independent of the hub UARTs and balance loop.
+ *  Every call below is a register write with no busy waiting.
  *
  *  THE TORCH DUTY IS HARD CAPPED. Every path to the hardware goes
  *  through _torchApply(), which clamps to TORCH_MAX_PCT, and the
  *  #error below refuses to build if that constant is ever raised
- *  past 50. Serial and pad input cannot get around either one.
+ *  past 90. Serial and pad input cannot get around either one.
  * ============================================================
  */
 
@@ -132,7 +131,7 @@ inline void payload_begin() {
                   SERVO_YAW_PIN, SERVO_ZOOM_PIN,
                   (float)P.svYawHome, (float)P.svZoomHome);
     Serial.printf("[PAY] Torch GPIO%d off, %d%% preset, HARD CAP %d%% duty @ %d kHz\n",
-                  TORCH_PIN, P.torchBoot, TORCH_MAX_PCT, TORCH_PWM_HZ / 1000);
+                  TORCH_PIN, (int)P.torchBoot, TORCH_MAX_PCT, TORCH_PWM_HZ / 1000);
 
     // Diagnostic: sample the zoom pin as an input before LEDC took it.
     // GPIO 12 must read LOW at reset or the chip picks the wrong flash

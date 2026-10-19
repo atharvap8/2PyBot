@@ -54,6 +54,7 @@ class SerialLink:
             "stale": True,
         }
         self.debug = {}                       # latest D-line fields
+        self.hub = {}                         # HM: raw motor feedback + forward-frame commands
         self.path = collections.deque(maxlen=3000)   # (x, y) for the map
         self._pose = [0.0, 0.0, 0.0]          # x, y, theta (rad)
         self._prev_enc = None
@@ -76,6 +77,7 @@ class SerialLink:
         self.tel["v_ms"] = 0.0
         self._release_flash_lock = True
         self.derived.clear()
+        self.hub.clear()
         self.tel["host_ready"] = False
         self.connected = True
         self._log(f"[console] opened {SERIAL_PORT} @ {SERIAL_BAUD}")
@@ -254,6 +256,18 @@ class SerialLink:
                          "dsActive", "dsGoal", "acOverspeed"]
                 self.debug = {n: float(x) for n, x in zip(names, f) if x not in ("", None)}
                 self.tel["balancing"] = bool(self.debug.get("bal", 0))
+                return
+
+            if line.startswith("HM,"):
+                fields=line.split(",")[1:]
+                if len(fields)!=14:return
+                values=[float(value) for value in fields]
+                if not all(math.isfinite(value) for value in values):return
+                names=("ms","current_cmd_l","current_cmd_r","current_l","current_r","rpm_l","rpm_r",
+                       "temp_l","temp_r","fault_l","fault_r","saturated","link_ok","mode_ok")
+                self.hub=dict(zip(names,values))
+                self.hub["received_monotonic"]=time.monotonic()
+                self.tel["hub"]=self.hub
                 return
 
             if line.startswith("P#,"):

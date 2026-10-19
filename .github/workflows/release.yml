@@ -34,7 +34,6 @@ jobs:
 
       - name: Install BaseLink libraries
         run: |
-          arduino-cli lib install "TMCStepper@0.7.3"
           arduino-cli lib install "STM32duino ISM6HG256X@2.1.0"
           arduino-cli lib install "QMC5883LCompass@1.2.3"
           arduino-cli lib install "NeoPixelBus by Makuna@2.8.4"
@@ -127,7 +126,7 @@ jobs:
             [Terrain sessions](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/terrain-sessions.md).
 
             BaseLink uses ESP32 LQR/LQI control, direct Bluepad32 gamepad input,
-            TMC2226 drivers, runtime parameters, terrain adaptation, and camera payload controls.
+            M0601 RS485 BLDC hubs, runtime parameters, terrain adaptation, and camera payload controls.
 
             ### Firmware outputs
 
