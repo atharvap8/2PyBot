@@ -103,6 +103,25 @@ def test_host_readiness_is_required_before_controller_lock(tmp_path):
     assert not link.began
 
 
+def test_manager_created_before_api_loop_serializes_competing_maintenance_requests(tmp_path):
+    m,link=manager(tmp_path/'state')
+    link.params_list=lambda:[{'key':'CURRENT','value':1500.0},{'key':'BOOTWAIT','value':1}]
+    async def scenario():
+        began=asyncio.Event();finish=asyncio.Event()
+        async def hold():
+            began.set();await finish.wait();link.hold_for_firmware()
+        link.begin_firmware_maintenance=hold
+        first=asyncio.create_task(m.acquire_deployment('a'*32,'b'*40))
+        await began.wait()
+        second=asyncio.create_task(m.acquire_deployment('c'*32,'b'*40))
+        await asyncio.sleep(0)
+        finish.set()
+        assert (await first)['token']=='a'*32
+        with pytest.raises(ValueError,match='Another deployment'):await second
+        assert m.deployment_hold()['token']=='a'*32 and link._serial_paused
+    asyncio.run(scenario())
+
+
 class FakeController:
     def __init__(self,log):self.port=SimpleNamespace(rts=False)
     def initialize_locked(self):pass

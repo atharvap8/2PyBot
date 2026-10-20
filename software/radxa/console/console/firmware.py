@@ -109,11 +109,18 @@ def hardware_mismatch(manifest,derived):
 class FirmwareManager:
     def __init__(self,link,snapshot,root=ROOT,heartbeat=HEARTBEAT,clock=time.time,host_ready=lambda:True):
         self.link=link;self.snapshot=snapshot;self.root=Path(root);self.heartbeat=Path(heartbeat);self.clock=clock
-        self.lock=asyncio.Lock();self.preparing=False
+        self._lock=None;self.preparing=False
         self.host_ready=host_ready
         self.deployment_hold_path=self.root/"deployment-hold.json"
         job=read_json(self.root/"current.json",{})
         if job.get("status") in HOLD or self.deployment_hold():self.link.hold_for_firmware()
+
+    @property
+    def lock(self):
+        # Python 3.9 binds Lock at construction. The manager is also created
+        # during imports, before the API's running loop necessarily exists.
+        if self._lock is None:self._lock=asyncio.Lock()
+        return self._lock
 
     def job(self):return read_json(self.root/"current.json",{})
     def deployment_hold(self):return read_json(self.deployment_hold_path,{})
