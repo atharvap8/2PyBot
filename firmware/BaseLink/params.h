@@ -61,7 +61,7 @@
   X(motorMa,   "CURRENT", MOTOR_CURRENT_MA,  300.0f,MOTOR_CURRENT_MAX_MA,"MOTOR","per-motor torque current limit (mA)") \
   X(supplyV,   "SUPPLYV", SUPPLY_V,            7.0f, 24.0f,"MOTOR", "configured supply; speed estimate only (V)") \
   X(freeRpm,   "FREERPM", 0.0f,               0.0f,500.0f,"MOTOR", "measured free speed; 0 = voltage estimate (rpm)") \
-  X(spdHead,   "SPDHEAD", SPEED_HEADROOM,      0.30f, 1.0f,"MOTOR", "full-stick share of free speed kept for balance") \
+  X(spdHead,   "SPDHEAD", SPEED_HEADROOM,      0.30f, 1.0f,"MOTOR", "legacy compatibility only; no drive cap") \
   X(drvMode,   "DRVMODE", HUB_DRIVE_MODE,      0.0f,  1.0f,"MOTOR", "1 current balance; 0 bench velocity") \
   X(hubKp,     "HUBKP",   HUB_KP,              0.0f, 40.0f,"MOTOR", "common velocity P (A per m/s)") \
   X(hubKi,     "HUBKI",   HUB_KI,              0.0f,100.0f,"MOTOR", "common velocity I (A per m)")   \
@@ -186,7 +186,7 @@ struct Params {
     // ---- derived, never set directly ----
     float stepsPerM, countsPerM, vMax, aMax;
     float vNoLoad, maxSpdEff;
-    float driveVEff;  // m/s actually used for full stick: min(DRIVEV, SPDHEAD*free speed, MAXSPD)
+    float driveVEff;  // full stick follows DRIVEV; only an explicit nonzero MAXSPD limits it
 };
 
 struct ParamMeta {

@@ -22,6 +22,15 @@ struct FallPrevention {
     static float score(float value, float warn, float critical) { return clip((value-warn)/(critical-warn),0.0f,1.0f); }
     void reset() { *this = FallPrevention(); }
 
+    // Diagnostic/unrestricted mode: direct operator target, no slew, risk-based
+    // reference cancellation or predictive steering reduction. Hard stops live
+    // in the main state machine and motor transport, independently of this.
+    void directReference(float requested,float pitchDegrees,float rateDps) {
+        reset();operatorRef=effectiveRef=requested;
+        predictedTilt=std::fmax(std::fabs(pitchDegrees),std::fabs(pitchDegrees+.08f*rateDps));
+        fullBalanceFeedback=std::fabs(pitchDegrees)>=6 || std::fabs(rateDps)>=40;
+    }
+
     void update(float requested, float measuredVelocity, float pitchDegrees, float rateDps,
                 float commonCommandVelocity, float maximumVelocity, float maximumAcceleration,
                 float maximumTilt, float dt, bool airborne) {

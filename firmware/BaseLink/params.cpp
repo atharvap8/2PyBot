@@ -37,12 +37,9 @@ void params_recompute() {
     P.maxSpdEff  = P.maxSpdSt; // zero means no firmware speed ceiling
     P.vMax       = P.maxSpdEff / P.countsPerM;
     P.aMax       = P.motAccel  / P.stepsPerM;
-    // Balancing needs spare wheel speed to catch a forward lean. A reference
-    // at (or above) the motor's free speed leaves zero catch torque: that is
-    // exactly the captured full-stick FELL at 0.725 m/s. Full stick therefore
-    // maps to SPDHEAD of the free speed (measured FREERPM when available).
-    // Raise the supply voltage or measure FREERPM to go faster.
-    float drive = fminf(P.maxDriveV, P.spdHead * P.vNoLoad);
+    // DRIVEV is the operator's full-stick target. Estimated/measured free
+    // speed and legacy SPDHEAD are informational, never hidden drive clamps.
+    float drive = P.maxDriveV;
     if (P.vMax > 0) drive = fminf(drive, P.vMax);
     P.driveVEff  = fmaxf(0.05f, drive);
 }
@@ -128,7 +125,7 @@ void params_service() {
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
         "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,1,1,1,1,1,P.driveVEff,1};
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

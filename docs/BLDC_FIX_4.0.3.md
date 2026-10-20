@@ -1,5 +1,10 @@
 # BLDC 4.0.3 — analysis and fix (2026-10-20)
 
+**Historical proposal:** the free-speed/torque explanation below was a model
+hypothesis, not an established cause of the hardware falls. The current branch
+removes its SPDHEAD-derived stick-speed cap and bypasses the predictive reference
+governor for the requested unrestricted diagnostic. See `DEVELOPMENT_SOP.md`.
+
 Status: **source fixed and native checks pass. Not flashed, not physically tested.**
 This session had no shell on the PC and could not reach the bot (10.42.0.1 is
 only reachable from your LAN), so nothing was built for the ESP32, flashed or armed.

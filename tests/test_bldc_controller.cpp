@@ -28,7 +28,8 @@ DescentGuard descentGuard;
 NavigationLease navigation;
 hub_control::Steering yawControl;
 bool terrain_airborne() { return false; }
-float terrain_soften() { return 1; }
+float testTerrainScale=1;
+float terrain_soften() { return testTerrainScale; }
 float clampf(float value,float lo,float hi) { return hub_control::clip(value,lo,hi); }
 bool params_motionActive() { return false; }
 void params_applyHardware(bool) { hub.applyTuning(); }
@@ -44,11 +45,15 @@ void reset() {
 }
 int main() {
     // Exact pre-fall snapshots from the supervised 2026-10-20 capture.
-    // v4.0.3: full stick is DRIVEV limited to SPDHEAD x free speed, so the
-    // reference no longer sits at the motor's free speed with no catch margin.
+    // Full stick follows DRIVEV even above the informational free-speed estimate.
     const float captured[][4]={{1653867,.602f,3.91f,48.4f},{1654079,.633f,15.2f,130.9f},{1666810,.752f,6.68f,6.8f}};
     reset();
-    assert(P.driveVEff<P.vNoLoad*.71f && P.driveVEff>P.vNoLoad*.69f && P.maxDriveV==1);
+    assert(P.driveVEff==1 && P.driveVEff>P.vNoLoad && P.maxDriveV==1);
+    cmdFwd=1;runController(.005f);
+    assert(fallPrevention.operatorRef==1 && fallPrevention.effectiveRef==1);
+    assert(fallPrevention.steeringScale==1 && !fallPrevention.recovering);
+    pitchF=25;rateF=100;runController(.005f);
+    assert(fallPrevention.effectiveRef==1 && fallPrevention.steeringScale==1);
     for(const auto& sample:captured) {
         reset();cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=sample[1];pitchF=sample[2];rateF=sample[3];vCmd=.7253f;
         runController(.005f);
@@ -64,7 +69,7 @@ int main() {
     cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=1.2f;vCmd=1.2f;
     runController(.005f);
     assert(vCmd>1.2f); // balance is still free to outrun the stick reference
-    // Measured free speed raises the real top speed; DRIVEV still bounds it.
+    // Measured free speed remains informational; DRIVEV is unchanged.
     params_set("FREERPM",300,true);
     assert(std::fabs(P.driveVEff-1.0f)<1e-5f);
     params_set("FREERPM",0,true);
@@ -82,5 +87,6 @@ int main() {
     cmdFwd=1;fallPrevention.operatorRef=1;pitchF=20;rateF=100;vCmd=.67f;
     runController(.005f);
     assert(satV && vCmd<=P.motorMa*.001f/P.hubKp+.00001f);
-    puts("BLDC production controller: speed headroom, recovery above stick speed and current-state anti-windup passed");
+    puts("BLDC production controller: direct full-stick target, predictive governor bypass and balance anti-windup passed");
+    return 0;
 }

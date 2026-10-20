@@ -146,6 +146,24 @@ instead of restarting it mid-write.
 - An interrupted, unconfirmed lock acquisition is reported for recovery, never
   interpreted as permission to unlock or drive.
 
+## Unrestricted full-stick diagnostic
+
+Normal full stick now follows `DRIVEV` directly (currently 1.00 m/s). Free-speed
+estimates and `SPDHEAD` do not reduce that target. `SPDHEAD` remains as an unused
+legacy parameter so firmware updates can restore the existing tuning snapshot.
+An explicitly configured nonzero `MAXSPD` remains an operator-selected ceiling.
+
+The predictive reference governor is bypassed: no reference slew, risk-driven
+velocity-reference cancellation or predictive steering reduction. Metadata reports
+`PR,FALLPREVENT,0`; normal-mode `PR,VDRIVE` should equal `DRIVEV`. Existing tilt/rate
+cutoffs, current limits, motor-link/fault stops and local START/SELECT stay active.
+This diagnostic change does not establish the cause of the full-speed fall.
+
+`python tools/sims/capture_control.py` only prepares/checks the recorder command;
+it performs no API reads or recording. Start it with `--go` only after the operator
+says GO. It then verifies the unrestricted firmware is live and records a fresh
+timestamped directory under `build/control-audit/`, without issuing motor commands.
+
 ## Managed hotspot band
 
 `scripts/radxa/hotspot.json` requests **2.4 GHz (`bg`), channel 6** on the existing

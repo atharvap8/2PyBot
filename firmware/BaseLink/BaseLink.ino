@@ -448,16 +448,15 @@ void runController(float dt) {
     float th = pitchF * DEG_TO_RAD;      // rad
     float om = rateF  * DEG_TO_RAD;      // rad/s
 
-    // Preserve terrain adaptation during calm motion; manoeuvre/recovery
-    // feedback takes priority when the reference governor detects a hazard.
+    // Preserve terrain adaptation and normal pitch/rate feedback. The
+    // predictive drive-reference governor is bypassed for this diagnostic.
     const bool  airborne = terrain_airborne() && P.airFreeze > 0.5f;
     const float driveScale = P.driveVEff+autoClimb.referenceBlend*(P.climbVel-P.driveVEff);
-    // Autonomy obeys the same physical speed headroom as the stick.
+    // Full-stick and autonomy targets follow DRIVEV, without free-speed derating.
     float nominalDriveV=navigation.granted?clampf(navigation.velocity,-P.driveVEff,P.driveVEff):cmdFwd*driveScale;
     requestedDriveV = navigation.granted?nominalDriveV:descentGuard.limitReference(nominalDriveV);
-    fallPrevention.update(requestedDriveV,velF,pitchF,rateF,vCmd,P.vMax,P.aMax,P.maxTilt,dt,airborne);
-    // A tighter obstacle/heartbeat reference cap takes effect immediately,
-    // rather than waiting for the normal operator-reference slew to catch up.
+    fallPrevention.directReference(requestedDriveV,pitchF,rateF);
+    // An explicitly enabled obstacle guard still takes effect immediately.
     if (!navigation.granted && tofGuard.enabled) {
         const float boundedRef = driveScale>0.0f ?
             tofGuard.apply(fallPrevention.operatorRef/driveScale,driveScale,millis())*driveScale : 0.0f;
@@ -682,8 +681,8 @@ void setup() {
     motorsRequested = false;
     btgamepad_syncArmed(false);
 
-    Serial.printf("[MAIN] countsPerM=%.0f  free=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f, SPDHEAD %.2f)  Amax=%.2f m/s^2\n",
-                  P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.spdHead, P.aMax);
+    Serial.printf("[MAIN] countsPerM=%.0f  estimatedFree=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f)  Amax=%.2f m/s^2; predictive governor OFF\n",
+                  P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.aMax);
     Serial.println("BS,READY");
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
 
