@@ -59,10 +59,12 @@ class DeploymentStatusTests(unittest.TestCase):
         self.assertGreater(sum(p[0] for p in failure),sum(p[1] for p in failure))
         self.assertGreater(sum(p[1] for p in success),sum(p[0] for p in success))
 
-    def test_flash_progress_really_fills_the_ring(self):
-        low=status.led_frame('flashing',10,0)
-        high=status.led_frame('flashing',90,0)
-        self.assertGreater(sum(sum(p) for p in high),sum(sum(p) for p in low))
+    def test_deployment_is_one_blended_spin_independent_of_progress(self):
+        start=status.led_frame('flashing',10,0)
+        self.assertEqual(start,status.led_frame('flashing',90,0))
+        self.assertEqual(start,status.led_frame('deploying',0,4))
+        self.assertNotEqual(start,status.led_frame('flashing',10,1))
+        self.assertTrue(all(sum(pixel)>0 for pixel in start))
 
 
 if __name__=='__main__':unittest.main()

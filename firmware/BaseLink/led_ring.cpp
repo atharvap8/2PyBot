@@ -3,9 +3,9 @@
  *  led_ring.cpp — personality engine for the WS2812 ring
  * ============================================================
  *  Priority (highest wins each frame):
- *    1. fall / fault      immediate red alert
- *    2. host lease        deployment status with automatic expiry
- *    3. event overlay     boot = cyan orbit, arm = green wake sweep
+ *    Host deployment lease overlays a blended spin, then expires back
+ *    to the original personality animations below. Fall events win.
+ *    1. event overlay      fall = red ouch, arm = green wake sweep
  *    2. party              any gesture -> spinning rainbow
  *    3. vision brake       Cubie override while still rolling ->
  *                          urgent red double-pulse (hazard lights)
@@ -15,7 +15,7 @@
  *                          brighter + wider with speed, orange when
  *                          reversing, arc leans into the turn
  *    6. stiff hold         determined amber breathing (fast)
- *    7. balancing idle     calm cyan breathing + forward marker,
+ *    7. balancing idle     calm cyan breathing + a random twinkle,
  *                          warm tint grows with tilt "effort"
  *    8. waiting for pickup armRequested but lying down -> green
  *                          "help me up" pulse at the front
@@ -95,10 +95,25 @@ static void hsv(float h, float s, float v, float& r, float& g, float& b) {
 
 void leds_begin() {
     ring.Begin();
-    // No half-second blocking rainbow. Setup gets a quiet cyan beacon;
-    // the running animation starts when the normal loop services the ring.
-    clearF(); arc(0,1.5f,.02f,.2f,.3f); showF();
-    eventActive=LED_EV_BOOT;eventT0=millis();
+    const uint32_t now=millis();
+    if(hostStatus.active(now)) {
+        for(int i=0;i<LED_RING_COUNT;++i)
+            deploymentPixel(hostStatus.phase,hostStatus.progress,now/1000.0f,i,LED_RING_COUNT,fr[i],fg[i],fb[i]);
+        showF();return;
+    }
+    // boot swirl: one rainbow lap, ~0.5 s, blocking is fine in setup()
+    for (int t = 0; t < LED_RING_COUNT * 2; t++) {
+        clearF();
+        for (int i = 0; i < LED_RING_COUNT; i++) {
+            float r, g, b;
+            hsv((i * 360.0f / LED_RING_COUNT) + t * 20.0f, 1.0f, 0.5f, r, g, b);
+            float fade = 0.15f + 0.85f * ((i + t) % LED_RING_COUNT) / (float)LED_RING_COUNT;
+            addF(i, r * fade, g * fade, b * fade);
+        }
+        showF();
+        delay(16);
+    }
+    clearF(); showF();
 }
 
 void leds_event(uint8_t ev) { eventActive = ev; eventT0 = millis(); }
@@ -118,9 +133,8 @@ void leds_update(const LedInputs& in) {
     padWasOn = in.padConnected;
     bool greeting = (now - padBlinkT0) < 600 && padBlinkT0 != 0;
 
-    // Real fall/fault alerts preempt host status; normal personality events do
-    // not hide deployment progress. The lease expires if the host disappears.
-    if (hostStatus.active(now) && eventActive!=LED_EV_FALL && eventActive!=LED_EV_FAULT) {
+    // The original normal animations resume when the deployment lease ends.
+    if (hostStatus.active(now) && eventActive!=LED_EV_FALL) {
         for(int i=0;i<LED_RING_COUNT;++i)
             deploymentPixel(hostStatus.phase,hostStatus.progress,t,i,LED_RING_COUNT,fr[i],fg[i],fb[i]);
         showF();return;
@@ -129,23 +143,10 @@ void leds_update(const LedInputs& in) {
     // ---------- 1. one-shot events ----------
     if (eventActive) {
         float e = (now - eventT0) / 1000.0f;
-        if (eventActive == LED_EV_FAULT) {
-            if(e<3) {
-                float pulse=.15f+.45f*(1+sinf(e*4));
-                for(int i=0;i<LED_RING_COUNT;++i)addF(i,pulse,i%4==0?pulse*.4f:0,0);
-                showF();return;
-            }
-            eventActive=0;
-        } else if (eventActive == LED_EV_BOOT) {
-            if(e<1.2f) {
-                arc(e*180,2,.02f,.35f,.5f);arc(e*180+180,2,.02f,.2f,.3f);
-                showF();return;
-            }
-            eventActive=0;
-        } else if (eventActive == LED_EV_FALL) {
+        if (eventActive == LED_EV_FALL) {
             if (e < 1.4f) {
                 float flash = (e < 0.25f) ? 1.0f : expf(-(e - 0.25f) * 3.0f);
-                float wobble = 0.85f + 0.15f * sinf(t * 4.0f);
+                float wobble = 0.75f + 0.25f * sinf(t * 40.0f);
                 fillAll(flash * wobble, 0.02f * flash, 0.0f);
                 showF(); return;
             }
@@ -247,14 +248,15 @@ void leds_update(const LedInputs& in) {
         showF(); return;
     }
 
-    // ---------- 7. balancing idle: calm breathing + forward marker ----------
+    // ---------- 7. balancing idle: calm breathing + twinkle ----------
     if (in.balancing) {
         float breath = 0.10f + 0.14f * (0.5f + 0.5f * sinf(t * 1.6f));
         float effort = fminf(fabsf(in.pitchF) / 8.0f, 1.0f);   // warm tint with tilt
         fillAll(breath * (0.15f + 0.85f * effort),
                 breath * (0.55f + 0.15f * (1 - effort)),
                 breath * (0.85f * (1 - effort)));
-        arc(0,1.5f,.015f,.035f,.05f); // steady forward marker, no random status-like flashes
+        if ((now / 130) % 23 == (uint32_t)(LED_RING_COUNT * 1.3f) % 23)   // rare twinkle
+            addF(now / 130 % LED_RING_COUNT, 0.5f, 0.5f, 0.6f);
         if (greeting) { arc(0, 2.0f, 0.0f, 0.8f, 0.15f); }
         showF(); return;
     }

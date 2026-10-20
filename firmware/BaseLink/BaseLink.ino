@@ -851,7 +851,6 @@ void loop() {
         }
     } else { // BALANCING
         if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000) {
-            leds_event(LED_EV_FAULT);
             static char reason[160];
             const auto& l = hub.left().fb(); const auto& r = hub.right().fb();
             snprintf(reason, sizeof(reason),

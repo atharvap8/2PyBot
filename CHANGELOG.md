@@ -14,8 +14,9 @@ For the main milestones and estimated dates for future work, see the
 - Show pull, preparation, build, flash, calibration, waiting, success and failure
   on an independently supervised Radxa LED service. Add expiring ESP32 display
   ownership and a separately wired SPI backend for continuous flash indication.
-- Rework boot/fault/neutral ring behavior, add a deployment dashboard and persist
-  Android downloads separately from application release snapshots.
+- Preserve the original normal ring animations and use a smooth blended circular
+  spin during deployment. Add a deployment dashboard and persist Android downloads
+  separately from application release snapshots.
 
 ## 4.0.3 — RS485 transport regression and full-stick headroom
 

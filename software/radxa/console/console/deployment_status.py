@@ -108,34 +108,19 @@ class Progress:
 
 
 def led_frame(phase, progress, seconds, count=16, brightness=.35):
-    """Deterministic, bounded, non-strobing ring language for a Radxa LED backend."""
+    """One smooth, four-second blended circular spin for deployment ownership."""
     if not 1 <= count <= 256 or not math.isfinite(seconds):
         raise ValueError("Invalid LED geometry/time")
-    if phase=="waiting_artifact":phase="checking"
-    progress = max(0, min(100, progress))
     brightness = max(0, min(.6, brightness))
-    colors = {"pulling": (.02, .75, 1), "checking": (.15, .35, 1),
-              "building": (.6, .12, 1), "deploying": (.3, .25, 1),
-              "flashing": (1, .45, .02), "calibrating": (.03, 1, .65),
-              "success": (.06, 1, .25), "failed": (1, .05, .02), "waiting_idle": (1, .5, .05)}
-    color = colors.get(phase, (0, 0, 0))
+    first,second=(.02,.75,1),(.6,.12,1)
+    if phase=='success':first,second=(.06,1,.25),(.03,.45,.08)
+    elif phase=='failed':first,second=(1,.05,.02),(.45,.01,.01)
+    elif phase=='waiting_idle':first,second=(1,.5,.05),(1,.15,.01)
+    elif phase not in PHASES or phase=='idle':first=second=(0,0,0)
     frame = []
     for i in range(count):
-        if phase == "flashing":
-            level = .65 if i < progress * count / 100 else .025
-            if i == min(count - 1, int(progress * count / 100)):
-                level = .65 + .3 * (1 + math.sin(seconds * 6)) / 2
-        elif phase == "success":
-            level = .6 + .25 * math.cos(i * 2 * math.pi / count - seconds * 4)
-        elif phase == "failed":
-            # Slow warning pulse; dark breaks make failure distinct from success.
-            level = (.2 + .6 * (1 + math.sin(seconds * 3)) / 2) if i % 4 != 3 else .02
-        elif phase == "waiting_idle":
-            level = .08 + .65 * (1 + math.sin(seconds * 2)) / 2 if i % 4 == 0 else .02
-        else:
-            position = seconds * (7 if phase == "pulling" else 4)
-            distance = (i - position) % count
-            mirror = (i - position - count / 2) % count
-            level = .035 + .8 * max(math.exp(-distance * .8), math.exp(-mirror * .8))
-        frame.append(tuple(round(255 * brightness * max(0, min(1, channel * level))) for channel in color))
+        angle=2*math.pi*(i/count-seconds/4)
+        blend=.5+.5*math.sin(angle)
+        level=.25+.65*(.5+.5*math.cos(angle))
+        frame.append(tuple(round(255*brightness*(a*(1-blend)+b*blend)*level) for a,b in zip(first,second)))
     return frame

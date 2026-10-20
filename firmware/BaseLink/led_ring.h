@@ -3,7 +3,7 @@
  *  led_ring.h — WS2812 16-LED expression ring (GPIO 15)
  * ============================================================
  *  Rendering is done with NeoPixelBus over the ESP32 RMT
- *  peripheral: the WS2812 timing is generated in hardware, no
+ *  peripheral: the WS2812 timing is generated in hardware;
  *  interrupts are never disabled by pixel transmission. Rendering remains
  *  rate-limited and independent of the BLDC UART ownership.
  *
@@ -25,8 +25,6 @@
 #define LED_EV_FALL      2   // red flash + fade ("ouch")
 #define LED_EV_SPEED_HI  3   // RB: fast blue double-lap ("sport")
 #define LED_EV_SPEED_LO  4   // LB: green arc settling at the front ("easy")
-#define LED_EV_FAULT     5   // red/amber diagnostic fault
-#define LED_EV_BOOT      6   // nonblocking cyan startup orbit
 
 struct LedInputs {
     bool  balancing;     // state == STATE_BALANCING

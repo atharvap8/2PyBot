@@ -178,21 +178,18 @@ after bootstrap and leave the robot stationary for that coordinated deployment.
 
 | State | Animation |
 | --- | --- |
-| Git pull | Cyan paired packet/comet orbit |
-| Checking / waiting for CI | Blue orbit |
-| Building | Violet orbit |
-| Deployment | Blue-violet orbit |
-| Firmware write/verify | Amber progress arc with breathing tip |
-| Calibration/restore | Teal orbit |
-| Waiting for stationary IDLE | Amber anchor pulses |
-| Verified success | Green travelling wave for six seconds, then handback |
-| Failed pull/deployment | Red broken ring with slow pulse for thirty seconds |
+| Pull, checks, build, deployment, flash, calibration | Smooth blue-to-violet blended circular spin, one lap per four seconds |
+| Waiting for stationary IDLE | Same blended spin in amber |
+| Verified success | Same spin in green for six seconds, then handback |
+| Failed pull/deployment | Same spin in red for thirty seconds |
 | Interrupted/recovery-required job | Failure indication until recovery/retry |
 
 The status daemon is independent of console restarts. On the ESP32, the display-
 only `LS,phase,progress,ttl_ms` lease expires automatically if the host disappears.
-Fall/motor-fault events outrank host display ownership. Normal boot is no longer
-a blocking rainbow; fall flicker is slowed and neutral has a steady forward marker.
+The existing fall event outranks host display ownership. Original normal
+animations are restored, including the rainbow boot swirl, fall response, idle
+twinkle, drive/gesture effects and sleep pattern. Progress is displayed in the
+dashboard; the deployment ring uses only the blended spin.
 
 ### Existing wiring and flash-time indication
 
