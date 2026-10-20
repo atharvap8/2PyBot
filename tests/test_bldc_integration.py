@@ -30,6 +30,22 @@ def test_supplied_hub_firmware_feedback_retains_faults_and_per_wheel_saturation(
     assert "self_righting_state" not in link.hub and "saturated_l" not in link.hub
 
 
+def test_indicator_uses_existing_owner_without_sending_motion_or_ignoring_capability():
+    link=bridge.SerialLink()
+    class Port:
+        def __init__(self):self.writes=[]
+        def write(self,data):self.writes.append(data)
+    link.ser=Port();link.maintenance=True
+    assert not link.send_indicator(5,50,1500)
+    link.derived['HOSTLED']=1
+    assert link.send_indicator(5,50,1500)
+    assert link.ser.writes==[b'LS,5,50,1500\n']
+    assert not link.send_indicator(99,0,1500)
+    link._serial_paused=True
+    assert not link.send_indicator(8,0,1500)
+    assert len(link.ser.writes)==1
+
+
 @pytest.mark.parametrize("derived",[{}, {"HUBMOTOR":1}, {"HUBSCHEMA":3}])
 def test_v4_cannot_silently_import_old_hardware_tuning(derived):
     assert "manual commissioning" in firmware.hardware_mismatch({"parameter_schema":"bldc-v4"},derived)

@@ -18,7 +18,7 @@ def main():
     start=sketch.index("void runController(float dt) {")
     end=sketch.index("\n}\n",start)+3
     (output/"bldc_controller_under_test.inc").write_text(sketch[start:end])
-    tests={"test_bldc_control":[],"test_m0601":[firmware/"m0601.cpp",stubs/"runtime.cpp"],
+    tests={"test_bldc_control":[],"test_deployment_led":[],"test_m0601":[firmware/"m0601.cpp",stubs/"runtime.cpp"],
            "test_bldc_params":[firmware/"params.cpp",stubs/"runtime.cpp"],
            "test_bldc_drive":[firmware/"hub_drive.cpp",firmware/"m0601.cpp",firmware/"params.cpp",stubs/"runtime.cpp"],
            "test_bldc_controller":[firmware/"hub_drive.cpp",firmware/"m0601.cpp",firmware/"params.cpp",stubs/"runtime.cpp"]}

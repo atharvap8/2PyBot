@@ -4,8 +4,8 @@
  * ============================================================
  *  Rendering is done with NeoPixelBus over the ESP32 RMT
  *  peripheral: the WS2812 timing is generated in hardware, no
- *  interrupts are ever disabled, so the 20 kHz stepper ISR and
- *  the 200 Hz balance loop are completely unaffected.
+ *  interrupts are never disabled by pixel transmission. Rendering remains
+ *  rate-limited and independent of the BLDC UART ownership.
  *
  *  The main loop calls leds_update(li) every iteration; frames
  *  are rate-limited to LED_FPS internally and each frame costs
@@ -25,6 +25,8 @@
 #define LED_EV_FALL      2   // red flash + fade ("ouch")
 #define LED_EV_SPEED_HI  3   // RB: fast blue double-lap ("sport")
 #define LED_EV_SPEED_LO  4   // LB: green arc settling at the front ("easy")
+#define LED_EV_FAULT     5   // red/amber diagnostic fault
+#define LED_EV_BOOT      6   // nonblocking cyan startup orbit
 
 struct LedInputs {
     bool  balancing;     // state == STATE_BALANCING
@@ -44,5 +46,6 @@ struct LedInputs {
 void leds_begin();                       // boot swirl
 void leds_update(const LedInputs& in);   // call every loop, self rate-limited
 void leds_event(uint8_t ev);             // LED_EV_ARM / LED_EV_FALL
+bool leds_hostStatus(unsigned phase, unsigned progress, unsigned ttlMs);
 
 #endif // LED_RING_H

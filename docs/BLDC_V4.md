@@ -1,5 +1,9 @@
 # v4.0.1 — M0601 BLDC drive
 
+Historical control notes below describe 4.0.1. See [4.0.3 analysis](BLDC_FIX_4.0.3.md)
+for the subsequent transport/headroom changes and [Development SOP](DEVELOPMENT_SOP.md)
+for the 4.1.0 deployment/LED implementation. These are not physical-validation claims.
+
 Branch: `hardware/bldc-v4.0.0`. The supplied `2pybot-hub/BaseLinkHub`
 program is integrated into the existing `firmware/BaseLink` build target.
 The USB protocol, gamepad, LQI, navigation lease, climb controller and payload

@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.0.3, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.1.0, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -229,6 +229,14 @@ void requestDisable(const char* why) {
 //  SERIAL PARSER — Radxa 'V' lines + tuner commands, one reader
 // ============================================================
 void handleLine(char* line) {
+    // Display-only host ownership is valid during startup/maintenance too.
+    // It never changes a motor, arming request or navigation lease.
+    if(!strncmp(line,"LS,",3)) {
+        unsigned phase=0,progress=0,ttl=0;char extra=0;
+        if(sscanf(line+3,"%u,%u,%u%c",&phase,&progress,&ttl,&extra)==3)
+            leds_hostStatus(phase,progress,ttl);
+        return;
+    }
     if(!strcmp(line,"FU,1") || !strcmp(line,"FU,0")) {
         if(line[3]=='1' && (state==STATE_BALANCING || motorsRequested)) {
             Serial.println("FU?,BUSY");return;
@@ -636,7 +644,7 @@ void setup() {
     // below and drives it low. The WS2812 ring shows status instead.
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.0.3 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.1.0 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();
@@ -843,6 +851,7 @@ void loop() {
         }
     } else { // BALANCING
         if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000) {
+            leds_event(LED_EV_FAULT);
             static char reason[160];
             const auto& l = hub.left().fb(); const auto& r = hub.right().fb();
             snprintf(reason, sizeof(reason),

@@ -1,0 +1,9 @@
+[Unit]
+Description=Start deployment after a managed Git pull
+
+[Path]
+PathChanged=__RUN_DIR__/request
+Unit=2pybot-deploy.service
+
+[Install]
+WantedBy=multi-user.target

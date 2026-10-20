@@ -124,7 +124,10 @@ together. See the [vision roadmap](docs/VISION_ROADMAP.md) for the detailed task
 
 ## Updating the bot
 
-The console runs from `/home/radxa/projects/2PyBot`. After `git pull --ff-only`, a systemd timer applies relevant committed changes and restarts the affected services. Android, CAD, firmware, and documentation changes do not restart the console. See [repo-based deployment](scripts/radxa/README.md) for installation, status, and retry commands.
+See the [one-pull development SOP](docs/DEVELOPMENT_SOP.md) for coordinated Git
+pulls, versioned host releases, firmware updates and deployment LED states.
+
+The managed source checkout is `/home/radxa/projects/2PyBot`; the console runs from a versioned release snapshot. After one-time setup, `git pull --ff-only` waits for coordinated deployment and reports its outcome. Firmware updates use the existing application-only flash worker when their inputs change. CAD/documentation-only updates leave running services untouched. See the SOP for setup, status and recovery, or [repo-based deployment](scripts/radxa/README.md) for legacy installations.
 
 ## Hardware defaults
 

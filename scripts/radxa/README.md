@@ -1,5 +1,9 @@
 # Repo-Based Radxa Deployment
 
+The coordinated workflow, one-time setup, firmware/APK artifacts and ring ownership
+are in [Development SOP](../../docs/DEVELOPMENT_SOP.md). Use `install_one_pull.py`
+for the new workflow. Notes below describe the older checkout-based legacy mode.
+
 The bot runs the console from a Git checkout at `/home/radxa/projects/2PyBot`. A systemd timer checks the local commit about every ten seconds. It does not fetch or pull from GitHub.
 
 ## Update

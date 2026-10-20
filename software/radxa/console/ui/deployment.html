@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2PyBot deployment</title><link rel="stylesheet" href="/ui/style.css">
+<style>
+body{margin:0;background:#090f18;color:#e5edf6;font:15px system-ui,sans-serif}main{max-width:850px;margin:auto;padding:24px}
+a{color:#6fe1ff}.panel{border:1px solid #263449;border-radius:18px;padding:22px;background:#111c2b;margin:16px 0}
+#phase{font-size:28px;margin:0 0 10px;text-transform:capitalize}progress{width:100%;height:16px;accent-color:#7d76ff}
+dl{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px}dt{color:#91a2b8}dd{margin:0;overflow-wrap:anywhere;font-family:monospace}
+#message{line-height:1.5}#error{color:#ff917d}.note{color:#91a2b8;font-size:13px;line-height:1.6}
+@media(max-width:500px){main{padding:14px}dl{grid-template-columns:1fr;gap:7px}dd{margin-bottom:10px}}
+</style></head><body><main>
+<a href="/ui/">← Console</a><h1>Deployment</h1>
+<section class="panel"><h2 id="phase">Connecting</h2><progress id="progress" max="100" value="0"></progress>
+<p id="message">Reading the bot's deployment state…</p><p id="error"></p></section>
+<section class="panel"><dl>
+<dt>Requested commit</dt><dd id="requested">—</dd><dt>Applied commit</dt><dd id="applied">—</dd>
+<dt>Controller image</dt><dd id="firmware">—</dd><dt>Maintenance</dt><dd id="maintenance">—</dd>
+<dt>LED phase</dt><dd id="indicator">—</dd><dt>Last update</dt><dd id="updated">—</dd>
+</dl></section>
+<p class="note">Pulling → preparation → deployment/flash → verified success. An armed or moving bot queues the update until local stop.
+Deployment never arms the motors. The ESP32-connected ring cannot animate while its ESP32 is in the flash bootloader;
+a separately wired Radxa SPI ring can display continuous progress.</p>
+</main><script>
+const put=(id,value)=>document.getElementById(id).textContent=value;
+async function refresh(){
+  try{
+    const response=await fetch('/api/deployment/status',{cache:'no-store'});if(!response.ok)throw Error('Deployment status unavailable ('+response.status+')');
+    const data=await response.json(),indicator=data.indicator||{},s=indicator.led_active?indicator:(data.progress||{}),fw=(data.firmware||{}).installed||{};
+    put('phase',(s.phase||'idle').replaceAll('_',' '));put('message',s.message||'No deployment is pending.');
+    document.getElementById('progress').value=s.progress||0;
+    put('requested',s.commit||'—');put('applied',(data.applied||{}).commit||'—');
+    put('firmware',fw.version?fw.version+' · '+fw.build_id:'No verified registered image');
+    put('maintenance',data.maintenance?'Controller maintenance held':'Released');put('indicator',(data.indicator||{}).phase||'idle');
+    put('updated',s.updated_at?new Date(s.updated_at*1000).toLocaleString():'—');put('error','');
+    document.getElementById('phase').style.color=s.phase==='failed'?'#ff917d':s.phase==='success'?'#7cf1a6':'#91c8ff';
+  }catch(error){put('error',error.message)}
+}
+refresh();setInterval(refresh,1000);
+</script></body></html>

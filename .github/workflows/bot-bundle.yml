@@ -1,0 +1,69 @@
+name: Bot deployment bundle
+
+on:
+  push:
+    branches: [main, 'hardware/**', 'bot/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bot-bundle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Restore the stable development signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE" || { echo "::error::Configure ANDROID_DEBUG_KEYSTORE_BASE64 once so APK updates keep the same signing identity"; exit 1; }
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEYSTORE" | base64 --decode > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Check version and native control/display logic
+        run: |
+          python scripts/versioning.py --check
+          python scripts/firmware/check_bldc.py
+      - name: Install locked ESP32 board and libraries
+        run: |
+          python - <<'PY'
+          import json,subprocess
+          lock=json.load(open('scripts/firmware/toolchain.json'))
+          urls=','.join(lock['board_manager_urls'])
+          subprocess.run(['arduino-cli','core','update-index','--additional-urls',urls],check=True)
+          subprocess.run(['arduino-cli','core','install',lock['core'],'--additional-urls',urls],check=True)
+          for library in lock['libraries']:
+              subprocess.run(['arduino-cli','lib','install',library],check=True)
+          PY
+      - name: Build immutable firmware and Android app
+        run: |
+          python scripts/firmware/build.py --output-dir build/BaseLink --require-toolchain-lock --source-fingerprint "$(python scripts/firmware/fingerprint.py)"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          bash software/android/gradlew -p software/android :app:assembleDebug --no-daemon --max-workers=2
+      - name: Package deployment inputs
+        run: python scripts/radxa/package_deployment.py
+      - name: Publish commit-bound deployment bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="bot-${GITHUB_SHA}"
+          asset="build/deployment/2pybot-deploy-${GITHUB_SHA}.tar.gz"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Commit bundle already published; leaving immutable release intact"
+          else
+            gh release create "$tag" "$asset" --target "$GITHUB_SHA" --title "Bot bundle ${GITHUB_SHA:0:8}" --notes "Commit-bound deployment artifact. Build success is not physical validation." --prerelease
+          fi

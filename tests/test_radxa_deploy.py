@@ -77,15 +77,21 @@ class DeploymentTests(unittest.TestCase):
     def instance(self, paths):
         return FakeDeployment(self.temporary.name, paths)
 
-    def test_android_cad_firmware_and_docs_do_not_restart_handlers(self):
+    def test_android_cad_and_docs_do_not_restart_legacy_handlers(self):
         instance = self.instance([
             "software/android/app/build.gradle.kts", "hardware/cad/enclosure/rev5/base.stl",
-            "firmware/BaseLink/config.h", "README.md", "software/radxa/console/README.md",
+            "README.md", "software/radxa/console/README.md",
             "software/radxa/deployment/mediamtx.yml",
         ])
         self.assertTrue(instance.deploy())
         self.assertEqual(instance.events, [])
         self.assertEqual(instance.read_state()["commit"], "b" * 40)
+
+    def test_firmware_changes_require_one_pull_setup_instead_of_false_success(self):
+        instance=self.instance(['firmware/BaseLink/config.h'])
+        with self.assertRaisesRegex(deploy.GitBusy,'one-pull'):instance.deploy()
+        self.assertEqual(instance.read_state()['commit'],'a'*40)
+        self.assertEqual(instance.events,[])
 
     def test_unchanged_commit_is_a_no_op(self):
         instance = self.instance([deploy.APP + "console/server.py"])

@@ -1,0 +1,14 @@
+[Unit]
+Description=2PyBot deployment ring status and ownership
+After=network.target
+
+[Service]
+Type=simple
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -u "__REPO__/scripts/radxa/deployment_leds.py"
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=3
+
+[Install]
+WantedBy=multi-user.target

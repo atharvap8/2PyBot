@@ -10,7 +10,7 @@ Parses the v2 protocol (see firmware PROTOCOL.md):
 
 Everything else in the console asks THIS for data. One owner, no races.
 """
-import asyncio, math, time, collections
+import asyncio, math, time, collections, threading
 from typing import Dict, Optional
 
 import serial
@@ -61,6 +61,7 @@ class SerialLink:
         self._rx_times = collections.deque(maxlen=50)
         self._pending = collections.deque()   # lines to send
         self._subs = set()                    # asyncio.Queue for websockets
+        self._write_lock=threading.Lock()
 
     # ---------------- lifecycle ----------------
     def open(self):
@@ -83,8 +84,8 @@ class SerialLink:
         self._log(f"[console] opened {SERIAL_PORT} @ {SERIAL_BAUD}")
 
     def close(self):
-        if self.ser:
-            self.ser.close()
+        with self._write_lock:
+            if self.ser:self.ser.close()
         self.connected = False
 
     # ---------------- outbound ----------------
@@ -93,8 +94,21 @@ class SerialLink:
             return False
         if not line.endswith("\n"):
             line += "\n"
-        self.ser.write(line.encode())
-        return True
+        return self._write_bytes(line.encode())
+
+    def _write_bytes(self,data,maintenance=False,flush=False):
+        with self._write_lock:
+            if not self.ser or self._serial_paused or (self.maintenance and not maintenance):return False
+            self.ser.write(data)
+            if flush:self.ser.flush()
+            return True
+
+    def send_indicator(self,phase,progress,ttl_ms):
+        # Only the existing serial owner writes. Indicators neither arm nor
+        # change drive authority, and may run during a maintenance handshake.
+        if not self.ser or self._serial_paused or self.derived.get("HOSTLED")!=1:return False
+        if phase not in range(10) or progress not in range(101) or not 250<=ttl_ms<=3000:return False
+        return self._write_bytes(f"LS,{phase},{progress},{ttl_ms}\n".encode(),maintenance=True)
 
     async def begin_firmware_maintenance(self):
         if not self.connected or self.tel.get("stale",True) or self.tel.get("balancing"):
@@ -104,21 +118,21 @@ class SerialLink:
         self.maintenance=True  # inhibit all ordinary writers, but keep reading acknowledgements
         self.tel["firmware_lock"]=False
         try:
-            self.ser.write(b"FU,1\n");self.ser.flush()
+            if not self._write_bytes(b"FU,1\n",maintenance=True,flush=True):raise ValueError('Controller serial writer is unavailable')
             deadline=time.monotonic()+3
             while time.monotonic()<deadline:
                 if self.tel.get("firmware_lock") and not self.tel.get("balancing"):break
                 await asyncio.sleep(.02)
             else:raise ValueError("Controller did not acknowledge the maintenance/arming lock")
             self.dump_complete=False;self.params.clear()
-            self.ser.write(b"P?\nBR,0\n");self.ser.flush()
+            self._write_bytes(b"P?\nBR,0\n",maintenance=True,flush=True)
             deadline=time.monotonic()+5
             retry_at=time.monotonic()+1
             while time.monotonic()<deadline:
                 if self.dump_complete and not self.tel.get("host_ready"):
                     self.hold_for_firmware();return
                 if time.monotonic()>=retry_at:
-                    self.ser.write(b"P?\nBR,0\n");self.ser.flush();retry_at=time.monotonic()+1
+                    self._write_bytes(b"P?\nBR,0\n",maintenance=True,flush=True);retry_at=time.monotonic()+1
                 await asyncio.sleep(.02)
             raise ValueError("Locked controller snapshot/readiness acknowledgement timed out")
         except BaseException:

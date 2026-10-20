@@ -111,11 +111,13 @@ class FirmwareManager:
         self.link=link;self.snapshot=snapshot;self.root=Path(root);self.heartbeat=Path(heartbeat);self.clock=clock
         self.lock=asyncio.Lock();self.preparing=False
         self.host_ready=host_ready
+        self.deployment_hold_path=self.root/"deployment-hold.json"
         job=read_json(self.root/"current.json",{})
-        if job.get("status") in HOLD:self.link.hold_for_firmware()
+        if job.get("status") in HOLD or self.deployment_hold():self.link.hold_for_firmware()
 
     def job(self):return read_json(self.root/"current.json",{})
-    def blocked(self):return self.job().get("status") in HOLD or self.link.maintenance
+    def deployment_hold(self):return read_json(self.deployment_hold_path,{})
+    def blocked(self):return self.job().get("status") in HOLD or self.link.maintenance or bool(self.deployment_hold())
     def status(self):
         job=self.job();latest=None;installed=None;problem=""
         try:
@@ -131,6 +133,7 @@ class FirmwareManager:
         busy=job.get("status") in BUSY
         if job.get("status")=="recovery_required":problem="Controller recovery required; see update log"
         elif busy or self.link.maintenance:problem="Firmware update in progress"
+        elif self.deployment_hold():problem="Source deployment holds controller maintenance"
         elif not worker_ready:problem="Firmware worker is unavailable"
         elif not latest:problem=problem or "No compiled firmware build is registered"
         elif hardware_mismatch(latest,self.link.derived):problem=hardware_mismatch(latest,self.link.derived)
@@ -178,7 +181,75 @@ class FirmwareManager:
 
     async def monitor(self):
         while True:
-            job=self.job();hold=job.get("status") in HOLD
+            job=self.job();hold=job.get("status") in HOLD or bool(self.deployment_hold())
             if hold and not self.preparing and not self.link._serial_paused:self.link.hold_for_firmware()
             elif not hold and self.link.maintenance:self.link.resume_after_firmware()
             await asyncio.sleep(.20)
+
+    async def acquire_deployment(self,token,commit):
+        if not re.fullmatch(r"[a-f0-9]{32}",token) or not re.fullmatch(r"[a-f0-9]{40}",commit):
+            raise ValueError("Invalid deployment identity")
+        async with self.lock:
+            existing=self.deployment_hold()
+            if existing:
+                if existing.get("token")==token and existing.get("commit")==commit and existing.get("locked"):return existing
+                raise ValueError("Another deployment owns maintenance")
+            if self.job().get("status") in HOLD:raise ValueError("Firmware update/recovery is active")
+            if not self.link.dump_complete or not self.link.tel.get("startup_ready"):
+                raise ValueError("Fresh READY/IDLE controller metadata is required")
+            snapshot=self.snapshot()
+            values={p["key"]:p["value"] for p in snapshot.get("params",[])}
+            if not values or any(not re.fullmatch(r"[A-Z0-9_]{1,20}",key) or not math.isfinite(value) for key,value in values.items()):
+                raise ValueError("A complete finite tuning snapshot is required")
+            if values.get('BOOTWAIT')!=1:
+                raise ValueError('BOOTWAIT=1 is required to keep arming closed across a USB reset during deployment')
+            self.preparing=True
+            atomic_json(self.deployment_hold_path,{"token":token,"commit":commit,"locked":False,
+                "created_at":self.clock(),"snapshot":snapshot})
+            try:
+                await self.link.begin_firmware_maintenance()
+                snapshot["params"]=self.link.params_list();snapshot["derived"]=dict(self.link.derived)
+                hold={"token":token,"commit":commit,"locked":True,"created_at":self.clock(),"snapshot":snapshot}
+                atomic_json(self.deployment_hold_path,hold)
+                return hold
+            except BaseException:
+                self.deployment_hold_path.unlink(missing_ok=True)
+                self.link.resume_after_firmware()
+                raise
+            finally:self.preparing=False
+
+    async def queue_deployment_build(self,token,identifier):
+        async with self.lock:
+            hold=self.deployment_hold()
+            if hold.get("token")!=token or not hold.get("locked"):
+                raise ValueError("Deployment maintenance ownership is required")
+            if self.job().get("status") in HOLD:raise ValueError("A firmware job is already active")
+            if not self.link._serial_paused:raise ValueError("Console still owns the controller serial port")
+            if not self.host_ready():raise ValueError("Host camera/API must be ready before firmware startup")
+            worker=read_json(self.heartbeat,{})
+            if self.clock()-worker.get("t",0)>=8:raise ValueError("Firmware worker is unavailable")
+            manifest,image=await asyncio.to_thread(load_build,self.root,identifier,True)
+            snapshot=hold["snapshot"]
+            values={p["key"]:p["value"] for p in snapshot.get("params",[])}
+            if not values or any(not re.fullmatch(r"[A-Z0-9_]{1,20}",key) or not math.isfinite(value) for key,value in values.items()):
+                raise ValueError("Held tuning snapshot is invalid")
+            mismatch=hardware_mismatch(manifest,snapshot.get("derived",{}))
+            if mismatch:raise ValueError(mismatch)
+            job_id=uuid.uuid4().hex;folder=self.root/"jobs"/job_id;folder.mkdir(parents=True)
+            shutil.copy2(image,folder/"selected.bin")
+            atomic_json(folder/"request.json",{"id":job_id,"build":manifest,"snapshot":snapshot,"created_at":self.clock()})
+            job={"id":job_id,"build_id":identifier,"version":manifest["version"],"status":"queued",
+                "stage":"queued","progress":3,"message":"Queued by source deployment; motors remain locked",
+                "created_at":self.clock(),"updated_at":self.clock(),"deployment_token":token}
+            atomic_json(self.root/"current.json",job)
+            return job
+
+    async def release_deployment(self,token):
+        async with self.lock:
+            hold=self.deployment_hold()
+            if not hold:return
+            if hold.get("token")!=token:raise ValueError("Deployment maintenance token does not match")
+            if not hold.get('locked'):raise ValueError('Interrupted maintenance acquisition requires recovery before release')
+            if self.job().get("status") in HOLD:raise ValueError("Firmware job/recovery must finish before release")
+            self.deployment_hold_path.unlink()
+            self.link.resume_after_firmware()

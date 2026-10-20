@@ -1,4 +1,4 @@
-/* 2PyBot v4.0.3: ESP32-WROOM + two M0601 RS485 BLDC hubs.
+/* 2PyBot v4.1.0: ESP32-WROOM + two M0601 RS485 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */

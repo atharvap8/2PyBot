@@ -179,3 +179,53 @@ def test_incremental_dump_finishes_before_retry_can_queue_another_dump(tmp_path,
     controller=worker.Controller(tmp_path/'dump.log');controller.dump()
     assert controller.complete and len(controller.params)==120
     assert port.sent.count(b'P?\n')==1 and clock[0]<1.0
+
+
+def test_deployment_maintenance_survives_host_restart_and_requires_its_token(tmp_path):
+    root=tmp_path/'state';first,link=manager(root)
+    link.params_list=lambda:[{'key':'CURRENT','value':1500.0},{'key':'BOOTWAIT','value':1}]
+    token='a'*32
+    asyncio.run(first.acquire_deployment(token,'b'*40))
+    assert link._serial_paused and first.deployment_hold()['locked']
+    second,new_link=manager(root)
+    assert new_link._serial_paused and second.blocked()
+    with pytest.raises(ValueError,match='token'):
+        asyncio.run(second.release_deployment('c'*32))
+    asyncio.run(second.release_deployment(token))
+    assert not new_link._serial_paused and not second.deployment_hold()
+
+
+def test_failed_deployment_lock_does_not_leave_a_phantom_hold(tmp_path):
+    m,link=manager(tmp_path/'state')
+    link.params_list=lambda:[{'key':'CURRENT','value':1500.0},{'key':'BOOTWAIT','value':1}]
+    async def refuse():raise ValueError('local START is pending')
+    link.begin_firmware_maintenance=refuse
+    with pytest.raises(ValueError,match='pending'):asyncio.run(m.acquire_deployment('a'*32,'b'*40))
+    assert not m.deployment_hold() and not link._serial_paused
+
+
+def test_held_update_queues_once_and_cannot_unlock_an_active_flash(tmp_path):
+    root=tmp_path/'state';build=register(root,tmp_path)
+    m,link=manager(root);token='a'*32
+    link.params_list=lambda:[{'key':'CURRENT','value':1500.0},{'key':'BOOTWAIT','value':1}]
+    asyncio.run(m.acquire_deployment(token,'b'*40))
+    job=asyncio.run(m.queue_deployment_build(token,build['build_id']))
+    assert job['status']=='queued' and job['deployment_token']==token
+    with pytest.raises(ValueError,match='active'):asyncio.run(m.queue_deployment_build(token,build['build_id']))
+    with pytest.raises(ValueError,match='finish'):asyncio.run(m.release_deployment(token))
+    fw.atomic_json(root/'current.json',dict(job,status='failed',rolled_back=True))
+    asyncio.run(m.release_deployment(token));assert not link._serial_paused
+
+
+def test_deployment_rejects_standalone_startup_before_acquiring_any_lock(tmp_path):
+    m,link=manager(tmp_path/'state')
+    with pytest.raises(ValueError,match='BOOTWAIT'):asyncio.run(m.acquire_deployment('a'*32,'b'*40))
+    assert not link.began and not m.deployment_hold()
+
+
+def test_unconfirmed_interrupted_deployment_requires_recovery_before_release(tmp_path):
+    m,link=manager(tmp_path/'state');token='a'*32
+    fw.atomic_json(m.deployment_hold_path,{'token':token,'commit':'b'*40,'locked':False})
+    link.resume_after_firmware=lambda:pytest.fail('An unconfirmed hold must not hand back serial ownership')
+    with pytest.raises(ValueError,match='recovery'):asyncio.run(m.release_deployment(token))
+    assert m.deployment_hold()

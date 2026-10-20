@@ -3,6 +3,18 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.1.0 — One-pull deployment and status ring
+
+- Add managed fast-forward pulls, commit-bound CI firmware/APK bundles, local
+  firmware build support and input/toolchain fingerprint caching.
+- Stage versioned host releases, hold controller maintenance across restarts,
+  queue firmware through its existing worker and report verified/failure state.
+- Show pull, preparation, build, flash, calibration, waiting, success and failure
+  on an independently supervised Radxa LED service. Add expiring ESP32 display
+  ownership and a separately wired SPI backend for continuous flash indication.
+- Rework boot/fault/neutral ring behavior, add a deployment dashboard and persist
+  Android downloads separately from application release snapshots.
+
 ## 4.0.3 — RS485 transport regression and full-stick headroom
 
 - Revert the 4.0.1/4.0.2 one-outstanding-request transport. Each motor again

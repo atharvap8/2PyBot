@@ -9,7 +9,7 @@ import copy
 import hashlib
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.responses import FileResponse, Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from . import vision
 from .object_detection import ObjectDetector
 from .firmware import FirmwareManager
 from .autonomy import Autonomy
+from .deployment_status import STATE_DIR as DEPLOY_STATE, RUN_DIR as DEPLOY_RUN, indicator, read as deployment_read
 
 UI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui")
 
@@ -74,6 +75,69 @@ def firmware_snapshot():
 
 firmware=FirmwareManager(link,firmware_snapshot,host_ready=lambda:host_ready().get("ready",False))
 autonomy=Autonomy(link,lambda:tof.status(link),firmware.blocked)
+
+
+def require_loopback(request):
+    if not request.client or request.client.host not in ("127.0.0.1","::1"):
+        raise HTTPException(403,"Deployment control is local to the bot")
+
+
+class DeploymentLock(BaseModel):
+    token: str
+    commit: str
+
+
+class DeploymentToken(BaseModel):
+    token: str
+
+
+class DeploymentBuild(BaseModel):
+    token: str
+    build_id: str
+
+
+class DeploymentLed(BaseModel):
+    phase: int
+    progress: int
+    ttl_ms: int=1500
+
+
+@app.get("/api/deployment/status")
+def deployment_status():
+    return {"protocol":1,"progress":deployment_read(DEPLOY_STATE/"progress.json",{}),
+        "applied":deployment_read(DEPLOY_STATE/"state.json",{}),
+        "indicator":indicator(DEPLOY_STATE,DEPLOY_RUN,firmware.root),
+        "maintenance":firmware.blocked(),"deployment_maintenance":bool(firmware.deployment_hold()),"firmware":firmware.status()}
+
+
+@app.post("/api/internal/deployment/lock")
+async def deployment_lock(body:DeploymentLock,request:Request):
+    require_loopback(request)
+    try:
+        hold=await firmware.acquire_deployment(body.token,body.commit)
+        return {"locked":True,"token":hold["token"],"commit":hold["commit"]}
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/internal/deployment/release")
+async def deployment_release(body:DeploymentToken,request:Request):
+    require_loopback(request)
+    try:await firmware.release_deployment(body.token);return {"released":True}
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/internal/deployment/firmware")
+async def deployment_firmware(body:DeploymentBuild,request:Request):
+    require_loopback(request)
+    try:return await firmware.queue_deployment_build(body.token,body.build_id)
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.post("/api/internal/deployment/led")
+def deployment_led(body:DeploymentLed,request:Request):
+    require_loopback(request)
+    return {"sent":link.send_indicator(body.phase,body.progress,body.ttl_ms),
+            "backend":"esp32","available_during_esp32_flash":False}
 
 
 @app.get("/api/autonomy/status")
@@ -155,7 +219,8 @@ async def autonomy_stop():autonomy.stop();return autonomy.status()
 
 @app.middleware("http")
 async def firmware_mutation_gate(request,call_next):
-    if request.method not in ("GET","HEAD","OPTIONS") and request.url.path not in ("/api/firmware/reflash","/api/estop") and firmware.blocked():
+    internal=request.url.path.startswith("/api/internal/deployment/")
+    if request.method not in ("GET","HEAD","OPTIONS") and not internal and request.url.path not in ("/api/firmware/reflash","/api/estop") and firmware.blocked():
         return JSONResponse({"detail":"Controller firmware maintenance is in progress"},status_code=409)
     return await call_next(request)
 
@@ -497,6 +562,36 @@ async def ws(sock: WebSocket):
 #  UI
 # ============================================================
 if os.path.isdir(UI_DIR):
+    @app.get("/ui/android.apk")
+    def latest_apk():
+        from pathlib import Path
+        latest=deployment_read(Path(os.environ.get("BOT_DOWNLOAD_DIR","/var/lib/2pybot/downloads"))/'latest.json',{})
+        if not latest.get('version'):raise HTTPException(404,'No checked APK has been published yet')
+        return published_apk(latest['version'])
+
+    @app.get("/ui/2PyBot-v{version}-debug.apk")
+    def published_apk(version:str):
+        from pathlib import Path
+        from .versioning import validate_version
+        try:validate_version(version,allow_legacy=True,allow_prerelease=True)
+        except ValueError:raise HTTPException(404,"Unknown build")
+        path=Path(os.environ.get("BOT_DOWNLOAD_DIR","/var/lib/2pybot/downloads"))/f"2PyBot-v{version}-debug.apk"
+        # Old checkout installations keep their existing downloads until migrated.
+        if not path.is_file():path=Path(UI_DIR)/f"2PyBot-v{version}-debug.apk"
+        if not path.is_file():raise HTTPException(404,"APK is not published")
+        return FileResponse(path,media_type="application/vnd.android.package-archive",filename=path.name)
+
+    @app.get("/ui/2PyBot-v{version}-manifest.json")
+    def published_apk_manifest(version:str):
+        from pathlib import Path
+        from .versioning import validate_version
+        try:validate_version(version,allow_legacy=True,allow_prerelease=True)
+        except ValueError:raise HTTPException(404,"Unknown build")
+        path=Path(os.environ.get("BOT_DOWNLOAD_DIR","/var/lib/2pybot/downloads"))/f"2PyBot-v{version}-manifest.json"
+        if not path.is_file():path=Path(UI_DIR)/f"2PyBot-v{version}-manifest.json"
+        if not path.is_file():raise HTTPException(404,'Manifest is not published')
+        return FileResponse(path,media_type='application/json')
+
     app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
 
 
