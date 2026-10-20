@@ -36,6 +36,7 @@ void params_applyHardware(bool) { hub.applyTuning(); }
 #include "bldc_controller_under_test.inc"
 
 void reset() {
+    testTerrainScale=1;
     params_defaults();fallPrevention.reset();autoClimb=AutoClimb();autoClimb.configure(false);
     descentGuard.reset();navigation.reset();yawControl.reset(0);
     pitchF=rateF=posM=velF=vCmd=xRef=zInt=uOut=0;
@@ -54,6 +55,14 @@ int main() {
     assert(fallPrevention.steeringScale==1 && !fallPrevention.recovering);
     pitchF=25;rateF=100;runController(.005f);
     assert(fallPrevention.effectiveRef==1 && fallPrevention.steeringScale==1);
+    // Actual pre-fall frames: terrain feedback suppression erased/reversed
+    // the forward catch even though the velocity demand was still full scale.
+    reset();testTerrainScale=.55f;cmdFwd=1;velF=.608f;pitchF=5.85f;rateF=8.4f;
+    runController(.005f);
+    assert(appliedBalanceScale==1 && uOut>2.4f); // recorded old output: +0.03
+    reset();testTerrainScale=.61f;cmdFwd=1;velF=.528f;pitchF=5.89f;rateF=10.7f;
+    runController(.005f);
+    assert(appliedBalanceScale==1 && uOut>2.1f); // recorded old output: -0.05
     for(const auto& sample:captured) {
         reset();cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=sample[1];pitchF=sample[2];rateF=sample[3];vCmd=.7253f;
         runController(.005f);

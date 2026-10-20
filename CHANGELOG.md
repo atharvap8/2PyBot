@@ -5,6 +5,8 @@ For the main milestones and estimated dates for future work, see the
 
 ## 4.1.0 — One-pull deployment and status ring
 
+- Keep attitude feedback at full strength: recorded full-stick frames showed
+  terrain scaling nearly erased or reversed the catch command near six degrees.
 - Remove free-speed/SPDHEAD derating of DRIVEV and bypass the predictive
   drive-reference governor for the requested unrestricted full-stick test.
   Preserve existing tilt/rate, current, link/fault and operator-stop protections.

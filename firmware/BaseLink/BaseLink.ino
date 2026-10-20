@@ -498,9 +498,10 @@ void runController(float dt) {
     if(fabsf(requestedDriveV)<=deadband && fabsf(fallPrevention.operatorRef)<=deadband &&
        fabsf(velF)<.05f && !fallPrevention.recovering) driveReferenceActive=false;
     bool driving = driveReferenceActive;
-    const float normalScale=(fallPrevention.fullBalanceFeedback || (stiffHold && !driving)) ?
-                            1.0f:terrain_soften();
-    const float sf=normalScale+autoClimb.blend*(1.0f-normalScale);
+    // Accelerating/roughness must not weaken attitude feedback while the
+    // velocity-error term remains at full strength. This caused the recorded
+    // full-stick catch command to collapse (or reverse) just below six degrees.
+    const float sf=1.0f;
     appliedBalanceScale = sf;
     const float k3t = k3*sf, k4t = k4*sf;
 

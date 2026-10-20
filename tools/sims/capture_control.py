@@ -9,7 +9,9 @@ import urllib.request
 ROOT=Path(__file__).resolve().parents[2]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--go',action='store_true',help='Start recording only after the operator says GO')
-if not parser.parse_args().go:
+parser.add_argument('--stop-after-disarm',action='store_true',help='Optional single-attempt capture')
+options=parser.parse_args()
+if not options.go:
     print('Recorder prepared. NOT recording. Waiting for operator GO.');raise SystemExit(0)
 base='http://10.42.0.1:8080'
 def get(path):
@@ -35,7 +37,7 @@ with (folder/'live-trace.jsonl').open('w') as file:
             file.write(json.dumps(row)+'\n');file.flush()
             if was_balancing and not row['balancing'] and stopped is None:stopped=time.monotonic()
             was_balancing=bool(row['balancing'])
-            if stopped is not None and time.monotonic()-stopped>3:break
+            if options.stop_after_disarm and stopped is not None and time.monotonic()-stopped>3:break
         except Exception as error:
             file.write(json.dumps({'host_time':time.time(),'error':str(error)})+'\n');file.flush()
         time.sleep(max(0,.05-(time.monotonic()-start)))
