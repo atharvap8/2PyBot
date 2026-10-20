@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.0.2, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.0.3, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -443,8 +443,9 @@ void runController(float dt) {
     // Preserve terrain adaptation during calm motion; manoeuvre/recovery
     // feedback takes priority when the reference governor detects a hazard.
     const bool  airborne = terrain_airborne() && P.airFreeze > 0.5f;
-    const float driveScale = P.maxDriveV+autoClimb.referenceBlend*(P.climbVel-P.maxDriveV);
-    float nominalDriveV=navigation.granted?navigation.velocity:cmdFwd*driveScale;
+    const float driveScale = P.driveVEff+autoClimb.referenceBlend*(P.climbVel-P.driveVEff);
+    // Autonomy obeys the same physical speed headroom as the stick.
+    float nominalDriveV=navigation.granted?clampf(navigation.velocity,-P.driveVEff,P.driveVEff):cmdFwd*driveScale;
     requestedDriveV = navigation.granted?nominalDriveV:descentGuard.limitReference(nominalDriveV);
     fallPrevention.update(requestedDriveV,velF,pitchF,rateF,vCmd,P.vMax,P.aMax,P.maxTilt,dt,airborne);
     // A tighter obstacle/heartbeat reference cap takes effect immediately,
@@ -462,9 +463,9 @@ void runController(float dt) {
     // itself created. Raw intent also resets confirmation during stick changes.
     autoClimb.update(nominalDriveV,velF,pitchF,rateF,cmdSteer,
                      wheelTargetL/P.stepsPerM,wheelTargetR/P.stepsPerM,
-                     velF-wheelDiffVelocity,velF+wheelDiffVelocity,P.maxDriveV,
+                     velF-wheelDiffVelocity,velF+wheelDiffVelocity,P.driveVEff,
                      fallPrevention.hazardRisk,terrain_airborne(),stiffHold || gestSeq!=nullptr,satA!=0,dt,
-                     navigation.granted?nominalDriveV:cmdFwd*P.maxDriveV);
+                     navigation.granted?nominalDriveV:cmdFwd*P.driveVEff);
     const bool descentEligible=(autoClimb.enabled && autoClimb.policy==AutoClimb::AUTOMATIC) ||
                                autoClimb.policy==AutoClimb::FORCE_CLIMB;
     const bool descentCue=(autoClimb.active && autoClimb.kind==AutoClimb::DOWN_LOAD) ||
@@ -484,7 +485,7 @@ void runController(float dt) {
         Serial.println("[AUTOCLIMB] LIMITED: wheel command/encoder mismatch; check load/driver/supply");
     climbMode=autoClimb.blend>.001f || autoClimb.active; // retain shadow C state during exit verification
     float vIn = fallPrevention.effectiveRef;
-    const float deadband = P.driveDb*P.maxDriveV;
+    const float deadband = P.driveDb*P.driveVEff;
     if(fabsf(requestedDriveV)>deadband || fabsf(fallPrevention.operatorRef)>deadband)
         driveReferenceActive=true;
     if(fabsf(requestedDriveV)<=deadband && fabsf(fallPrevention.operatorRef)<=deadband &&
@@ -635,7 +636,7 @@ void setup() {
     // below and drives it low. The WS2812 ring shows status instead.
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.0.2 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.0.3 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();
@@ -673,8 +674,8 @@ void setup() {
     motorsRequested = false;
     btgamepad_syncArmed(false);
 
-    Serial.printf("[MAIN] P.stepsPerM=%.0f  P.countsPerM=%.0f  Vmax=%.2f m/s  Amax=%.2f m/s^2\n",
-                  P.stepsPerM, P.countsPerM, P.vMax, P.aMax);
+    Serial.printf("[MAIN] countsPerM=%.0f  free=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f, SPDHEAD %.2f)  Amax=%.2f m/s^2\n",
+                  P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.spdHead, P.aMax);
     Serial.println("BS,READY");
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
 
@@ -787,7 +788,7 @@ void loop() {
     if(previousNavState!=navigation.state && navigation.token)
         Serial.printf("[NAV] state=%u token=%lu\n",(unsigned)navigation.state,(unsigned long)navigation.token);
     if(navigation.granted) {
-        const float scale=P.maxDriveV+autoClimb.referenceBlend*(P.climbVel-P.maxDriveV);
+        const float scale=P.driveVEff+autoClimb.referenceBlend*(P.climbVel-P.driveVEff);
         cmdFwd=scale>0?clampf(navigation.velocity/scale,-1,1):0;
         cmdSteer=clampf(navigation.yawRate*P.trackW*P.stepsPerM/(2.0f*P.maxSteerSt),-1,1);
     } else if(navigation.token) {
@@ -799,7 +800,7 @@ void loop() {
     } else if (joyFresh) {
         // Dual speed mode (LB = LOW, RB = HIGH): scales the pad's authority
         // INSIDE the existing caps. Full stick in LOW mode commands
-        // P.spdLoDrv * P.maxDriveV and
+        // P.spdLoDrv * P.driveVEff and
         // P.spdLoStr * P.maxSteerSt. Radxa override (above)
         // and gesture keyframes (below) stay full-scale on purpose, and
         // the balancer's own limits (P.vMax / P.aMax) never shrink.
@@ -828,7 +829,7 @@ void loop() {
     // Reverse/steering and balance-recovery authority are unchanged.
     // The optional manual-drive ToF guard does not gate autonomous routes.
     if(!navigation.granted)
-        cmdFwd = tofGuard.apply(cmdFwd,P.maxDriveV+autoClimb.referenceBlend*(P.climbVel-P.maxDriveV),millis());
+        cmdFwd = tofGuard.apply(cmdFwd,P.driveVEff+autoClimb.referenceBlend*(P.climbVel-P.driveVEff),millis());
 
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {

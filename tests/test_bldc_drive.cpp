@@ -47,10 +47,29 @@ int main() {
     for(int i=0;i<300;++i)cycle();
     assert(queries==before); // never inject temperature/pos8 replies into armed pos16 feedback
     assert(params_set("LDIR",1)==-3);
-    hub.transmit(.005f);testMicros+=9000;hub.service(.005f);
+    // v4.0.3: a lost reply does not stop either wheel's next torque frame.
+    Serial1.tx.clear();Serial2.tx.clear();
+    hub.transmit(.005f);                                    // no reply injected
+    testMicros+=5000;hub.service(.005f);
+    Serial1.tx.clear();Serial2.tx.clear();
     hub.transmit(.005f);
-    assert(hub.isEnabled() && hub.modeOk()); // one missed reply is not a confirmed mode loss
+    assert(hub.isEnabled() && hub.modeOk());
+    assert(Serial1.tx.size()==10 && Serial1.tx[1]==m0601::CMD_DRIVE); // sent despite the gap
+    assert(Serial2.tx.size()==10 && Serial2.tx[1]==m0601::CMD_DRIVE);
+    reply(Serial1,1);reply(Serial2,2);testMicros+=5000;hub.service(.005f);
+    for(int i=0;i<5;++i)cycle();
+    assert(hub.isEnabled() && hub.modeOk());
+    // Motor rebooted into VELOCITY mode: the very next reply disarms.
+    Serial1.tx.clear();Serial2.tx.clear();hub.transmit(.005f);
+    {uint8_t f[10]={1,m0601::MODE_VELOCITY,0,0,0,0,0,0,0,0};f[9]=m0601::crc8(f,9);for(auto b:f)Serial1.rx.push_back(b);}
+    reply(Serial2,2);testMicros+=5000;hub.service(.005f);
+    assert(!hub.modeOk());
+    Serial1.tx.clear();Serial2.tx.clear();hub.transmit(.005f);
+    assert(!hub.isEnabled() && hub.currentCmdL()==0 && hub.currentCmdR()==0);
+    assert(Serial1.tx[1]==m0601::CMD_MODE || Serial1.tx[1]==m0601::CMD_QUERY); // handshake, no drive value
+    // Total silence: link age expires and the drive stays disabled.
+    hub.enable();
     testMicros+=61000;hub.service(.005f);hub.transmit(.005f);
     assert(!hub.isEnabled() && !hub.modeOk() && hub.currentCmdL()==0 && hub.currentCmdR()==0);
-    puts("BLDC drive: actual UART polarity, pure-turn symmetry, armed DRIVE-only polling and timeout disable passed");
+    puts("BLDC drive: actual UART polarity, pure-turn symmetry, armed DRIVE-only polling, never-blocking send, mode-loss and timeout disable passed");
 }

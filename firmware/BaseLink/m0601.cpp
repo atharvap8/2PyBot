@@ -40,13 +40,19 @@ void M0601Port::begin() {
         pinMode(dePin, OUTPUT); digitalWrite(dePin, LOW);
     }
     while (serial.available()) serial.read();
-    length = 0; pending = NONE; reconfirmMode = true;
+    length = 0; pending = NONE;
 }
 
-bool M0601Port::canSend() const { return pending == NONE && !resync; }
-
 bool M0601Port::write(const uint8_t* frame, Pending kind) {
-    if (!canSend()) return false;
+    if (pending != NONE) {
+        // Previous reply missing or still in flight. Do NOT stall: a stale
+        // torque setpoint is far worse for balance than a stale feedback
+        // sample. If a late reply still arrives, its common fields (mode,
+        // current, rpm, fault) are valid; only the byte 6/7 layout is unknown
+        // when the two outstanding requests differ in kind.
+        ++feedback.timeouts;
+        if (pending != kind) kind = (kind == NONE) ? NONE : AMBIGUOUS;
+    }
     pending = kind; sentUs = micros();
     if (!hardwareDe) digitalWrite(dePin, HIGH);
     serial.write(frame, m0601::FRAME_LEN);
@@ -68,22 +74,16 @@ void M0601Port::decode(const uint8_t* f) {
     feedback.currentA = m0601::rawToAmps((int16_t)((f[2] << 8) | f[3]));
     feedback.rpm = (int16_t)((f[4] << 8) | f[5]);
     if (pending == QUERY) feedback.tempC = f[6];
-    else {
+    else if (pending == DRIVE) {
         feedback.pos16 = (uint16_t)((f[6] << 8) | f[7]);
         feedback.posValid = true; ++feedback.posFrames;
-    }
+    } // AMBIGUOUS: DRIVE/QUERY layout unknown, keep common fields only
     feedback.fault = f[8]; feedback.rxMs = millis(); ++feedback.frames;
-    reconfirmMode = false;
     pending = NONE;
 }
 
 void M0601Port::service() {
     const uint32_t now = micros();
-    if (resync) {
-        while (serial.available()) { serial.read(); ++feedback.dropped; quietSinceUs = now; }
-        if (now - quietSinceUs >= m0601::RESYNC_US) resync = false;
-        return;
-    }
     while (serial.available() && length < sizeof(buffer)) buffer[length++] = (uint8_t)serial.read();
     while (length >= m0601::FRAME_LEN) {
         const bool header = buffer[0] == motorId && buffer[1] >= 1 && buffer[1] <= 3;
@@ -99,13 +99,10 @@ void M0601Port::service() {
             memmove(buffer, buffer + 1, --length); ++feedback.dropped;
         }
     }
-    // A valid reply may already be queued when the control cycle jitters.
-    // Parse it first; do not turn a 9 ms CPU interval into a false mode loss.
+    // A reply this old is lost. Forget the request so a stray late frame is
+    // not decoded with a guessed layout. Link loss is judged by reply age.
     if (pending != NONE && now - sentUs > m0601::REPLY_TIMEOUT_US) {
-        // One missed reply is not a mode change. Link loss is judged by the
-        // 60 ms reply-age check; the last confirmed mode/position remain valid.
         ++feedback.timeouts;
-        reconfirmMode = true;
-        pending = NONE; resync = true; quietSinceUs = now; length = 0;
+        pending = NONE;
     }
 }

@@ -44,7 +44,10 @@ void HubDrive::serviceWheel(HubWheel& w) {
     w.positionFrames = fb.posFrames; w.lastPositionUs = now;
 }
 
-void HubDrive::service(float) { serviceWheel(leftWheel); serviceWheel(rightWheel); }
+void HubDrive::service(float) {
+    serviceWheel(leftWheel); serviceWheel(rightWheel);
+    reportFaults(leftWheel); reportFaults(rightWheel);
+}
 float HubDrive::measuredVelocity(const HubWheel& w) const {
     return P.hubVSrc > .5f ? w.velocity : w.port->fb().rpm * P.rpmSign * w.direction * (2 * PI * P.wheelR / 60);
 }
@@ -82,32 +85,32 @@ void HubDrive::disable() {
 }
 
 void HubDrive::handshake(HubWheel& w) {
-    if (!w.port->canSend()) return;
-    if (w.modeOk) {
-        if (w.port->needsModeConfirmation()) w.port->sendQuery();
-        else w.port->sendDriveRaw(0);
-        return;
-    }
+    // Mode not (yet) confirmed: alternate MODE and QUERY. Neither moves the
+    // wheel. Every reply, DRIVE or QUERY, reports the motor's actual mode.
     if (w.queryNext) w.port->sendQuery();
     else w.port->sendMode(wantedMode());
     w.queryNext = !w.queryNext;
 }
 
 void HubDrive::transmit(float dt) {
-    if (!modeOk() || faultBits()) {
-        disable(); handshake(leftWheel); handshake(rightWheel); return;
+    // v4.0.3 transport: exactly one frame per motor per control cycle, never
+    // gated on the previous reply (4.0.2 skipped drive frames while a reply
+    // was outstanding and then resynchronised for >=10 ms, so one late or
+    // lost reply froze that wheel's torque for ~25 ms and made the update
+    // rate depend on loop jitter). Safety is unchanged: every reply carries
+    // the motor's mode byte, so a motor that rebooted into velocity mode is
+    // seen on the very next reply and the robot disarms.
+    const bool healthy = wheelHealthy(leftWheel) && wheelHealthy(rightWheel);
+    if (!healthy) {
+        disable();
+        for (HubWheel* w : {&leftWheel, &rightWheel}) {
+            if (!w->modeOk) handshake(*w);
+            else w->port->sendDriveRaw(0);   // confirmed mode, zero torque
+        }
+        return;
     }
-    // Never stall the healthy wheel while the other port resynchronises.
-    if (!leftPort.canSend() && !rightPort.canSend()) return;
-    const bool leftReady = leftPort.canSend() && !leftPort.needsModeConfirmation();
-    const bool rightReady = rightPort.canSend() && !rightPort.needsModeConfirmation();
-    // A recovered port must confirm mode before another drive value. A motor
-    // brown-out can reboot in velocity mode, where current raw values are unsafe.
-    if (leftPort.canSend() && leftPort.needsModeConfirmation()) leftPort.sendQuery();
-    if (rightPort.canSend() && rightPort.needsModeConfirmation()) rightPort.sendQuery();
-    if (!leftReady && !rightReady) return;
-    if (!enabled && leftReady && rightReady && millis() - lastQueryMs >= 500) {
-        // QUERY layout is never interleaved with armed DRIVE transactions.
+    if (!enabled && millis() - lastQueryMs >= 500) {
+        // Temperature only while disarmed: QUERY replies carry no pos16.
         leftPort.sendQuery(); rightPort.sendQuery(); lastQueryMs = millis(); return;
     }
     const uint32_t now = micros();
@@ -115,8 +118,9 @@ void HubDrive::transmit(float dt) {
     lastDriveUs = now;
     if (wantedMode() == m0601::MODE_VELOCITY) {
         const float scale = 60 / (2 * PI * P.wheelR);
-        if (leftReady) leftPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(leftWheel.target * scale * leftWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
-        if (rightReady) rightPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(rightWheel.target * scale * rightWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
+        leftPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(leftWheel.target * scale * leftWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
+        rightPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(rightWheel.target * scale * rightWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
+        leftWheel.current = rightWheel.current = 0;
         return;
     }
     hub_control::Currents currents;
@@ -127,8 +131,18 @@ void HubDrive::transmit(float dt) {
             balanceControl ? balanceAcceleration : NAN, recoveryControl);
     }
     currentLimited = currents.limited;
-    if (leftReady && leftPort.sendDriveRaw(m0601::ampsToRaw(currents.left * leftWheel.direction * P.curSign))) leftWheel.current = currents.left;
-    if (rightReady && rightPort.sendDriveRaw(m0601::ampsToRaw(currents.right * rightWheel.direction * P.curSign))) rightWheel.current = currents.right;
+    leftWheel.current = currents.left; rightWheel.current = currents.right;
+    leftPort.sendDriveRaw(m0601::ampsToRaw(currents.left * leftWheel.direction * P.curSign));
+    rightPort.sendDriveRaw(m0601::ampsToRaw(currents.right * rightWheel.direction * P.curSign));
+}
+
+void HubDrive::reportFaults(HubWheel& w) {
+    const uint8_t f = w.port->fb().fault;
+    if (f == w.lastFault) return;
+    w.lastFault = f;
+    Serial.printf("[HUB] %s fault 0x%02X%s\n", w.port->name(), f,
+        !f ? " cleared" : (f & 0x02) ? " BUS OVERCURRENT" : (f & 0x04) ? " PHASE OVERCURRENT" :
+        (f & 0x08) ? " STALL" : (f & 0x10) ? " OVERHEAT" : (f & 0x01) ? " SENSOR" : "");
 }
 
 void HubDrive::printStatus() const {

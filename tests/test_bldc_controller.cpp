@@ -44,23 +44,35 @@ void reset() {
 }
 int main() {
     // Exact pre-fall snapshots from the supervised 2026-10-20 capture.
-    // This replay checks the corrected command path, not counterfactual body motion.
+    // v4.0.3: full stick is DRIVEV limited to SPDHEAD x free speed, so the
+    // reference no longer sits at the motor's free speed with no catch margin.
     const float captured[][4]={{1653867,.602f,3.91f,48.4f},{1654079,.633f,15.2f,130.9f},{1666810,.752f,6.68f,6.8f}};
+    reset();
+    assert(P.driveVEff<P.vNoLoad*.71f && P.driveVEff>P.vNoLoad*.69f && P.maxDriveV==1);
     for(const auto& sample:captured) {
-        reset();cmdFwd=1;fallPrevention.operatorRef=1;velF=sample[1];pitchF=sample[2];rateF=sample[3];vCmd=.7253f;
+        reset();cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=sample[1];pitchF=sample[2];rateF=sample[3];vCmd=.7253f;
         runController(.005f);
-        assert(uOut>0 && vCmd>.7253f && requestedDriveV==1);
+        assert(uOut>0 && vCmd>.7253f && std::fabs(requestedDriveV-P.driveVEff)<1e-5f);
     }
     reset();
     cmdFwd=1;fallPrevention.operatorRef=1;velF=.806f;vCmd=.725f;pitchF=15.2f;rateF=130.9f;
     runController(.005f);
-    assert(requestedDriveV==1 && fallPrevention.operatorRef==1);
+    assert(std::fabs(requestedDriveV-P.driveVEff)<1e-5f && fallPrevention.operatorRef<=1);
     assert(uOut==P.aMax && vCmd>.725f && !satV);
     assert(.5f*(wheelTargetL+wheelTargetR)/P.stepsPerM>.725f);
     reset();
-    cmdFwd=1;fallPrevention.operatorRef=1;velF=1.2f;vCmd=1.2f;
+    cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=1.2f;vCmd=1.2f;
     runController(.005f);
-    assert(vCmd>1.2f && requestedDriveV==1); // balance is free to outrun stick speed
+    assert(vCmd>1.2f); // balance is still free to outrun the stick reference
+    // Measured free speed raises the real top speed; DRIVEV still bounds it.
+    params_set("FREERPM",300,true);
+    assert(std::fabs(P.driveVEff-1.0f)<1e-5f);
+    params_set("FREERPM",0,true);
+    // Autonomy obeys the same physical limit.
+    reset();navigation.granted=true;navigation.velocity=1;
+    runController(.005f);
+    assert(std::fabs(requestedDriveV-P.driveVEff)<1e-5f);
+    navigation.granted=false;
     reset();
     params_set("MAXSPD",P.countsPerM*.8f,true);
     cmdFwd=1;fallPrevention.operatorRef=.8f;velF=.9f;vCmd=.8f;pitchF=15;rateF=100;
@@ -70,5 +82,5 @@ int main() {
     cmdFwd=1;fallPrevention.operatorRef=1;pitchF=20;rateF=100;vCmd=.67f;
     runController(.005f);
     assert(satV && vCmd<=P.motorMa*.001f/P.hubKp+.00001f);
-    puts("BLDC production controller: uncapped full stick, recovery above model speed and current-state anti-windup passed");
+    puts("BLDC production controller: speed headroom, recovery above stick speed and current-state anti-windup passed");
 }

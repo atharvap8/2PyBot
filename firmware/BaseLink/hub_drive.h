@@ -12,6 +12,7 @@ struct HubWheel {
     uint16_t previousPosition = 0;
     uint32_t positionFrames = 0, lastPositionUs = 0;
     bool initialized = false, modeOk = false, queryNext = false;
+    uint8_t lastFault = 0;
 };
 
 class HubDrive {
@@ -31,6 +32,7 @@ public:
     float wheelVelL() const { return measuredVelocity(leftWheel); }
     float wheelVelR() const { return measuredVelocity(rightWheel); }
     bool modeOk() const { return leftWheel.modeOk && rightWheel.modeOk && leftPort.fb().posValid && rightPort.fb().posValid; }
+    bool wheelHealthy(const HubWheel& w) const { return w.modeOk && w.port->fb().posValid && !w.port->fb().fault; }
     bool linkOk(uint32_t ageMs) const;
     uint8_t faultBits() const { return leftPort.fb().fault | rightPort.fb().fault; }
     const M0601Port& left() const { return leftPort; }
@@ -54,5 +56,6 @@ private:
     float balanceAcceleration = 0;
     bool balanceControl = false, recoveryControl = false;
     uint32_t lastDriveUs = 0, lastQueryMs = 0;
+    void reportFaults(HubWheel& wheel);
 };
 extern HubDrive hub;

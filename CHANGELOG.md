@@ -3,6 +3,24 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.0.3 — RS485 transport regression and full-stick headroom
+
+- Revert the 4.0.1/4.0.2 one-outstanding-request transport. Each motor again
+  receives exactly one frame per 5 ms cycle (supplied BaseLinkHub behaviour).
+  4.0.2 skipped drive frames while a reply was pending and then resynchronised
+  for >=10 ms, so a single late/lost reply froze that wheel's torque for
+  ~25 ms and loop jitter halved the update rate. Mode safety is unchanged:
+  every reply carries the motor mode byte, so a velocity-mode reboot disarms
+  on the next reply. Late replies with an unknown DRIVE/QUERY layout update
+  only the common fields.
+- Full stick now maps to min(DRIVEV, SPDHEAD x free speed, MAXSPD). New
+  SPDHEAD (default 0.70) keeps the catch margin the balance loop needs; free
+  speed is FREERPM when measured (AT,stall), else SUPPLYV x Kv. At 12 V that is
+  ~0.51 m/s; 1.00 m/s needs a measured free speed >= 1.43 m/s (higher supply).
+  Navigation velocity obeys the same limit. New PR,VDRIVE readback.
+- Log motor fault-byte transitions with their meaning.
+- Control law (4/4/0.5 common loop, direct acceleration feed-forward) unchanged.
+
 ## 4.0.2 — RS485 arming dropout
 
 - Keep the last confirmed motor mode/position through an individual missing

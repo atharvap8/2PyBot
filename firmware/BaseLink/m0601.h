@@ -10,7 +10,9 @@ constexpr uint8_t FRAME_LEN = 10, CMD_DRIVE = 0x64, CMD_QUERY = 0x74, CMD_MODE =
 enum Mode : uint8_t { MODE_CURRENT = 1, MODE_VELOCITY = 2, MODE_POSITION = 3 };
 constexpr float POS_PER_REV = 32767.0f, CURRENT_FULL_A = 8.0f;
 constexpr int16_t RPM_CMD_MAX = 330;
-constexpr uint32_t REPLY_TIMEOUT_US = 8000, RESYNC_US = 10000;
+// A reply normally lands ~2 ms after its request. Anything older than this
+// when the next frame is due is counted as missed; it never blocks sending.
+constexpr uint32_t REPLY_TIMEOUT_US = 8000;
 uint8_t crc8(const uint8_t* data, size_t n);
 void frameDrive(uint8_t* f, uint8_t id, int16_t value, uint8_t accel, bool brake);
 void frameQuery(uint8_t* f, uint8_t id);
@@ -36,8 +38,10 @@ public:
     M0601Port(HardwareSerial& serial, uint8_t id, int8_t rx, int8_t tx, int8_t de, const char* name);
     void begin();
     void service();
-    bool canSend() const;
-    bool needsModeConfirmation() const { return reconfirmMode; }
+    // v4.0.3: the port never refuses to send. One frame per cycle goes out
+    // regardless of whether the previous reply arrived (the supplied
+    // BaseLinkHub behaviour that balanced on this hardware). A missed reply
+    // only costs feedback freshness; link loss is judged by reply age.
     bool sendDriveRaw(int16_t value, uint8_t accel = 0);
     bool sendQuery();
     bool sendMode(uint8_t mode);
@@ -47,17 +51,16 @@ public:
     bool hwDe() const { return hardwareDe; }
 
 private:
-    enum Pending : uint8_t { NONE, DRIVE, QUERY };
+    enum Pending : uint8_t { NONE, DRIVE, QUERY, AMBIGUOUS };
     bool write(const uint8_t* frame, Pending kind);
     void decode(const uint8_t* frame);
     HardwareSerial& serial;
     uint8_t motorId;
     int8_t rxPin, txPin, dePin;
     const char* label;
-    bool hardwareDe = false, resync = false;
-    bool reconfirmMode = true;
+    bool hardwareDe = false;
     Pending pending = NONE;
-    uint32_t sentUs = 0, quietSinceUs = 0;
+    uint32_t sentUs = 0;
     uint8_t buffer[40] = {}, length = 0;
     M0601Feedback feedback;
 };

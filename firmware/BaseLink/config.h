@@ -1,4 +1,4 @@
-/* 2PyBot v4.0.1: ESP32-WROOM + two M0601 RS485 BLDC hubs.
+/* 2PyBot v4.0.3: ESP32-WROOM + two M0601 RS485 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */
@@ -85,7 +85,12 @@
 // MAXSPD=0 is uncapped. The voltage/free-speed model is telemetry only.
 #define MAX_SPEED_STEPS     0.0f
 #define MOTOR_ACCEL_LIMIT   (6.0f * COUNTS_PER_M)
-#define MAX_DRIVE_VEL_MS     1.00f
+#define MAX_DRIVE_VEL_MS     1.00f   // requested; limited by SPEED_HEADROOM x free speed
+// Share of the motor free speed usable as a drive reference. The rest is the
+// catch margin the balance loop needs (simulation: 0.70 survives a shove at
+// top speed, 0.80 does not). Not a diagnostic cap: measure FREERPM (AT,stall)
+// or raise the supply voltage to raise the real top speed.
+#define SPEED_HEADROOM       0.70f
 #define DRIVE_DEADBAND      0.03f
 #define JOY_FWD_SCALE       (-0.2f)
 #define JOY_STEER_SCALE     1.0f
