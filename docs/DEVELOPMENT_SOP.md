@@ -146,6 +146,34 @@ instead of restarting it mid-write.
 - An interrupted, unconfirmed lock acquisition is reported for recovery, never
   interpreted as permission to unlock or drive.
 
+## Managed hotspot band
+
+`scripts/radxa/hotspot.json` requests **2.4 GHz (`bg`), channel 6** on the existing
+NetworkManager hotspot. A null `connection` selects the unique active Wi-Fi AP;
+an explicit profile name can be used when multiple APs are active. A pull changing that file selects a hotspot
+deployment. It waits for stationary controller maintenance, modifies only the
+band/channel, reactivates that profile and verifies the live radio frequency.
+SSID, password, IP addressing and uplink configuration are preserved. Fresh
+installations also default to 2.4 GHz/channel 6.
+
+The AP restart briefly disconnects Wi-Fi/SSH clients. Rejoin the same SSID and
+reconnect SSH; deployment runs under systemd and continues independently of the
+terminal. If band activation fails before handback, the previous band/channel
+are restored. Original settings are retained under `hotspot-backups/<commit>.json`
+in the deployment state directory. An already-correct radio is not restarted.
+
+After reconnecting, check `/ui/deployment.html` and inspect the active interface:
+
+```sh
+nmcli -f NAME,TYPE connection show --active
+iw dev
+```
+
+Expected live channel: **6**; expected frequency: **2437 MHz**. The change
+does not alter firmware inputs; a first deployment after host-only bootstrap
+may still have the initial controller update pending. Reconnect the controller
+after bootstrap and leave the robot stationary for that coordinated deployment.
+
 ## Ring animations and ownership
 
 | State | Animation |

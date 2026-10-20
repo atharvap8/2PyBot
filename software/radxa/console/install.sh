@@ -8,8 +8,12 @@ APP_USER="${SUDO_USER:-radxa}"
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 SSID="${SSID:-2PyBot}"
 PSK="${PSK:?Set PSK to the hotspot password before running the installer}"
-BAND="${BAND:-a}"
-CHAN="${CHAN:-36}"
+BAND="${BAND:-bg}"
+if [ "$BAND" = "a" ]; then
+  CHAN="${CHAN:-36}"
+else
+  CHAN="${CHAN:-6}"
+fi
 COUNTRY="${COUNTRY:-IN}"
 SERIAL_PORT="${SERIAL_PORT:-/dev/ttyUSB0}"
 WIFI_DEV="${WIFI_DEV:-$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2=="wifi"{print $1;exit}')}"

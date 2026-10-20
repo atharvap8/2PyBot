@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 SOURCE=Path(__file__).resolve().parents[1]/'scripts/radxa/deploy.py'
 SPEC=importlib.util.spec_from_file_location('one_pull_test_deploy',SOURCE)
@@ -44,6 +45,9 @@ class Fake(deploy.Deployment):
     def wait_controller(self):self.events.append('controller-ready');return {'connected':True}
     def stream_running(self):return True
     def run(self,args,**kwargs):self.events.append(list(args))
+    def prepare_hotspot(self):self.events.append('prepare-hotspot');return {'changed':True}
+    def apply_hotspot(self,hotspot):self.events.append('hotspot');return {'band':'bg','channel':6}
+    def restore_hotspot(self,hotspot):self.events.append('restore-hotspot')
     def api(self,path,body=None):
         if path=='/api/internal/deployment/lock':
             self.events.append('lock')
@@ -155,6 +159,34 @@ class OnePullTests(unittest.TestCase):
         self.assertNotIn('release',self.manager.events)
         progress=json.loads((self.manager.state_dir/'progress.json').read_text())
         self.assertIn('rollback was not verified',progress['recovery'][0])
+    def hotspot_only(self):
+        state=self.manager.read_state();state['firmware_fingerprint']='f'*64
+        self.manager.state_file.write_text(json.dumps(state))
+        self.manager.changed_paths=lambda previous:(['scripts/radxa/hotspot.json'],False)
+    def test_hotspot_only_change_holds_controller_without_restarting_host_or_flashing(self):
+        self.hotspot_only()
+        with patch.object(Path,'is_symlink',return_value=True):self.assertTrue(self.manager.deploy())
+        events=self.manager.events
+        self.assertLess(events.index('lock'),events.index('hotspot'))
+        self.assertLess(events.index('hotspot'),events.index('release'))
+        self.assertNotIn('activate',events);self.assertNotIn('queue-flash',events)
+        self.assertEqual(self.manager.read_state()['hotspot']['band'],'bg')
+    def test_failed_band_switch_restores_network_before_controller_handback(self):
+        self.hotspot_only()
+        def fail(hotspot):self.manager.events.append('hotspot');raise RuntimeError('AP failed')
+        self.manager.apply_hotspot=fail
+        with patch.object(Path,'is_symlink',return_value=True):
+            with self.assertRaisesRegex(RuntimeError,'AP failed'):self.manager.deploy()
+        events=self.manager.events
+        self.assertLess(events.index('restore-hotspot'),events.index('release'))
+        self.assertEqual(self.manager.read_state()['commit'],'a'*40)
+    def test_failed_network_rollback_keeps_maintenance_held(self):
+        self.hotspot_only()
+        def fail(hotspot):raise RuntimeError('AP failed')
+        self.manager.apply_hotspot=fail;self.manager.restore_hotspot=fail
+        with patch.object(Path,'is_symlink',return_value=True):
+            with self.assertRaisesRegex(RuntimeError,'AP failed'):self.manager.deploy()
+        self.assertNotIn('release',self.manager.events)
 
 
 if __name__=='__main__':unittest.main()

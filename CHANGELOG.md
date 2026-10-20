@@ -5,6 +5,8 @@ For the main milestones and estimated dates for future work, see the
 
 ## 4.1.0 — One-pull deployment and status ring
 
+- Manage the existing hotspot's 2.4 GHz/channel 6 setting through one-pull,
+  verify the live radio and restore the previous band on activation failure.
 - Add managed fast-forward pulls, commit-bound CI firmware/APK bundles, local
   firmware build support and input/toolchain fingerprint caching.
 - Stage versioned host releases, hold controller maintenance across restarts,

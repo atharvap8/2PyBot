@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import hashlib
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -42,11 +43,13 @@ class Plan:
     firmware: bool = False
     firmware_worker: bool = False
     android: bool = False
+    hotspot: bool = False
 
 
 def plan_changes(paths, first=False):
     plan = Plan(**{name: first for name in Plan.__dataclass_fields__})
     for path in paths:
+        if path=="scripts/radxa/hotspot.json":plan.hotspot=True
         if path.startswith("software/android/") or path=="VERSION":plan.android=True
         if path.startswith("firmware/BaseLink/") or path.startswith("scripts/firmware/") or path=="VERSION":
             plan.firmware=True
@@ -363,6 +366,79 @@ class Deployment:
                 "scripts/firmware/fingerprint.py","software/radxa/console/console/versioning.py","VERSION")
         return hashlib.sha256(self.git("ls-tree","-r",self.commit,"--",*inputs).stdout.encode()).hexdigest()
 
+    def hotspot_command(self,*arguments):
+        result=subprocess.run(arguments,capture_output=True,text=True,timeout=45,
+            env=dict(self.environment,LC_ALL='C'),check=False)
+        if result.returncode:
+            raise RuntimeError('Hotspot command failed: '+(result.stderr.strip() or result.stdout.strip()))
+        return result.stdout.strip()
+
+    def hotspot_radio(self,interface):
+        output=self.hotspot_command('iw','dev',interface,'info')
+        match=re.search(r'\bchannel\s+(\d+)\s+\((\d+)\s+MHz\)',output)
+        if not match:raise RuntimeError('Cannot verify the active hotspot radio channel')
+        return tuple(map(int,match.groups()))
+
+    def prepare_hotspot(self):
+        target=read_json(self.source/'scripts/radxa/hotspot.json',{})
+        if set(target)!={'connection','band','channel'}:raise ValueError('Invalid managed hotspot settings')
+        name=target.get('connection')
+        if name is not None and (not isinstance(name,str) or not name.strip() or any(ord(c)<32 for c in name)):
+            raise ValueError('A NetworkManager hotspot connection name is required')
+        if target.get('band')!='bg' or type(target.get('channel')) is not int or not 1<=target['channel']<=11:
+            raise ValueError('Managed hotspot requires band bg and a 2.4 GHz channel from 1 to 11')
+        def field(key):
+            return self.hotspot_command('nmcli','--get-values',key,'connection','show','uuid',identifier)
+        uuid_pattern=r'[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}'
+        if name is None:
+            candidates=[]
+            for identifier in self.hotspot_command('nmcli','--get-values','UUID','connection','show','--active').splitlines():
+                if not re.fullmatch(uuid_pattern,identifier):raise RuntimeError('Invalid active connection identity')
+                if field('connection.type')=='802-11-wireless' and field('802-11-wireless.mode')=='ap':candidates.append(identifier)
+            if len(candidates)!=1:raise RuntimeError('Expected exactly one active Wi-Fi hotspot; set its connection name in hotspot.json')
+            identifier=candidates[0];name=field('connection.id')
+        else:
+            identifier=self.hotspot_command('nmcli','--get-values','connection.uuid','connection','show',name)
+        if not re.fullmatch(uuid_pattern,identifier):
+            raise RuntimeError('Hotspot connection must resolve to exactly one profile: '+name)
+        if field('connection.type')!='802-11-wireless' or field('802-11-wireless.mode')!='ap':
+            raise RuntimeError('Selected connection is not a Wi-Fi access point; no settings changed')
+        if field('GENERAL.STATE')!='activated':
+            raise RuntimeError('The managed hotspot must already be active before changing its band')
+        interface=field('GENERAL.DEVICES')
+        if not re.fullmatch(r'[A-Za-z0-9_.:-]+',interface):raise RuntimeError('Cannot identify the hotspot Wi-Fi interface')
+        band=field('802-11-wireless.band');channel=field('802-11-wireless.channel')
+        if band not in {'','a','bg'} or not channel.isdigit():raise RuntimeError('Invalid existing hotspot band/channel')
+        radio=self.hotspot_radio(interface)
+        return dict(target,connection=name,uuid=identifier,interface=interface,previous_band=band,previous_channel=channel,
+            changed=band!=target['band'] or int(channel)!=target['channel'] or radio!=(target['channel'],2407+5*target['channel']))
+
+    def apply_hotspot(self,hotspot):
+        if hotspot['changed']:
+            # Only band/channel are managed. SSID, PSK, addressing, sharing and
+            # the uplink are never copied, printed or rewritten.
+            backup=self.state_dir/'hotspot-backups'/(self.commit+'.json')
+            if not backup.exists():atomic(backup,hotspot)
+            self.progress.update('deploying','Switching hotspot to 2.4 GHz; reconnect Wi-Fi clients',progress=96)
+            self.hotspot_command('nmcli','connection','modify','uuid',hotspot['uuid'],
+                '802-11-wireless.band',hotspot['band'],'802-11-wireless.channel',str(hotspot['channel']))
+            self.hotspot_command('nmcli','--wait','30','connection','up','uuid',hotspot['uuid'])
+        if self.hotspot_radio(hotspot['interface'])!=(hotspot['channel'],2407+5*hotspot['channel']):
+            raise RuntimeError('Hotspot did not activate on the requested 2.4 GHz channel')
+        return {key:hotspot[key] for key in ('connection','uuid','band','channel','interface')}
+
+    def restore_hotspot(self,hotspot):
+        backup=read_json(self.state_dir/'hotspot-backups'/(self.commit+'.json'),hotspot)
+        if backup.get('uuid')!=hotspot['uuid']:raise RuntimeError('Hotspot rollback profile identity changed')
+        self.hotspot_command('nmcli','connection','modify','uuid',hotspot['uuid'],
+            '802-11-wireless.band',backup['previous_band'],'802-11-wireless.channel',backup['previous_channel'])
+        self.hotspot_command('nmcli','--wait','30','connection','up','uuid',hotspot['uuid'])
+        channel,frequency=self.hotspot_radio(hotspot['interface'])
+        if int(backup['previous_channel']) and channel!=int(backup['previous_channel']):
+            raise RuntimeError('Previous hotspot channel did not recover')
+        if (backup['previous_band']=='bg' and not 2400<=frequency<2500) or (backup['previous_band']=='a' and frequency<5000):
+            raise RuntimeError('Previous hotspot band did not recover')
+
     def preflight(self):
         if self.api("/api/deployment/status").get("protocol")!=1:
             raise DeploymentDeferred("One-time host bootstrap is required")
@@ -606,9 +682,10 @@ class Deployment:
             return True
         self.progress.update("checking","Checking requested deployment",commit=self.commit,previous_commit=state.get("commit"),progress=2)
         token=None;activated=False;released=False;previous=state.get("release");had_stream=False
+        hotspot=None;hotspot_attempted=False;hotspot_result=state.get('hotspot')
         existing_hold=read_json(Path(self.config.get("firmware_root","/var/lib/2pybot/firmware"))/"deployment-hold.json",{})
         try:
-            if needs_runtime or plan.firmware:
+            if needs_runtime or plan.firmware or plan.hotspot:
                 if existing_hold and existing_hold.get("commit")!=self.commit:
                     raise DeploymentDeferred("Another interrupted deployment holds the controller; recover it first")
                 if existing_hold:
@@ -627,6 +704,7 @@ class Deployment:
                 self.progress.update("building","Preparing immutable release",progress=8)
                 self.stage_release(plan)
                 self.prepare(plan)
+                hotspot=self.prepare_hotspot() if plan.hotspot else None
                 firmware=self.prepare_firmware(fingerprint) if plan.firmware else None
                 if self.stable_head()!=self.commit:raise GitBusy("A second pull changed the requested commit during preparation")
                 token=existing_hold.get("token") or uuid.uuid4().hex
@@ -659,20 +737,29 @@ class Deployment:
                     self.progress.update('deploying','Publishing the checked Android download',progress=95)
                     self.publish_android()
                 if plan.monitor:self.install_monitor()
+                if hotspot:
+                    hotspot_attempted=hotspot['changed']
+                    hotspot_result=self.apply_hotspot(hotspot)
                 self.api("/api/internal/deployment/release",{"token":token});released=True
                 self.wait_controller()
             if self.stable_head()!=self.commit:raise GitBusy("Repository changed before deployment completion")
-            if plan.android and not (needs_runtime or plan.firmware):
+            if plan.android and not (needs_runtime or plan.firmware or plan.hotspot):
                 self.fetch_bundle();self.publish_android()
-            if plan.monitor and not (needs_runtime or plan.firmware):self.install_monitor()
+            if plan.monitor and not (needs_runtime or plan.firmware or plan.hotspot):self.install_monitor()
             record={"commit":self.commit,"previous":state.get("commit"),"repo":str(self.repo),
                 "release":str(self.release) if activated else previous,"venv":str(self.venv),
                 "firmware_fingerprint":fingerprint if plan.firmware else state.get("firmware_fingerprint"),
+                "hotspot":hotspot_result,
                 "actions":asdict(plan),"applied_at":datetime.now(timezone.utc).isoformat()}
             atomic(self.state_file,record)
             self.progress.update("success","Deployment verified; local START remains required",progress=100,applied_commit=self.commit)
             return True
         except (DeploymentDeferred,GitBusy) as error:
+            if hotspot_attempted and not released:
+                try:self.restore_hotspot(hotspot)
+                except Exception as failure:
+                    self.progress.update('failed',str(error),recovery=['Hotspot rollback failed: '+str(failure)])
+                    raise RuntimeError('Hotspot rollback failed; maintenance remains held') from failure
             if token and not activated:
                 try:self.api("/api/internal/deployment/release",{"token":token})
                 except Exception:pass
@@ -680,11 +767,16 @@ class Deployment:
             raise
         except Exception as error:
             recovery=[]
+            network_recovered=True
+            if hotspot_attempted and not released:
+                try:self.restore_hotspot(hotspot)
+                except Exception as failure:
+                    network_recovered=False;recovery.append('Hotspot rollback failed: '+str(failure))
             # Never reset/restart a possibly re-armed controller after handback.
             if token and not released:
                 job=read_json(Path(self.config.get("firmware_root","/var/lib/2pybot/firmware"))/"current.json",{})
                 if job.get("status") not in {"queued","running","recovering","preparing","recovery_required"}:
-                    recovery_ok=True
+                    recovery_ok=network_recovered
                     updated_firmware=job.get('deployment_token')==token and job.get('status')=='succeeded'
                     if updated_firmware:
                         recovery.append('New firmware is verified; keeping its host release and maintenance lock together')
@@ -736,8 +828,8 @@ class Deployment:
             if not force and old_progress.get("phase")=="failed" and old_progress.get("commit")==self.commit and pull.get("updated_at",0)<=old_progress.get("updated_at",0):
                 return False # failure is latched; a new pull or explicit retry is required
             return self.deploy_coordinated(plan,state,dry_run)
-        if plan.firmware and not dry_run:
-            raise GitBusy("Firmware changed: install the one-pull configuration before marking this commit deployed")
+        if (plan.firmware or plan.hotspot) and not dry_run:
+            raise GitBusy("Firmware/hotspot changed: install the one-pull configuration before marking this commit deployed")
         print(json.dumps({"commit": self.commit, "previous": previous, "actions": asdict(plan)}), flush=True)
         if dry_run:
             return True
