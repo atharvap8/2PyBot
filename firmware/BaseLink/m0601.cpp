@@ -40,7 +40,7 @@ void M0601Port::begin() {
         pinMode(dePin, OUTPUT); digitalWrite(dePin, LOW);
     }
     while (serial.available()) serial.read();
-    length = 0; pending = NONE;
+    length = 0; pending = NONE; reconfirmMode = true;
 }
 
 bool M0601Port::canSend() const { return pending == NONE && !resync; }
@@ -73,6 +73,7 @@ void M0601Port::decode(const uint8_t* f) {
         feedback.posValid = true; ++feedback.posFrames;
     }
     feedback.fault = f[8]; feedback.rxMs = millis(); ++feedback.frames;
+    reconfirmMode = false;
     pending = NONE;
 }
 
@@ -101,8 +102,10 @@ void M0601Port::service() {
     // A valid reply may already be queued when the control cycle jitters.
     // Parse it first; do not turn a 9 ms CPU interval into a false mode loss.
     if (pending != NONE && now - sentUs > m0601::REPLY_TIMEOUT_US) {
+        // One missed reply is not a mode change. Link loss is judged by the
+        // 60 ms reply-age check; the last confirmed mode/position remain valid.
         ++feedback.timeouts;
-        feedback.mode = 0; feedback.posValid = false;
+        reconfirmMode = true;
         pending = NONE; resync = true; quietSinceUs = now; length = 0;
     }
 }

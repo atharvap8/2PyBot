@@ -37,6 +37,7 @@ public:
     void begin();
     void service();
     bool canSend() const;
+    bool needsModeConfirmation() const { return reconfirmMode; }
     bool sendDriveRaw(int16_t value, uint8_t accel = 0);
     bool sendQuery();
     bool sendMode(uint8_t mode);
@@ -54,6 +55,7 @@ private:
     int8_t rxPin, txPin, dePin;
     const char* label;
     bool hardwareDe = false, resync = false;
+    bool reconfirmMode = true;
     Pending pending = NONE;
     uint32_t sentUs = 0, quietSinceUs = 0;
     uint8_t buffer[40] = {}, length = 0;

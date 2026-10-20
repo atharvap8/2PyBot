@@ -3,6 +3,14 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.0.2 — RS485 arming dropout
+
+- Keep the last confirmed motor mode/position through an individual missing
+  reply; retain the 60 ms sustained-link-loss cutoff and immediate real-fault stop.
+- Service each UART independently and confirm mode after resynchronisation
+  before sending more drive current. Log the exact mode, fault, reply ages,
+  timeout counts and CRC counts when a motor-health disarm occurs.
+
 ## 4.0.1 — Full-stick balance recovery
 
 - Remove the supply/Kv estimate from speed/reference/steering clamps. MAXSPD=0

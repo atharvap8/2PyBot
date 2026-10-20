@@ -83,7 +83,11 @@ void HubDrive::disable() {
 
 void HubDrive::handshake(HubWheel& w) {
     if (!w.port->canSend()) return;
-    if (w.modeOk) { w.port->sendDriveRaw(0); return; }
+    if (w.modeOk) {
+        if (w.port->needsModeConfirmation()) w.port->sendQuery();
+        else w.port->sendDriveRaw(0);
+        return;
+    }
     if (w.queryNext) w.port->sendQuery();
     else w.port->sendMode(wantedMode());
     w.queryNext = !w.queryNext;
@@ -93,8 +97,16 @@ void HubDrive::transmit(float dt) {
     if (!modeOk() || faultBits()) {
         disable(); handshake(leftWheel); handshake(rightWheel); return;
     }
-    if (!leftPort.canSend() || !rightPort.canSend()) return;
-    if (!enabled && millis() - lastQueryMs >= 500) {
+    // Never stall the healthy wheel while the other port resynchronises.
+    if (!leftPort.canSend() && !rightPort.canSend()) return;
+    const bool leftReady = leftPort.canSend() && !leftPort.needsModeConfirmation();
+    const bool rightReady = rightPort.canSend() && !rightPort.needsModeConfirmation();
+    // A recovered port must confirm mode before another drive value. A motor
+    // brown-out can reboot in velocity mode, where current raw values are unsafe.
+    if (leftPort.canSend() && leftPort.needsModeConfirmation()) leftPort.sendQuery();
+    if (rightPort.canSend() && rightPort.needsModeConfirmation()) rightPort.sendQuery();
+    if (!leftReady && !rightReady) return;
+    if (!enabled && leftReady && rightReady && millis() - lastQueryMs >= 500) {
         // QUERY layout is never interleaved with armed DRIVE transactions.
         leftPort.sendQuery(); rightPort.sendQuery(); lastQueryMs = millis(); return;
     }
@@ -103,8 +115,8 @@ void HubDrive::transmit(float dt) {
     lastDriveUs = now;
     if (wantedMode() == m0601::MODE_VELOCITY) {
         const float scale = 60 / (2 * PI * P.wheelR);
-        leftPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(leftWheel.target * scale * leftWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
-        rightPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(rightWheel.target * scale * rightWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
+        if (leftReady) leftPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(leftWheel.target * scale * leftWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
+        if (rightReady) rightPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(rightWheel.target * scale * rightWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
         return;
     }
     hub_control::Currents currents;
@@ -114,9 +126,9 @@ void HubDrive::transmit(float dt) {
         currents = controller.update(leftWheel.target, rightWheel.target, wheelVelL(), wheelVelR(), dt, settings,
             balanceControl ? balanceAcceleration : NAN, recoveryControl);
     }
-    leftWheel.current = currents.left; rightWheel.current = currents.right; currentLimited = currents.limited;
-    leftPort.sendDriveRaw(m0601::ampsToRaw(currents.left * leftWheel.direction * P.curSign));
-    rightPort.sendDriveRaw(m0601::ampsToRaw(currents.right * rightWheel.direction * P.curSign));
+    currentLimited = currents.limited;
+    if (leftReady && leftPort.sendDriveRaw(m0601::ampsToRaw(currents.left * leftWheel.direction * P.curSign))) leftWheel.current = currents.left;
+    if (rightReady && rightPort.sendDriveRaw(m0601::ampsToRaw(currents.right * rightWheel.direction * P.curSign))) rightWheel.current = currents.right;
 }
 
 void HubDrive::printStatus() const {

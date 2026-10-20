@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.0.1, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.0.2, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -635,7 +635,7 @@ void setup() {
     // below and drives it low. The WS2812 ring shows status instead.
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.0.1 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.0.2 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();
@@ -842,7 +842,16 @@ void loop() {
         }
     } else { // BALANCING
         if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000) {
-            requestDisable(elapsed>20000?"CONTROL LOOP OVERRUN":"MOTOR LINK/MODE/FAULT");
+            static char reason[160];
+            const auto& l = hub.left().fb(); const auto& r = hub.right().fb();
+            snprintf(reason, sizeof(reason),
+                "%s: link=%u mode=%u fault L0x%02X R0x%02X modeL%u modeR%u ageL%lums ageR%lums toL%lu toR%lu crcL%lu crcR%lu",
+                elapsed>20000 ? "CONTROL LOOP OVERRUN" : "MOTOR LINK/MODE/FAULT",
+                (unsigned)hub.linkOk(HUB_LINK_TIMEOUT_MS), (unsigned)hub.modeOk(), l.fault, r.fault, l.mode, r.mode,
+                (unsigned long)(millis()-l.rxMs), (unsigned long)(millis()-r.rxMs),
+                (unsigned long)l.timeouts, (unsigned long)r.timeouts,
+                (unsigned long)l.crcErrors, (unsigned long)r.crcErrors);
+            requestDisable(reason);
         } else if (fabsf(pitchF) > P.maxTilt || fabsf(rateF) > P.maxRate) {
             leds_event(LED_EV_FALL);
             requestDisable(fabsf(pitchF) > P.maxTilt ? "FELL" : "RATE SPIKE");

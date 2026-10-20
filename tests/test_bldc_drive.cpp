@@ -49,6 +49,8 @@ int main() {
     assert(params_set("LDIR",1)==-3);
     hub.transmit(.005f);testMicros+=9000;hub.service(.005f);
     hub.transmit(.005f);
+    assert(hub.isEnabled() && hub.modeOk()); // one missed reply is not a confirmed mode loss
+    testMicros+=61000;hub.service(.005f);hub.transmit(.005f);
     assert(!hub.isEnabled() && !hub.modeOk() && hub.currentCmdL()==0 && hub.currentCmdR()==0);
     puts("BLDC drive: actual UART polarity, pure-turn symmetry, armed DRIVE-only polling and timeout disable passed");
 }

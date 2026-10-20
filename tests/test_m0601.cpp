@@ -29,7 +29,7 @@ int main() {
     assert(port.sendDriveRaw(0)); inject(serial,bad); port.service();
     assert(port.fb().frames==2 && port.fb().crcErrors==1);
     testMicros+=9000; port.service();
-    assert(port.fb().mode==0 && !port.fb().posValid && port.fb().timeouts==1);
+    assert(port.fb().mode==2 && port.fb().posValid && port.fb().timeouts==1 && port.needsModeConfirmation());
     assert(!port.sendQuery());
     inject(serial,drive); port.service(); // late reply is discarded during quiet resync
     testMicros+=11000; port.service(); assert(port.canSend());
