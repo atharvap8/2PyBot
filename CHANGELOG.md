@@ -3,6 +3,19 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.0.1 — Full-stick balance recovery
+
+- Remove the supply/Kv estimate from speed/reference/steering clamps. MAXSPD=0
+  is uncapped; full-stick HIGH defaults to 1.00 m/s. Explicit positive MAXSPD
+  values are respected independently of the estimate.
+- Pass LQI acceleration directly to current feed-forward, preserve catch torque
+  during overspeed recovery, and back-calculate virtual speed state against the
+  existing current budget rather than an absolute model speed.
+- Retune the delayed common velocity loop to 4/4/0.5 and retain full motor-current
+  authority. Accept queued motor replies before declaring timeout on CPU jitter.
+- Record measured free RPM without setting a speed ceiling. Parse both original
+  and v4 hub telemetry, and add regression coverage for the captured fall states.
+
 ## 4.0.0 — M0601 BLDC hardware
 
 - Replace STEP/DIR, TMC2226 and PCNT wheel drivers with independent M0601

@@ -33,7 +33,7 @@ export default function register(registerTab) {
       const dv = el.querySelector('#dv');
       const units = { STEPSM: 'counts/m', COUNTSM: 'counts/m', VMAX: 'm/s', AMAX: 'm/s²' };
       dv.innerHTML = Object.entries(c.state.derived).map(([k, v]) =>
-        `<div class=stat><u>${k}</u><b>${Number(v).toFixed(2)}</b>
+        `<div class=stat><u>${k}</u><b>${k === 'VMAX' && Number(v) === 0 ? 'uncapped' : Number(v).toFixed(2)}</b>
          <small style="color:var(--dim);font-size:10px">${units[k] || ''}</small></div>`).join('')
         || '<p class=hint>waiting for the parameter dump…</p>';
 

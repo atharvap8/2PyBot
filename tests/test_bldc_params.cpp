@@ -13,7 +13,14 @@ int main() {
     testNvs["2pybot-hub:ISGN"]=1;
     params_begin();
     assert(P.curSign==-1 && P.rpmSign==-1 && P.maxSpdSt==0 && P.hubVSrc==1);
-    assert(P.stepsPerM==P.countsPerM && P.vMax>.7f && P.vMax<.75f);
+    assert(P.stepsPerM==P.countsPerM && P.vMax==0 && P.maxSpdEff==0 && P.vNoLoad>.7f && P.vNoLoad<.75f);
+    assert(P.maxDriveV==1);
+    assert(params_set("SUPPLYV",7)==0 && P.vMax==0);
+    assert(params_set("SUPPLYV",12)==0);
+    assert(params_set("MAXSPD",P.countsPerM*1.4f)==0 && P.vMax>1.39f);
+    assert(params_set("MAXSPD",0)==0 && P.vMax==0);
+    assert(params_set("FREERPM",190)==0 && P.vNoLoad>1 && P.vMax==0);
+    assert(params_set("FREERPM",0)==0);
     assert(params_set("ISGN",1)==-2 && params_set("RPMSGN",1)==-2 && params_set("LDIR",0)==-2);
     assert(params_set("DRVMODE",.5f)==-2 && params_set("CURRENT",5000)==-2);
     active=true;

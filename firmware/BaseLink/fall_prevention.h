@@ -28,7 +28,8 @@ struct FallPrevention {
         dt = clip(dt,0.0f,.05f);
         reasons = 0;
         const float maxVelocity = std::fmax(.05f,maximumVelocity);
-        const float goal = clip(requested,-maxVelocity,maxVelocity);
+        const bool speedLimited = maximumVelocity > 0;
+        const float goal = speedLimited ? clip(requested,-maxVelocity,maxVelocity) : requested;
         const float referenceAccelerationLimit = std::fmin(2.40f,.70f*std::fmax(.05f,maximumAcceleration));
         const float referenceJerkLimit = 18.0f;
         float error = goal-operatorRef;
@@ -39,7 +40,7 @@ struct FallPrevention {
         refAcceleration += clip(wantedAcceleration-refAcceleration,-referenceJerkLimit*dt,referenceJerkLimit*dt);
         const float next = operatorRef+refAcceleration*dt;
         if (error*(goal-next)<=0.0f) { operatorRef=goal;refAcceleration=0.0f; }
-        else operatorRef=clip(next,-maxVelocity,maxVelocity);
+        else operatorRef=speedLimited ? clip(next,-maxVelocity,maxVelocity) : next;
 
         const bool reversal = goal*measuredVelocity<-.015f && std::fabs(measuredVelocity)>.12f;
         const bool shaping = std::fabs(goal-operatorRef)>.035f || std::fabs(refAcceleration)>.10f;
@@ -49,8 +50,8 @@ struct FallPrevention {
         const float warn = std::fmin(18.0f,.45f*maximumTilt);
         const float critical = std::fmin(28.0f,.75f*maximumTilt);
         const float angleRisk = score(predictedTilt,warn,std::fmax(warn+1.0f,critical));
-        const float commandRatio = std::fmax(std::fabs(commonCommandVelocity),std::fabs(measuredVelocity))/maxVelocity;
-        const float speedRisk = score(commandRatio,.94f,.995f);
+        const float commandRatio = speedLimited ? std::fmax(std::fabs(commonCommandVelocity),std::fabs(measuredVelocity))/maxVelocity : 0;
+        const float speedRisk = speedLimited ? score(commandRatio,.94f,.995f) : 0;
         if(speedRisk>0.0f) reasons|=SPEED_MARGIN;
         hazardRisk = airborne?1.0f:std::fmax(angleRisk,speedRisk);
         const float instantaneousRisk = hazardRisk;
@@ -81,7 +82,7 @@ struct FallPrevention {
     }
 
     float allocateSteering(float commonSteps, float requestedSteeringSteps, float maximumSteps) {
-        float headroom=std::fmax(0.0f,maximumSteps-std::fabs(commonSteps));
+        float headroom=maximumSteps>0 ? std::fmax(0.0f,maximumSteps-std::fabs(commonSteps)) : std::fabs(requestedSteeringSteps);
         float requested=requestedSteeringSteps*steeringScale;
         float applied=clip(requested,-headroom,headroom);
         if(std::fabs(applied-requestedSteeringSteps)>.5f) reasons|=YAW_LIMIT;

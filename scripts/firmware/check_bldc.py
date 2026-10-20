@@ -14,12 +14,17 @@ def main():
     output=ROOT/"build/bldc-checks";output.mkdir(parents=True,exist_ok=True)
     firmware=ROOT/"firmware/BaseLink";stubs=ROOT/"tests/stubs"
     compiler=[args.cxx]+(["c++"] if args.zig else [])
+    sketch=(firmware/"BaseLink.ino").read_text()
+    start=sketch.index("void runController(float dt) {")
+    end=sketch.index("\n}\n",start)+3
+    (output/"bldc_controller_under_test.inc").write_text(sketch[start:end])
     tests={"test_bldc_control":[],"test_m0601":[firmware/"m0601.cpp",stubs/"runtime.cpp"],
            "test_bldc_params":[firmware/"params.cpp",stubs/"runtime.cpp"],
-           "test_bldc_drive":[firmware/"hub_drive.cpp",firmware/"m0601.cpp",firmware/"params.cpp",stubs/"runtime.cpp"]}
+           "test_bldc_drive":[firmware/"hub_drive.cpp",firmware/"m0601.cpp",firmware/"params.cpp",stubs/"runtime.cpp"],
+           "test_bldc_controller":[firmware/"hub_drive.cpp",firmware/"m0601.cpp",firmware/"params.cpp",stubs/"runtime.cpp"]}
     for name,extra in tests.items():
         binary=output/(name+(".exe" if sys.platform=="win32" else ""))
-        subprocess.run(compiler+["-std=c++11","-Wall","-Wextra","-Werror","-I",str(stubs),"-I",str(firmware),
+        subprocess.run(compiler+["-std=c++11","-Wall","-Wextra","-Werror","-I",str(stubs),"-I",str(firmware),"-I",str(output),
             str(ROOT/"tests"/(name+".cpp")),*map(str,extra),"-o",str(binary)],check=True)
         subprocess.run([str(binary)],check=True)
 

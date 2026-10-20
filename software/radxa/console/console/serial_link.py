@@ -260,14 +260,18 @@ class SerialLink:
 
             if line.startswith("HM,"):
                 fields=line.split(",")[1:]
-                if len(fields)!=14:return
+                if len(fields) not in (14,16):return
                 values=[float(value) for value in fields]
                 if not all(math.isfinite(value) for value in values):return
                 names=("ms","current_cmd_l","current_cmd_r","current_l","current_r","rpm_l","rpm_r",
-                       "temp_l","temp_r","fault_l","fault_r","saturated","link_ok","mode_ok")
+                       "temp_l","temp_r","fault_l","fault_r")
+                names+=("saturated","link_ok","mode_ok") if len(fields)==14 else (
+                    "saturated_l","saturated_r","link_ok","mode_ok","self_righting_state")
                 self.hub=dict(zip(names,values))
+                if len(fields)==16:self.hub["saturated"]=float(bool(values[11] or values[12]))
                 self.hub["received_monotonic"]=time.monotonic()
                 self.tel["hub"]=self.hub
+                self._publish({"type":"hub","hub":self.hub})
                 return
 
             if line.startswith("P#,"):

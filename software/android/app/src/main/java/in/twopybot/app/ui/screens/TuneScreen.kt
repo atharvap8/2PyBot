@@ -29,7 +29,8 @@ private val HINTS = mapOf(
     "BALANCE" to "LQR/LQI gains. K4 is gyro-rate damping and its SIGN is the most " +
         "dangerous value on the robot. Change one gain at a time and watch the attitude gauge.",
     "MOTOR" to "M0601 BLDC geometry, common/turn current loops and speed limits. " +
-        "ISGN and RPMSGN are fixed at -1. Stop before saving or changing motor mode/direction.",
+        "MAXSPD=0 / VMAX=0 means uncapped; VNOLOAD is an estimate. ISGN and RPMSGN are fixed at -1. " +
+        "Stop before saving or changing motor mode/direction.",
     "DRIVE"   to "Speed scaling and stick shaping. SNAPIN is the cone around straight-ahead " +
         "where steering is forced to zero.",
     "YAW"     to "Differential steering and heading hold. YAWKP/YAWKD act on encoder counts, " +

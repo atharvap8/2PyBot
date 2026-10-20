@@ -1,4 +1,4 @@
-/* 2PyBot v4.0.0: ESP32-WROOM + two M0601 RS485 BLDC hubs.
+/* 2PyBot v4.0.1: ESP32-WROOM + two M0601 RS485 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */
@@ -33,11 +33,11 @@
 #define HUB_VEL_ACCEL_BYTE  0
 #define HUB_LINK_TIMEOUT_MS 60
 
-// Preserve the supplied straight-line tuning. Differential control is
-// independently tuned and may use only remaining balance current.
-#define HUB_KP              6.0f
-#define HUB_KI              8.0f
-#define HUB_INT_LIM         1.0f
+// Lower sampled velocity-loop gains reduce the current reversals observed
+// under load with delayed position feedback. Full torque remains available.
+#define HUB_KP              4.0f
+#define HUB_KI              4.0f
+#define HUB_INT_LIM         0.5f
 #define HUB_KFF             1.0f
 #define HUB_MASS_KG         2.0f
 #define HUB_VEL_SOURCE      1 // owner-confirmed fix: position-derived velocity
@@ -82,10 +82,10 @@
 #define CLIMB_STEER_SCALE   0.40f
 #define LOOK_MAX_DEG        18.0f
 
-// MAXSPD=0 follows supply voltage; retain supplied drive/balance limits.
+// MAXSPD=0 is uncapped. The voltage/free-speed model is telemetry only.
 #define MAX_SPEED_STEPS     0.0f
 #define MOTOR_ACCEL_LIMIT   (6.0f * COUNTS_PER_M)
-#define MAX_DRIVE_VEL_MS     0.60f
+#define MAX_DRIVE_VEL_MS     1.00f
 #define DRIVE_DEADBAND      0.03f
 #define JOY_FWD_SCALE       (-0.2f)
 #define JOY_STEER_SCALE     1.0f

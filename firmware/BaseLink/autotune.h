@@ -187,9 +187,9 @@ inline void at_update(float dt) {
         if (AT.ramp > 800 && actual < expected * 0.85f) {
             float measured = actual * P.countsPerM;
             if (actual < .05f) { at_restore("wheel did not follow -- check motor feedback/polarity"); return; }
-            params_set("MAXSPD", measured, true);
+            params_set("FREERPM", actual / (2.0f * PI * P.wheelR) * 60.0f, true);
             char s[96];
-            snprintf(s, sizeof(s), "free speed %.2f m/s -> MAXSPD %.0f counts/s", actual, measured);
+            snprintf(s, sizeof(s), "free speed %.2f m/s (%.0f counts/s); MAXSPD unchanged", actual, measured);
             at_finish(s); return;
         }
         if (AT.ramp > 25000) {

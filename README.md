@@ -9,7 +9,7 @@
 [![Python Lint](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/python-lint.yml)
 [![Docs Check](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml/badge.svg)](https://github.com/atharvap8/2PyBot/actions/workflows/docs-check.yml)
 
-2PyBot v4.0.0 is an ESP32 self-balancing robot with two M0601 RS485 BLDC hub motors, integrated wheel feedback, and an ISM6HG256X IMU. The firmware uses **LQR/LQI state feedback** for balance and position hold. An EVOFOX One S gamepad pairs directly through Bluepad32. USB serial carries host drive commands, telemetry, and parameter tuning. See the [BLDC integration notes](docs/BLDC_V4.md) for wiring, polarity and turning changes.
+2PyBot v4.0.1 is an ESP32 self-balancing robot with two M0601 RS485 BLDC hub motors, integrated wheel feedback, and an ISM6HG256X IMU. The firmware uses **LQR/LQI state feedback** for balance and position hold. An EVOFOX One S gamepad pairs directly through Bluepad32. USB serial carries host drive commands, telemetry, and parameter tuning. See the [BLDC integration notes](docs/BLDC_V4.md) for wiring, polarity, full-stick control and turning changes.
 
 ## Current firmware
 
@@ -74,7 +74,7 @@ assets/                     Project media
 5. Pair the EVOFOX One S in Home+B mode. Leave both sticks centered while calibration completes.
 6. Use the [v4 hardware guide](docs/BLDC_V4.md) for the BLDC pin map, confirmed polarity, parameter schema and offline verification.
 
-Saved v4 NVS parameters take precedence over compiled defaults in `2pybot-bldc4`. `PD` restores defaults in RAM; `PS` saves them with motors stopped. `ISGN` and `RPMSGN` are fixed at -1; `HUBVSRC` defaults to 1.
+Saved v4 NVS parameters take precedence over compiled defaults in `2pybot-bldc4`. `PD` restores defaults in RAM; `PS` saves them with motors stopped. `ISGN` and `RPMSGN` are fixed at -1; `HUBVSRC` defaults to 1. Full-stick HIGH requests 1.00 m/s; `MAXSPD=0` leaves firmware speed uncapped. `VNOLOAD` is informational, not a driving limit.
 
 ## Host software status
 

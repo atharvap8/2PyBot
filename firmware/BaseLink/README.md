@@ -1,6 +1,6 @@
 # BaseLink Firmware
 
-ESP32 v4.0.0 firmware for two M0601 BLDC hubs, with LQR/LQI balancing,
+ESP32 v4.0.1 firmware for two M0601 BLDC hubs, with LQR/LQI balancing,
 direct Bluepad32 gamepad input, runtime parameters, terrain adaptation, a
 WS2812 ring, and camera payload control. [BLDC integration details](../../docs/BLDC_V4.md)
 cover the control changes and offline checks.

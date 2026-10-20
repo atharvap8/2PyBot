@@ -12,17 +12,39 @@ struct Settings {
 
 struct Currents { float left = 0, right = 0; bool limited = false; };
 
+struct VelocityCommand { float value; bool trackingLimited; };
+
+// Back-calculate only the virtual actuator state, in units of available
+// current / velocity gain. This is not an absolute speed or stick-input cap:
+// the same tracking error is allowed at 0.1, 1.0 or 1.5 m/s.
+inline VelocityCommand integrateVelocity(float previous, float acceleration, float measured,
+                                         float dt, float kp, float currentLimit, float explicitSpeedLimit) {
+    const float requested = previous + acceleration * dt;
+    float value = requested;
+    if (kp > .0001f) {
+        const float lead = currentLimit / kp;
+        value = clip(value, measured - lead, measured + lead);
+    }
+    if (explicitSpeedLimit > 0) value = clip(value, -explicitSpeedLimit, explicitSpeedLimit);
+    return {value, std::fabs(value-requested) > .00001f};
+}
+
 class CurrentLoop {
 public:
     float commonIntegral = 0, yawIntegral = 0, yawCurrent = 0;
+    float feedForwardCurrent = 0, velocityCorrection = 0;
+    bool recoveryPriority = false;
 
     void reset(float commonTarget = 0) {
         commonIntegral = yawIntegral = yawCurrent = 0;
+        feedForwardCurrent = velocityCorrection = 0;
+        recoveryPriority = false;
         previousTarget = commonTarget;
     }
 
     Currents update(float leftTarget, float rightTarget, float leftVelocity,
-                    float rightVelocity, float dt, const Settings& s) {
+                    float rightVelocity, float dt, const Settings& s,
+                    float balanceAcceleration = NAN, bool recovering = false) {
         Currents out;
         if (!(dt > 0 && dt <= .05f) || !std::isfinite(leftTarget + rightTarget + leftVelocity + rightVelocity)) {
             reset();
@@ -30,15 +52,29 @@ public:
         }
         const float target = .5f * (leftTarget + rightTarget);
         const float error = target - .5f * (leftVelocity + rightVelocity);
-        const float accel = clip((target - previousTarget) / dt, -8.0f, 8.0f);
+        // Balance supplies its acceleration explicitly: a clipped or
+        // back-calculated speed target must not erase a catch command.
+        // Target differentiation remains only for the disarmed bench routine.
+        const float accel = std::isfinite(balanceAcceleration) ? balanceAcceleration : (target - previousTarget) / dt;
         previousTarget = target;
         // Feed-forward is COMMON acceleration only. A turn must not inject
         // opposing full-mass acceleration impulses into the two wheels.
         const float ff = s.feedForward * s.mass * s.radius / (2 * s.torqueConstant) * accel;
-        const float commonPre = ff + s.kp * error + commonIntegral;
-        if (!((commonPre >= s.currentLimit && error > 0) || (commonPre <= -s.currentLimit && error < 0)))
+        float correction = s.kp * error + commonIntegral;
+        recoveryPriority = recovering && accel * correction < 0;
+        if (recoveryPriority) {
+            // Do not brake against the balance controller just because the
+            // wheels outran a virtual velocity target during a forward fall.
+            correction = 0;
+            commonIntegral *= 1 - clip(8 * dt, 0, 1);
+        }
+        const float commonPre = ff + correction;
+        if (!recoveryPriority && !((commonPre >= s.currentLimit && error > 0) || (commonPre <= -s.currentLimit && error < 0)))
             commonIntegral = clip(commonIntegral + s.ki * error * dt, -s.integralLimit, s.integralLimit);
-        const float common = clip(ff + s.kp * error + commonIntegral, -s.currentLimit, s.currentLimit);
+        correction = recoveryPriority ? 0 : s.kp * error + commonIntegral;
+        const float common = clip(ff + correction, -s.currentLimit, s.currentLimit);
+        feedForwardCurrent = ff;
+        velocityCorrection = correction;
         const float room = std::fmax(0.0f, s.currentLimit - std::fabs(common));
         const float yawError = .5f * ((rightTarget - leftTarget) - (rightVelocity - leftVelocity));
         const float yawPre = s.yawKp * yawError + yawIntegral;
@@ -50,7 +86,7 @@ public:
         yawCurrent = clip(slewed, -room, room);
         out.left = common - yawCurrent;
         out.right = common + yawCurrent;
-        out.limited = std::fabs(commonPre) > s.currentLimit || std::fabs(yawPre) > room;
+        out.limited = std::fabs(ff + correction) > s.currentLimit || std::fabs(yawPre) > room;
         return out;
     }
 

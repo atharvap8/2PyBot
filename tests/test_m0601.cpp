@@ -36,5 +36,9 @@ int main() {
     assert(port.sendQuery()); inject(serial,query); port.service();
     assert(port.fb().tempC==30 && port.fb().posFrames==1);
     inject(serial,drive); port.service(); assert(port.fb().posFrames==1); // duplicate/unsolicited
+    // Reply arrived while the CPU was busy: service at 9 ms must accept the
+    // queued valid frame instead of falsely declaring a timeout first.
+    assert(port.sendDriveRaw(0));inject(serial,drive);testMicros+=9000;port.service();
+    assert(port.fb().posFrames==2 && port.fb().mode==2 && port.fb().timeouts==1);
     puts("M0601: golden frames, split RX, CRC, layout ownership, timeout/resync passed");
 }

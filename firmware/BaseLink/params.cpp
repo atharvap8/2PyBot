@@ -32,9 +32,9 @@ void params_recompute() {
     if (P.wheelR < 0.005f) P.wheelR = 0.005f;
     P.countsPerM = (float)ENCODER_CPR    / (2.0f * PI * P.wheelR);
     P.stepsPerM  = P.countsPerM;
-    P.vNoLoad    = P.supplyV * M0601_KV_RPM_PER_V / 60.0f * 2.0f * PI * P.wheelR;
-    P.maxSpdEff  = P.vNoLoad * P.countsPerM;
-    if (P.maxSpdSt > 0) P.maxSpdEff = fminf(P.maxSpdEff, P.maxSpdSt);
+    const float freeRpm = P.freeRpm > 0 ? P.freeRpm : P.supplyV * M0601_KV_RPM_PER_V;
+    P.vNoLoad    = freeRpm / 60.0f * 2.0f * PI * P.wheelR; // informational, never a control clamp
+    P.maxSpdEff  = P.maxSpdSt; // zero means no firmware speed ceiling
     P.vMax       = P.maxSpdEff / P.countsPerM;
     P.aMax       = P.motAccel  / P.stepsPerM;
 }

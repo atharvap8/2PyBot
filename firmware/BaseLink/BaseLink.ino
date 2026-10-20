@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.0.0, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.0.1, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -562,15 +562,15 @@ void runController(float dt) {
 
     satA = (fabsf(uOut) > P.aMax) ? 1 : 0;
     uOut = clampf(uOut, -P.aMax, P.aMax);
-    const float vNext = vCmd + uOut * dt;
-    satV = fabsf(vNext) > P.vMax;
-    vCmd = clampf(vNext,-P.vMax,P.vMax);
+    const auto velocity = hub_control::integrateVelocity(vCmd,uOut,velF,dt,P.hubKp,P.motorMa*.001f,P.vMax);
+    vCmd = velocity.value;
+    satV = velocity.trackingLimited;
 
     // BALANCE > POSITION: if the speed command saturates, the tilt
     // terms lose their actuator and the robot falls. Give up ground:
     // bleed the hold point (and integral) toward the robot until
     // authority returns. It parks a little off-spot instead of falling.
-    if (fabsf(vCmd) > 0.90f * P.vMax) {
+    if (satV || hub.saturated() || (P.vMax>0 && fabsf(vCmd) > 0.90f * P.vMax)) {
         xRef += (posM - xRef) * clampf(P.vsatBleed * dt, 0.0f, 1.0f);
         zInt -= zInt * clampf(2.0f * dt, 0.0f, 1.0f);
         if(climbMode) {
@@ -586,7 +586,7 @@ void runController(float dt) {
     const bool navigationTurning=navigation.granted && fabsf(navigation.yawRate)>.005f;
     const bool turning = navigationTurning || fabsf(steerIn) > P.steerDb;
     const float target = navigationTurning ? navigation.yawRate*P.trackW*P.stepsPerM*.5f : steerIn*P.maxSteerSt;
-    const float room = fmaxf(0,P.maxSpdEff-fabsf(baseSteps));
+    const float room = P.maxSpdEff>0 ? fmaxf(0,P.maxSpdEff-fabsf(baseSteps)) : P.maxSteerSt;
     steerSteps = yawControl.update(clampf(target,-P.maxSteerSt,P.maxSteerSt),turning,encDiff,diffRateF,
         lookCmd*(P.lookMaxDeg*DEG_TO_RAD)*P.trackW*P.countsPerM,P.yawKp,P.yawKd,P.yawMaxSt,
         P.yawRelatch,fabsf(pitchF)>P.yawTiltSus,P.steerSlew,room,.1f*P.trackW*P.countsPerM,dt);
@@ -594,7 +594,8 @@ void runController(float dt) {
     appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,P.maxSpdEff);
     wheelTargetL=baseSteps-appliedSteerSteps;
     wheelTargetR=baseSteps+appliedSteerSteps;
-    hub.setSpeeds(wheelTargetL,wheelTargetR);
+    const bool recoveryTorque = fallPrevention.recovering || fabsf(pitchF)>=6.0f || fabsf(rateF)>=40.0f;
+    hub.setBalanceCommand(wheelTargetL,wheelTargetR,uOut,recoveryTorque);
 }
 
 // ============================================================
@@ -634,7 +635,7 @@ void setup() {
     // below and drives it low. The WS2812 ring shows status instead.
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.0.0 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.0.1 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();

@@ -37,6 +37,12 @@ int main() {
     assert(hub.currentCmdL()<0 && hub.currentCmdR()>0);
     assert(wireCurrent(Serial1)<0 && wireCurrent(Serial2)<0);
     assert(std::fabs(hub.currentCmdL()+hub.currentCmdR())<.00001f);
+    // Direct balance acceleration survives a fixed target and overspeed,
+    // and its wire polarity remains correct during a forward catch.
+    hub.disable();cycle();hub.enable();
+    hub.setBalanceCommand(0,0,6,true);cycle();
+    assert(hub.currentCmdL()>.4f && hub.currentCmdR()>.4f);
+    assert(wireCurrent(Serial1)>0 && wireCurrent(Serial2)<0);
     const int before=queries;
     for(int i=0;i<300;++i)cycle();
     assert(queries==before); // never inject temperature/pos8 replies into armed pos16 feedback

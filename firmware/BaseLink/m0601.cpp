@@ -78,11 +78,6 @@ void M0601Port::decode(const uint8_t* f) {
 
 void M0601Port::service() {
     const uint32_t now = micros();
-    if (pending != NONE && now - sentUs > m0601::REPLY_TIMEOUT_US) {
-        ++feedback.timeouts;
-        feedback.mode = 0; feedback.posValid = false;
-        pending = NONE; resync = true; quietSinceUs = now; length = 0;
-    }
     if (resync) {
         while (serial.available()) { serial.read(); ++feedback.dropped; quietSinceUs = now; }
         if (now - quietSinceUs >= m0601::RESYNC_US) resync = false;
@@ -102,5 +97,12 @@ void M0601Port::service() {
             if (header) ++feedback.crcErrors;
             memmove(buffer, buffer + 1, --length); ++feedback.dropped;
         }
+    }
+    // A valid reply may already be queued when the control cycle jitters.
+    // Parse it first; do not turn a 9 ms CPU interval into a false mode loss.
+    if (pending != NONE && now - sentUs > m0601::REPLY_TIMEOUT_US) {
+        ++feedback.timeouts;
+        feedback.mode = 0; feedback.posValid = false;
+        pending = NONE; resync = true; quietSinceUs = now; length = 0;
     }
 }

@@ -1,7 +1,9 @@
 # 2PyBot Android App
 
-Revision **4.0.0** targets the [BLDC hardware branch](../../docs/BLDC_V4.md).
+Revision **4.0.1** targets the [BLDC hardware branch](../../docs/BLDC_V4.md).
 Tune shows the MOTOR group and fixed wiring-polarity values as read-only.
+`MAXSPD=0` means uncapped; the free-speed routine records FREERPM without
+silently reducing the driving speed.
 
 Revision **3.40.0** fixed Routes rendering across rotation and short landscape
 windows, with instance-owned WebView lifecycle, explicit viewport sizing and Reload.

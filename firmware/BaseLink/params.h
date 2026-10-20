@@ -56,10 +56,11 @@
   X(s5,        "S5",      LQR_S5,            -40.0f,   0.0f, "BALANCE", "stiff: integral gain")         \
   /* ---------- BLDC MOTOR / GEOMETRY ---------- */                                           \
   X(wheelR,    "WHEELR",  WHEEL_RADIUS_M,      0.020f, 0.120f,"MOTOR", "loaded wheel radius (m)")       \
-  X(maxSpdSt,  "MAXSPD",  MAX_SPEED_STEPS,     0.0f,25000.0f,"MOTOR", "counts/s; 0 = supply no-load speed") \
+  X(maxSpdSt,  "MAXSPD",  MAX_SPEED_STEPS,     0.0f,25000.0f,"MOTOR", "counts/s; 0 = no firmware speed cap") \
   X(motAccel,  "MAXACC",  MOTOR_ACCEL_LIMIT,1000.0f,150000.0f,"MOTOR","balance acceleration (counts/s^2)") \
   X(motorMa,   "CURRENT", MOTOR_CURRENT_MA,  300.0f,MOTOR_CURRENT_MAX_MA,"MOTOR","per-motor torque current limit (mA)") \
-  X(supplyV,   "SUPPLYV", SUPPLY_V,            7.0f, 24.0f,"MOTOR", "motor supply (V)")             \
+  X(supplyV,   "SUPPLYV", SUPPLY_V,            7.0f, 24.0f,"MOTOR", "configured supply; speed estimate only (V)") \
+  X(freeRpm,   "FREERPM", 0.0f,               0.0f,500.0f,"MOTOR", "measured free speed; 0 = voltage estimate (rpm)") \
   X(drvMode,   "DRVMODE", HUB_DRIVE_MODE,      0.0f,  1.0f,"MOTOR", "1 current balance; 0 bench velocity") \
   X(hubKp,     "HUBKP",   HUB_KP,              0.0f, 40.0f,"MOTOR", "common velocity P (A per m/s)") \
   X(hubKi,     "HUBKI",   HUB_KI,              0.0f,100.0f,"MOTOR", "common velocity I (A per m)")   \

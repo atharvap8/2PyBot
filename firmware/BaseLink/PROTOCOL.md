@@ -59,7 +59,7 @@ D,ms,pitchF,rateF,uOut,velF,ex,vCmdSteps,steerSteps,satV,satA,loopMaxUs,speedHi,
 | `uOut`, `velF` | Acceleration in m/s², filtered velocity in m/s |
 | `ex` | Normal reference error, or climb reference error once blend ≥0.5, metres; use `clEx` for unambiguous climb state |
 | `vCmdSteps`, `steerSteps` | Common and allocated differential rates, encoder counts/s in v4 |
-| `satV`, `satA` | Velocity/acceleration clamp flags |
+| `satV`, `satA` | Virtual velocity tracking/user-limit intervention and acceleration clamp flags |
 | `loopMaxUs` | Largest measured loop interval since the previous debug record |
 | `speedHi`, `balancing` | HIGH-speed flag and balance-state flag, 0 or 1 |
 | `cmdFwd`, `cmdSteer` | Inputs after authority selection and gesture playback |
@@ -145,7 +145,7 @@ Split a parameter row at its first six commas; descriptions may contain commas. 
 | Group | Parameters |
 | :--- | :--- |
 | BALANCE | 15 |
-| MOTOR | 21 |
+| MOTOR | 22 |
 | DRIVE | 17 |
 | YAW | 10 |
 | SAFETY | 6 |
@@ -154,7 +154,7 @@ Split a parameter row at its first six commas; descriptions may contain commas. 
 | LED | 3 |
 | PAYLOAD | 17 |
 | TERRAIN | 8 |
-| **Total** | **119** |
+| **Total** | **120** |
 
 `params.h` is the complete key/bounds reference. The current Radxa console builds parameter rows from this metadata. It has tabs for nine parameter groups; TERRAIN parameters are exposed by the API but do not yet have a tab. The legacy desktop GUI does not implement this protocol.
 
@@ -167,6 +167,11 @@ save/load/default operations and mode/direction/radius/source changes require
 stopped motors. `P?` is nonblocking, one row per cycle; records can interleave
 with telemetry and repeated requests do not restart an unfinished dump.
 `TORCH_MAX_PCT` remains a compile-time cap. See [v4 defaults](../../docs/BLDC_V4.md).
+
+In 4.0.1, `MAXSPD=0` and `PR,VMAX,0` explicitly mean uncapped. `VNOLOAD` is
+informational, based on `FREERPM` or the supply/Kv estimate. A positive MAXSPD
+sets a user-selected ceiling; it is not silently reduced to the estimate.
+`AT,stall` records FREERPM without installing a MAXSPD limit.
 
 ## Startup hold and Radxa acknowledgement
 

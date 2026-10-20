@@ -1,4 +1,4 @@
-# v4.0.0 — M0601 BLDC drive
+# v4.0.1 — M0601 BLDC drive
 
 Branch: `hardware/bldc-v4.0.0`. The supplied `2pybot-hub/BaseLinkHub`
 program is integrated into the existing `firmware/BaseLink` build target.
@@ -25,13 +25,38 @@ The harness uses I2C 21/22, LED ring 15, pan 26, zoom 0 and torch 2.
   at the hub boundary, avoiding a second feedback-only inversion.
 - Radius 0.052 m, track 0.155 m, supply 12 V and feed-forward mass 2 kg
   follow the supplied program. They are tunable commissioning values.
-- The supplied common velocity gains (`HUBKP=6`, `HUBKI=8`, `HUBILIM=1`),
-  LQI gains, 0.60 m/s drive setting and 6 m/s² balance acceleration remain.
+- Common velocity gains are `HUBKP=4`, `HUBKI=4`, `HUBILIM=0.5`, reducing the
+  current reversals observed under delayed position feedback. The LQI gains,
+  2.7 A motor-current ceiling and 6 m/s² balance acceleration are retained.
+- Full-stick HIGH requests 1.00 m/s. LOW retains its configured 0.5 scale.
 
 One internal count is 1/4096 revolution. `STEPSM == COUNTSM`; legacy field
 names such as `MAXSPD` and `vCmdSteps` now describe encoder counts, not
-microsteps. `MAXSPD=0` derives the ceiling from supply voltage. A positive
-setting can lower that ceiling but cannot exceed the configured no-load speed.
+microsteps. **`MAXSPD=0` / `VMAX=0` means no firmware speed ceiling.** A
+positive MAXSPD is an explicit user limit, independent of the voltage estimate.
+`VNOLOAD` is informational: it uses measured `FREERPM` when available, otherwise
+the configured supply/Kv estimate. Actual attainable speed must be measured.
+
+## Full-stick failure correction
+
+The supervised capture recorded two falls with no reported motor fault and
+healthy mode/link state. The old velocity command stayed at 0.725 m/s while
+measured speed reached approximately 0.81 m/s; positive catch acceleration
+was requested but current commands reversed. Disarming occurred after pitch
+crossed 55 degrees (`FELL`), not as the first observed event.
+
+The current loop now receives the LQI acceleration directly. It is not
+reconstructed from a speed target whose derivative vanishes at saturation.
+During pitch/rate recovery the velocity correction may assist, but cannot
+brake against, that catch torque. Virtual speed-state anti-windup is referenced
+to measured motion and the existing current/gain budget, not to an absolute
+vehicle speed. The supply-derived estimate no longer clips full-stick input,
+activates speed-margin intervention or removes steering headroom.
+
+The firmware still uses CURRENT mode for balance. The motor's internal velocity
+mode is a disarmed bench option, not a speed-triggered mode switch. Fall, fault,
+current and link protections remain. The correction does not promise speed or
+torque beyond what the real supply, motor and traction can deliver.
 
 ## Turning changes
 
@@ -100,6 +125,6 @@ partial/corrupt/late replies, sign application, pure-turn symmetry, balance
 current priority, slew/release, delayed turn responses, timeout disable,
 namespace isolation and incremental dumps. These checks do not access a bot.
 
-This change is source/offline-build work only. Turning on real hardware has
-not been verified; no controller flashing, arming or motor exercise is part
-of this work.
+The recorded-state regression checks verify the command/current path; they
+do not predict counterfactual body motion. The 4.0.1 correction requires its
+own supervised hardware verification after installation.

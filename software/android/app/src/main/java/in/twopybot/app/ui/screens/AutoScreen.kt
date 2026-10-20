@@ -39,10 +39,9 @@ private val ROUTINES = listOf(
         "what the encoders reported against the real 2.00 m and corrects WHEELR. This " +
         "is the loaded rolling radius — the number that scales the whole control loop.",
         needsBalancing = false),
-    Routine("stall", "Find the speed ceiling",
-        "WHEELS OFF THE GROUND. Ramps the motors until the encoders stop following the " +
-        "command, then sets MAXSPD to 80% of that. This is the honest stall point at " +
-        "your current motor current and battery voltage.",
+    Routine("stall", "Measure free speed",
+        "WHEELS OFF THE GROUND. Ramps the motors and records measured free speed in FREERPM. " +
+        "It does not change MAXSPD or add a driving speed cap.",
         danger = true, needsBalancing = false),
 )
 
