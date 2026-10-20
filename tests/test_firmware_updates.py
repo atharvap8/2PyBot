@@ -148,3 +148,34 @@ def test_partition_layout_is_application_only():
     assert worker.app_partition(prefix())==(0x10000,0x300000)
     bad=bytearray(prefix());struct.pack_into("<I",bad,0x8004,0x20000)
     with pytest.raises(ValueError):worker.app_partition(bad)
+
+
+def test_incremental_dump_finishes_before_retry_can_queue_another_dump(tmp_path,monkeypatch):
+    clock=[0.0]
+    class Port:
+        def __init__(self):self.dtr=False;self.rts=False;self.queued=0;self.sent=[];self.next_line=0;self.index=0;self.active=False
+        def open(self):pass
+        def close(self):pass
+        def flush(self):pass
+        def write(self,data):
+            self.sent.append(data)
+            if data==b'P?\n':
+                if self.active:self.queued+=1
+                else:self.active=True;self.index=0;self.next_line=clock[0]+.005
+        def read(self,size):
+            clock[0]+=.1;out=[]
+            while self.active and self.next_line<=clock[0]:
+                if self.index==0:line='P#,120\n'
+                elif self.index<=120:line=f'P,K{self.index},0,-1,1,MOTOR,test\n'
+                elif self.index<136:line='PR,HUBSCHEMA,4\n'
+                else:line='P.\n'
+                out.append(line);self.index+=1;self.next_line+=.005
+                if self.index>136:
+                    if self.queued:self.queued-=1;self.index=0
+                    else:self.active=False
+            return ''.join(out).encode()
+    port=Port();monkeypatch.setattr(worker.serial,'Serial',lambda:port)
+    monkeypatch.setattr(worker.time,'monotonic',lambda:clock[0])
+    controller=worker.Controller(tmp_path/'dump.log');controller.dump()
+    assert controller.complete and len(controller.params)==120
+    assert port.sent.count(b'P?\n')==1 and clock[0]<1.0

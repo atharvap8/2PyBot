@@ -70,16 +70,16 @@ class Controller:
                 if "-> BALANCING" in text or self.balancing:raise RuntimeError("Controller unexpectedly armed during maintenance")
             except (ValueError,IndexError):pass
         if len(self.buffer)>65536:self.buffer=b""
-    def wait(self,predicate,timeout,message,retry=None):
+    def wait(self,predicate,timeout,message,retry=None,retry_interval=.6):
         end=time.monotonic()+timeout;last=time.monotonic()
         while time.monotonic()<end:
-            if retry and time.monotonic()-last>.6:retry();last=time.monotonic()
+            if retry and time.monotonic()-last>retry_interval:retry();last=time.monotonic()
             self.pump()
             if predicate():return
         raise RuntimeError(message)
     def dump(self):
         self.complete=False;self.send("P?")
-        self.wait(lambda:self.complete,10,"Complete parameter dump unavailable",lambda:self.send("P?"))
+        self.wait(lambda:self.complete,10,"Complete parameter dump unavailable",lambda:self.send("P?"),retry_interval=2)
     def initialize_locked(self):
         self.dump()
         if self.derived.get("FLASHLOCK")!=1 or self.derived.get("STARTUPACK")!=1:
