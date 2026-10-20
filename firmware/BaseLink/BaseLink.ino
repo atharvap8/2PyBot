@@ -229,14 +229,8 @@ void requestDisable(const char* why) {
 //  SERIAL PARSER — Radxa 'V' lines + tuner commands, one reader
 // ============================================================
 void handleLine(char* line) {
-    // Display-only host ownership is valid during startup/maintenance too.
-    // It never changes a motor, arming request or navigation lease.
-    if(!strncmp(line,"LS,",3)) {
-        unsigned phase=0,progress=0,ttl=0;char extra=0;
-        if(sscanf(line+3,"%u,%u,%u%c",&phase,&progress,&ttl,&extra)==3)
-            leds_hostStatus(phase,progress,ttl);
-        return;
-    }
+    // Retired host-LED messages must not become a legacy 'L' debug command.
+    if(!strncmp(line,"LS,",3)) return;
     if(!strcmp(line,"FU,1") || !strcmp(line,"FU,0")) {
         if(line[3]=='1' && (state==STATE_BALANCING || motorsRequested)) {
             Serial.println("FU?,BUSY");return;

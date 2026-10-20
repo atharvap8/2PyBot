@@ -209,6 +209,16 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0][:4], ["runuser", "-u", "radxa", "--"])
         self.assertIn("git", run.call_args.args[0])
 
+    def test_default_one_pull_stops_led_service_instead_of_enabling_it(self):
+        instance=self.instance([]);instance.config={'one_pull':True,'led':{'backend':'esp32'}}
+        monitor=instance.repo/deploy.MONITOR;monitor.mkdir(parents=True)
+        for name in ('2pybot-deploy.service','2pybot-deploy.timer','2pybot-deploy.path','2pybot-deployment-leds.service'):
+            (monitor/name).write_text('[Unit]\nDescription=fixture\n')
+        instance.run=lambda command,**kwargs:instance.events.append(command)
+        deploy.Deployment.install_monitor(instance)
+        self.assertIn(['systemctl','disable','--now','2pybot-deployment-leds.service'],instance.events)
+        self.assertFalse(any('2pybot-deployment-leds.service' in c and ('enable' in c or 'restart' in c) for c in instance.events))
+
     def test_git_errors_include_the_original_diagnostic(self):
         instance = deploy.Deployment(self.temporary.name, "radxa", Path(self.temporary.name) / "state", "http://localhost")
         completed = subprocess.CompletedProcess([], 128, "", "fatal: detected dubious ownership\n")

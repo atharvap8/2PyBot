@@ -125,7 +125,7 @@ void params_service() {
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
         "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,1};
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

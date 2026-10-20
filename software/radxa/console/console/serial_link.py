@@ -104,11 +104,9 @@ class SerialLink:
             return True
 
     def send_indicator(self,phase,progress,ttl_ms):
-        # Only the existing serial owner writes. Indicators neither arm nor
-        # change drive authority, and may run during a maintenance handshake.
-        if not self.ser or self._serial_paused or self.derived.get("HOSTLED")!=1:return False
-        if phase not in range(10) or progress not in range(101) or not 250<=ttl_ms<=3000:return False
-        return self._write_bytes(f"LS,{phase},{progress},{ttl_ms}\n".encode(),maintenance=True)
+        # Original firmware animations own the ESP32 ring. Keep old local
+        # callers harmless, including while an older image is being updated.
+        return False
 
     async def begin_firmware_maintenance(self):
         if not self.connected or self.tel.get("stale",True) or self.tel.get("balancing"):

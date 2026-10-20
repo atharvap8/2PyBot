@@ -30,7 +30,7 @@ def test_supplied_hub_firmware_feedback_retains_faults_and_per_wheel_saturation(
     assert "self_righting_state" not in link.hub and "saturated_l" not in link.hub
 
 
-def test_indicator_uses_existing_owner_without_sending_motion_or_ignoring_capability():
+def test_retired_indicator_cannot_override_original_firmware_animations():
     link=bridge.SerialLink()
     class Port:
         def __init__(self):self.writes=[]
@@ -38,12 +38,12 @@ def test_indicator_uses_existing_owner_without_sending_motion_or_ignoring_capabi
     link.ser=Port();link.maintenance=True
     assert not link.send_indicator(5,50,1500)
     link.derived['HOSTLED']=1
-    assert link.send_indicator(5,50,1500)
-    assert link.ser.writes==[b'LS,5,50,1500\n']
+    assert not link.send_indicator(5,50,1500)
+    assert link.ser.writes==[]
     assert not link.send_indicator(99,0,1500)
     link._serial_paused=True
     assert not link.send_indicator(8,0,1500)
-    assert len(link.ser.writes)==1
+    assert len(link.ser.writes)==0
 
 
 @pytest.mark.parametrize("derived",[{}, {"HUBMOTOR":1}, {"HUBSCHEMA":3}])

@@ -254,8 +254,12 @@ class Deployment:
         if reload_needed:
             self.run(["systemctl", "restart", "2pybot-deploy.timer"])
         if self.config.get("one_pull"):
-            self.run(["systemctl","enable","--now","2pybot-deploy.path","2pybot-deployment-leds.service"])
-            self.run(["systemctl","restart","2pybot-deployment-leds.service"])
+            self.run(["systemctl","enable","--now","2pybot-deploy.path"])
+            if self.config.get('led',{}).get('backend')=='spi':
+                self.run(["systemctl","enable","--now","2pybot-deployment-leds.service"])
+                self.run(["systemctl","restart","2pybot-deployment-leds.service"])
+            else:
+                self.run(["systemctl","disable","--now","2pybot-deployment-leds.service"])
 
     def install_boot(self):
         content = (self.source / MONITOR / "2pybot-boot-gate.service").read_text(encoding="utf-8")

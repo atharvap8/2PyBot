@@ -15,7 +15,6 @@ import urllib.request
 import serial
 
 from .firmware import ROOT, HEARTBEAT, atomic_json, inspect_image, load_build, read_json, hardware_mismatch
-from .deployment_status import indicator
 
 API=os.environ.get("BOT_FIRMWARE_API","http://127.0.0.1:8080")
 ESPTOOL=os.environ.get("BOT_ESPTOOL_PYTHON","/home/radxa/tools/2pybot-flasher/bin/python3")
@@ -40,7 +39,6 @@ class Controller:
     def __init__(self,log):
         self.log=log;self.buffer=b"";self.params={};self.derived={};self.expected=0
         self.complete=False;self.ready=False;self.locked=False;self.balancing=False;self.acks={}
-        self.last_indicator=0
         self.port=serial.Serial();self.port.port=PORT;self.port.baudrate=460800;self.port.timeout=.1
         self.port.exclusive=True;self.port.dtr=False;self.port.rts=False;self.port.open()
     def send(self,text):self.port.write((text+"\n").encode());self.port.flush()
@@ -72,10 +70,6 @@ class Controller:
                 if "-> BALANCING" in text or self.balancing:raise RuntimeError("Controller unexpectedly armed during maintenance")
             except (ValueError,IndexError):pass
         if len(self.buffer)>65536:self.buffer=b""
-        if self.derived.get("HOSTLED")==1 and time.monotonic()-self.last_indicator>.4:
-            self.last_indicator=time.monotonic()
-            status=indicator(firmware_root=ROOT)
-            self.send(f"LS,{status['phase_code']},{status['progress']},1500")
     def wait(self,predicate,timeout,message,retry=None,retry_interval=.6):
         end=time.monotonic()+timeout;last=time.monotonic()
         while time.monotonic()<end:

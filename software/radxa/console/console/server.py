@@ -137,7 +137,7 @@ async def deployment_firmware(body:DeploymentBuild,request:Request):
 def deployment_led(body:DeploymentLed,request:Request):
     require_loopback(request)
     return {"sent":link.send_indicator(body.phase,body.progress,body.ttl_ms),
-            "backend":"esp32","available_during_esp32_flash":False}
+            "backend":"firmware","available_during_esp32_flash":False}
 
 
 @app.get("/api/autonomy/status")

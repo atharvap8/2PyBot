@@ -3,8 +3,6 @@
  *  led_ring.cpp — personality engine for the WS2812 ring
  * ============================================================
  *  Priority (highest wins each frame):
- *    Host deployment lease overlays a blended spin, then expires back
- *    to the original personality animations below. Fall events win.
  *    1. event overlay      fall = red ouch, arm = green wake sweep
  *    2. party              any gesture -> spinning rainbow
  *    3. vision brake       Cubie override while still rolling ->
@@ -26,7 +24,6 @@
 
 #include "led_ring.h"
 #include <NeoPixelBus.h>
-#include "deployment_led.h"
 
 // RMT channel 0; timing generated in hardware, zero IRQ impact.
 static NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod>
@@ -37,7 +34,6 @@ static uint8_t  eventActive = 0;
 static uint32_t eventT0     = 0;
 static bool     padWasOn    = false;
 static uint32_t padBlinkT0  = 0;
-static HostLedLease hostStatus;
 
 // float pixel buffer so effects can blend before quantizing
 static float fr[LED_RING_COUNT], fg[LED_RING_COUNT], fb[LED_RING_COUNT];
@@ -95,12 +91,6 @@ static void hsv(float h, float s, float v, float& r, float& g, float& b) {
 
 void leds_begin() {
     ring.Begin();
-    const uint32_t now=millis();
-    if(hostStatus.active(now)) {
-        for(int i=0;i<LED_RING_COUNT;++i)
-            deploymentPixel(hostStatus.phase,hostStatus.progress,now/1000.0f,i,LED_RING_COUNT,fr[i],fg[i],fb[i]);
-        showF();return;
-    }
     // boot swirl: one rainbow lap, ~0.5 s, blocking is fine in setup()
     for (int t = 0; t < LED_RING_COUNT * 2; t++) {
         clearF();
@@ -117,9 +107,6 @@ void leds_begin() {
 }
 
 void leds_event(uint8_t ev) { eventActive = ev; eventT0 = millis(); }
-bool leds_hostStatus(unsigned phase,unsigned progress,unsigned ttlMs) {
-    return hostStatus.update(phase,progress,ttlMs,millis());
-}
 
 void leds_update(const LedInputs& in) {
     uint32_t now = millis();
@@ -132,13 +119,6 @@ void leds_update(const LedInputs& in) {
     if (in.padConnected && !padWasOn) padBlinkT0 = now;
     padWasOn = in.padConnected;
     bool greeting = (now - padBlinkT0) < 600 && padBlinkT0 != 0;
-
-    // The original normal animations resume when the deployment lease ends.
-    if (hostStatus.active(now) && eventActive!=LED_EV_FALL) {
-        for(int i=0;i<LED_RING_COUNT;++i)
-            deploymentPixel(hostStatus.phase,hostStatus.progress,t,i,LED_RING_COUNT,fr[i],fg[i],fb[i]);
-        showF();return;
-    }
 
     // ---------- 1. one-shot events ----------
     if (eventActive) {

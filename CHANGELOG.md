@@ -16,11 +16,10 @@ For the main milestones and estimated dates for future work, see the
   firmware build support and input/toolchain fingerprint caching.
 - Stage versioned host releases, hold controller maintenance across restarts,
   queue firmware through its existing worker and report verified/failure state.
-- Show pull, preparation, build, flash, calibration, waiting, success and failure
-  on an independently supervised Radxa LED service. Add expiring ESP32 display
-  ownership and a separately wired SPI backend for continuous flash indication.
-- Preserve the original normal ring animations and use a smooth blended circular
-  spin during deployment. Add a deployment dashboard and persist Android downloads
+- Restore the original firmware-only ring animations and remove Radxa ESP32 LED
+  ownership, including deployment overrides. A separately wired SPI backend is
+  opt-in; the normal deployment LED service is stopped/disabled.
+- Add a deployment dashboard and persist Android downloads
   separately from application release snapshots.
 
 ## 4.0.3 — RS485 transport regression and full-stick headroom

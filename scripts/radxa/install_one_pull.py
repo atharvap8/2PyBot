@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--provision-toolchain",action="store_true")
     parser.add_argument("--firmware-mode",choices=["artifact","build"],default="artifact")
     parser.add_argument("--bootstrap-host",action="store_true",help="Install versioned host once with controller USB disconnected")
-    parser.add_argument("--led-backend",choices=["esp32","spi"],default="esp32")
+    parser.add_argument("--led-backend",choices=["firmware","spi"],default="firmware")
     parser.add_argument("--spi-bus",type=int,default=0)
     parser.add_argument("--spi-device",type=int,default=0)
     parser.add_argument("--serial-port",default="/dev/ttyUSB0")
@@ -111,8 +111,8 @@ def main():
     manager.install_monitor()
     print('One-pull units installed. Open a new shell or run hash -r once, then git pull --ff-only.')
     print('If the host protocol is not installed, use --bootstrap-host once with controller USB disconnected.')
-    if args.led_backend=='esp32':
-        print('ESP32 ring backend: deployment animation pauses in the ESP32 bootloader. SPI backend requires a separately wired ring/data path.')
+    if args.led_backend=='firmware':
+        print('Original ESP32 LED animations own the ring; Radxa LED control is disabled.')
 
 
 if __name__=='__main__':main()

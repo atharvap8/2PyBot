@@ -194,29 +194,20 @@ after bootstrap and leave the robot stationary for that coordinated deployment.
 
 ## Ring animations and ownership
 
-| State | Animation |
-| --- | --- |
-| Pull, checks, build, deployment, flash, calibration | Smooth blue-to-violet blended circular spin, one lap per four seconds |
-| Waiting for stationary IDLE | Same blended spin in amber |
-| Verified success | Same spin in green for six seconds, then handback |
-| Failed pull/deployment | Same spin in red for thirty seconds |
-| Interrupted/recovery-required job | Failure indication until recovery/retry |
+The ESP32 ring uses the original firmware renderer from commit `823aa85`,
+including its boot, idle, drive, gesture, fall and sleep animations. There is no
+Radxa display lease or deployment overlay. `PR,HOSTLED,0` advertises this policy;
+old `LS` messages are ignored. Both console and firmware worker stop sending them.
 
-The status daemon is independent of console restarts. On the ESP32, the display-
-only `LS,phase,progress,ttl_ms` lease expires automatically if the host disappears.
-The existing fall event outranks host display ownership. Original normal
-animations are restored, including the rainbow boot swirl, fall response, idle
-twinkle, drive/gesture effects and sleep pattern. Progress is displayed in the
-dashboard; the deployment ring uses only the blended spin.
+One-pull disables/stops `2pybot-deployment-leds.service` for the default setup,
+including installations whose old configuration still says `esp32`. Fresh setups
+default to `--led-backend firmware`. Deployment progress remains in the dashboard.
 
 ### Existing wiring and flash-time indication
 
-The current ring is wired to **ESP32 GPIO 15**. Radxa can own the desired status,
-but **cannot keep animating that ring while the same ESP32 is in its bootloader**.
-Its last frame can remain visible until the app runs again. The API reports this.
-The first firmware update installs HOSTLED capability; the ESP32 backend cannot
-show pull animations before that capability exists. An independent SPI path does
-not depend on that first MCU update.
+The current ring is wired to **ESP32 GPIO 15** and stays firmware-controlled.
+It cannot animate while that ESP32 is in its bootloader. Its last frame can remain
+visible until the app runs again.
 
 For continuous flash-time animation, use a separately wired Radxa SPI LED data
 path/controller and select it:
@@ -230,7 +221,8 @@ This requires the enabled spidev node, `python3-spidev`, compatible electrical
 levels/common ground and **one physical driver** on the ring data input. Two
 push-pull outputs must not be connected together. A shared-data handoff needs
 an appropriate hardware mux/isolator. After deployment the SPI service renders
-normal robot feedback from telemetry; ESP32 mode returns to firmware personality.
+normal robot feedback from telemetry. This explicit SPI option is separate from
+the firmware-owned ESP32 ring.
 Default geometry is sixteen pixels with bounded brightness.
 
 ## Inspect

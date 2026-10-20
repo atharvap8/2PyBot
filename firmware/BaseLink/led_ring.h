@@ -44,6 +44,5 @@ struct LedInputs {
 void leds_begin();                       // boot swirl
 void leds_update(const LedInputs& in);   // call every loop, self rate-limited
 void leds_event(uint8_t ev);             // LED_EV_ARM / LED_EV_FALL
-bool leds_hostStatus(unsigned phase, unsigned progress, unsigned ttlMs);
 
 #endif // LED_RING_H

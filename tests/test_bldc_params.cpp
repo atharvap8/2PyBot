@@ -35,6 +35,7 @@ int main() {
     assert(Serial.output.find("PR,HUBSCHEMA,4\n")!=std::string::npos);
     assert(Serial.output.find("PR,VDRIVE,")!=std::string::npos);
     assert(Serial.output.find("PR,FALLPREVENT,0\n")!=std::string::npos);
+    assert(Serial.output.find("PR,HOSTLED,0\n")!=std::string::npos);
     assert(Serial.output.find("P.\n")!=std::string::npos); // retry did not starve completion
     active=false; params_save(); assert(testNvs["2pybot-bldc4:ISGN"]==-1);
     testNvs["2pybot-bldc4:ISGN"]=1; testNvs["2pybot-bldc4:RPMSGN"]=1;
