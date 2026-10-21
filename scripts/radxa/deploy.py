@@ -82,6 +82,7 @@ def plan_changes(paths, first=False):
         elif path in (MONITOR + "2pybot-deploy.service", MONITOR + "2pybot-deploy.timer"):
             plan.monitor = True
         elif path in ("scripts/radxa/deploy.py","scripts/radxa/git_pull.py","scripts/radxa/deployment_leds.py",
+                      "scripts/radxa/bot_cli.py","scripts/radxa/install_bot_cli.py",
                       MONITOR+"2pybot-deploy.path",MONITOR+"2pybot-deployment-leds.service"):
             plan.monitor=True
     return plan
@@ -232,7 +233,14 @@ class Deployment:
         if plan.native or (plan.console and not (self.app / "native/2pybot_hwstream").exists()):
             self.run(["make", "-C", self.app / "native"], user=True)
 
+    def install_cli(self):
+        installer=self.repo/"scripts/radxa/install_bot_cli.py"
+        if installer.is_file():
+            self.run([sys.executable,installer,"--repo",self.repo,"--user",self.user,
+                      "--deploy-config",self.system_root/"etc/2pybot-deploy.json"])
+
     def install_monitor(self):
+        self.install_cli()
         reload_needed = False
         substitutions = {
             "__REPO__": str(self.repo), "__USER__": self.user,
@@ -689,6 +697,9 @@ class Deployment:
         hotspot=None;hotspot_attempted=False;hotspot_result=state.get('hotspot')
         existing_hold=read_json(Path(self.config.get("firmware_root","/var/lib/2pybot/firmware"))/"deployment-hold.json",{})
         try:
+            # Install recovery commands even if an erased MCU cannot pass READY.
+            # This creates operator files only; no device/service is touched.
+            self.install_cli()
             if needs_runtime or plan.firmware or plan.hotspot:
                 if existing_hold and existing_hold.get("commit")!=self.commit:
                     raise DeploymentDeferred("Another interrupted deployment holds the controller; recover it first")

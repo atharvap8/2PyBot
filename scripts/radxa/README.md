@@ -1,5 +1,9 @@
 # Repo-Based Radxa Deployment
 
+For directory-independent commands, an auto-activated SSH bot environment,
+firmware builds/flashes, calibration, diagnostics and erased-ESP recovery, see
+[Bot commands](../../docs/BOT_COMMANDS.md).
+
 The coordinated workflow, one-time setup, firmware/APK artifacts and ring ownership
 are in [Development SOP](../../docs/DEVELOPMENT_SOP.md). Use `install_one_pull.py`
 for the new workflow. Notes below describe the older checkout-based legacy mode.
