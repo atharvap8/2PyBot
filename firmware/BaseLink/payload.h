@@ -68,7 +68,10 @@ static bool     _torchOn   = false;
 static uint8_t  _torchPct  = TORCH_BOOT_PCT;
 static uint32_t _lastServoMs = 0;
 static uint32_t _lastMoveMs  = 0;
-static bool     _servoLive   = false;
+static bool     _yawLive     = false;
+static uint32_t _lastZoomCommandMs = 0;
+static bool     _zoomLive = false;
+static const uint32_t ZOOM_RELEASE_MS = 2000;
 
 // ------------------------------------------------------------
 //  Hardware writes
@@ -81,6 +84,32 @@ static void _servoWriteDeg(uint8_t pin, uint8_t ch, float deg) {
     float us = P.servoUsMin + (P.servoUsMax - P.servoUsMin) * (deg / 180.0f);
     const float countsPerUs = (float)(1UL << SERVO_PWM_BITS) / (1000000.0f / SERVO_PWM_HZ);
     _pwmWrite(pin, ch, (uint32_t)(us * countsPerUs + 0.5f));
+}
+
+static void _zoomCommand() {
+    if (!_zoomLive) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+        _pwmAttach(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, SERVO_PWM_HZ, SERVO_PWM_BITS);
+#else
+        // Channel is already configured: do not reset the timer shared with yaw.
+        ledcAttachPin(SERVO_ZOOM_PIN, SERVO_ZOOM_CH);
+#endif
+        _zoomLive = true;
+    }
+    _lastZoomCommandMs = millis();
+    _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
+}
+
+static void _zoomRelease() {
+    _pwmWrite(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, 0);
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+    ledcDetach(SERVO_ZOOM_PIN);
+#else
+    ledcDetachPin(SERVO_ZOOM_PIN);
+#endif
+    pinMode(SERVO_ZOOM_PIN, OUTPUT);
+    digitalWrite(SERVO_ZOOM_PIN, LOW);
+    _zoomLive = false;
 }
 
 // Every torch change in the whole firmware funnels through here.
@@ -124,7 +153,7 @@ inline void payload_begin() {
     _zoomDeg = P.svZoomHome;
     _servoWriteDeg(SERVO_YAW_PIN,  SERVO_YAW_CH,  _yawDeg);
     _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
-    _servoLive  = true;
+    _yawLive  = true;
     _lastMoveMs = millis();
 
     Serial.printf("[PAY] Servos yaw GPIO%d / zoom GPIO%d homed to %.0f / %.0f deg\n",
@@ -144,6 +173,8 @@ inline void payload_begin() {
     _claimPin(SERVO_ZOOM_PIN);
     _pwmAttach(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, SERVO_PWM_HZ, SERVO_PWM_BITS);
     _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
+    _zoomLive = true;
+    _lastZoomCommandMs = millis();
 }
 
 inline void payload_torchToggle() {
@@ -181,7 +212,11 @@ inline void payload_torchSetPct(int pct) {
 }
 
 inline void payload_setYaw(float deg)  { _yawDeg  = constrain(deg, (float)P.svYawMin,  (float)P.svYawMax);  _lastMoveMs = millis(); }
-inline void payload_setZoom(float deg) { _zoomDeg = constrain(deg, (float)P.svZoomMin, (float)P.svZoomMax); _lastMoveMs = millis(); }
+inline void payload_setZoom(float deg) {
+    _zoomDeg = constrain(deg, (float)P.svZoomMin, (float)P.svZoomMax);
+    _lastMoveMs = millis();
+    _zoomCommand();
+}
 
 inline void payload_center() {
     payload_setYaw(P.svYawHome);
@@ -209,27 +244,28 @@ inline void payload_update(float dt, float yawStick, float zoomStick) {
         _yawDeg  = constrain(_yawDeg,  (float)P.svYawMin,  (float)P.svYawMax);
         _zoomDeg = constrain(_zoomDeg, (float)P.svZoomMin, (float)P.svZoomMax);
         _lastMoveMs = millis();
+        if (zoomStick != 0.0f) _zoomCommand();
     }
 
     uint32_t now = millis();
+    // Zoom has its own command deadline: yaw movement and periodic refreshes
+    // must not keep it attached. Held zoom input renews the deadline each loop.
+    if (_zoomLive && now - _lastZoomCommandMs >= ZOOM_RELEASE_MS) _zoomRelease();
     if (now - _lastServoMs < (uint32_t)(1000.0f / (P.svRate < 1 ? 1 : P.svRate))) return;   // one servo frame
     _lastServoMs = now;
 
-    // Stop pulsing after a spell of no input so the MG90S stops hunting and
-    // buzzing; it holds position on its own gearing. Runtime-gated now
-    // (SVIDLE = 0 disables), so it can be toggled from the app.
+    // Yaw retains its existing SVIDLE setting. Zoom always detaches after its
+    // independent two-second deadline, including when SVIDLE is zero.
     if (P.svIdleMs > 0 && !moving && (now - _lastMoveMs) > (uint32_t)P.svIdleMs) {
-        if (_servoLive) {
+        if (_yawLive) {
             _pwmWrite(SERVO_YAW_PIN,  SERVO_YAW_CH,  0);
-            _pwmWrite(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, 0);
-            _servoLive = false;
+            _yawLive = false;
         }
-        return;
+    } else {
+        _yawLive = true;
+        _servoWriteDeg(SERVO_YAW_PIN, SERVO_YAW_CH, _yawDeg);
     }
-
-    _servoLive = true;
-    _servoWriteDeg(SERVO_YAW_PIN,  SERVO_YAW_CH,  _yawDeg);
-    _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
+    if (_zoomLive) _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
 }
 
 #endif // PAYLOAD_H
