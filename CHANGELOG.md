@@ -5,6 +5,9 @@ For the main milestones and estimated dates for future work, see the
 
 ## 4.1.0 — One-pull deployment and status ring
 
+- Add an active-high GPIO32 blue button LED: boot/wait blink, balancing breathe,
+  ready steady-on, arming blink, stop/maintenance pulses and fast error blink.
+  Independent hardware PWM/timer keeps the indication running during calibration.
 - Keep attitude feedback at full strength: recorded full-stick frames showed
   terrain scaling nearly erased or reversed the catch command near six degrees.
 - Remove free-speed/SPDHEAD derating of DRIVEV and bypass the predictive

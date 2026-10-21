@@ -47,6 +47,7 @@
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
 #include "led_ring.h"      // WS2812 16-LED expression ring on GPIO 15
 #include "payload.h"       // servos GPIO 26/0 + torch MOSFET GPIO 2
+#include "status_led.h"    // blue power-button LED, GPIO 32
 
 IMUSensor imu;
 
@@ -61,6 +62,8 @@ bool RADXA_STREAM      = true;
 bool hostBootReady     = false;
 StartupGate startupGate;
 bool hardwareReady = false;
+bool statusErrorLatched = false;
+bool statusStopped = false;
 
 // Forward-positive measurements (see config.h sign conventions)
 float pitchF = 0.0f, rateF = 0.0f;      // deg, deg/s
@@ -173,6 +176,20 @@ static inline float clampf(float v, float lo, float hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+void updateStatusLed() {
+    status_led::Mode mode;
+    if (statusErrorLatched) mode = status_led::ERROR;
+    else if (startupGate.maintenance || AT.mode != AT_IDLE) mode = status_led::MAINTENANCE;
+    else if (!startupGate.initialized || (P.bootWait > .5f && !hostBootReady)) mode = status_led::BOOT;
+    else if (hardwareReady && (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || P.drvMode < .5f))
+        mode = status_led::ERROR;
+    else if (state == STATE_BALANCING) mode = status_led::BALANCING;
+    else if (motorsRequested) mode = status_led::ARMING;
+    else if (statusStopped) mode = status_led::STOPPED;
+    else mode = status_led::READY;
+    status_led::setMode(mode);
+}
+
 void resetController() {
     navigation.reset();
     fallPrevention.reset();
@@ -206,10 +223,17 @@ void requestEnable() {
         return;
     }
     motorsRequested = true;
+    statusErrorLatched = false;
+    statusStopped = false;
+    updateStatusLed();
     Serial.println("[MAIN] Enable requested — will arm when upright");
 }
 
 void requestDisable(const char* why) {
+    if (!strcmp(why,"FELL") || !strcmp(why,"RATE SPIKE") ||
+        !strncmp(why,"MOTOR LINK/MODE/FAULT",21) || !strncmp(why,"CONTROL LOOP OVERRUN",20))
+        statusErrorLatched = true;
+    statusStopped = true;
     navigation.cancel(NavigationLease::NAV_DISABLED);radxaLastRx=0;radxaFwd=radxaSteer=0;
     motorsRequested = false;
     // Push the state back into the pad module. Without this, an AUTOMATIC
@@ -222,6 +246,7 @@ void requestDisable(const char* why) {
     }
     wheelTargetL=wheelTargetR=appliedSteerSteps=0.0f;
     autoClimb.resetDynamics();climbMode=false;
+    updateStatusLed();
     Serial.printf("[MAIN] Motors OFF (%s)\n", why);
 }
 
@@ -384,7 +409,9 @@ void handleLine(char* line) {
         case 'X': requestDisable("e-stop"); break;
         case 'C':
             requestDisable("gyro cal");
-            imu.calibrateGyro();
+            status_led::setMode(status_led::BOOT);
+            if (!imu.calibrateGyro()) statusErrorLatched = true;
+            updateStatusLed();
             Serial.println("[TUNE] Send 'E' to re-arm.");
             break;
         case 'R': resetController(); Serial.println("[TUNE] Controller state reset"); break;
@@ -629,13 +656,14 @@ void waitForHostStartup() {
 void setup() {
     pinMode(RIGHT_RS485_DE,OUTPUT); digitalWrite(RIGHT_RS485_DE,LOW);
     pinMode(LEFT_RS485_DE,OUTPUT); digitalWrite(LEFT_RS485_DE,LOW);
+    const bool statusLedReady = status_led::begin();
     digitalWrite(TORCH_PIN, LOW);
     pinMode(TORCH_PIN, OUTPUT);
     Serial.setTxBufferSize(1024);
     Serial.begin(SERIAL_BAUD);
     delay(300);
-    // GPIO 2 is the torch MOSFET gate now; payload_begin() claims it
-    // below and drives it low. The WS2812 ring shows status instead.
+    // GPIO 2 is the torch MOSFET gate; GPIO 32 is the blue status LED.
+    if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
     Serial.println("     2PyBot BaseLink v4.1.0 — M0601 BLDC / LQI");
@@ -649,6 +677,7 @@ void setup() {
     leds_begin();   // boot swirl plays while sensors settle below
 
     if (!imu.begin()) {
+        status_led::setMode(status_led::ERROR);
         Serial.println("BS,ERROR");
         Serial.println("[MAIN] FATAL: IMU init failed — halting");
         while (true) delay(1000);
@@ -661,6 +690,7 @@ void setup() {
     Serial.println("BS,CALIBRATING");
     delay(STARTUP_SETTLE_MS);
     if (!imu.calibrateGyro()) {
+        status_led::setMode(status_led::ERROR);
         Serial.println("BS,ERROR");
         Serial.println("[MAIN] FATAL: gyro calibration failed — motors remain disabled");
         while (true) delay(1000);
@@ -676,6 +706,7 @@ void setup() {
     motorsRequested = false;
     btgamepad_syncArmed(false);
 
+    updateStatusLed();
     Serial.printf("[MAIN] countsPerM=%.0f  estimatedFree=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f)  Amax=%.2f m/s^2; predictive governor OFF\n",
                   P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.aMax);
     Serial.println("BS,READY");
@@ -867,6 +898,7 @@ void loop() {
         at_restore("motor feedback/control timing lost");
     at_update(dt);
     hub.transmit(dt);       // both UARTs immediately after calculating control
+    updateStatusLed();      // PWM animation runs independently; state update only
     params_service();      // incremental output, never blocks motor updates
 
     // ---- 3b. expression ring (rate-limited internally, non-blocking) ----

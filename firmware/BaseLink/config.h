@@ -140,6 +140,13 @@
 #define LED_DIR_CW          1
 #define LED_MAX_BRIGHT      200
 #define LED_FPS             50
+// Blue power-button LED: GPIO32 -> LED+, LED- -> GND.
+// Channel 0/timer 0 are separate from servo channels 4/5 and torch channel 6.
+#define STATUS_LED_PIN      32
+#define STATUS_LED_CH       0
+#define STATUS_LED_ACTIVE_HIGH 1
+#define STATUS_LED_PWM_HZ   1000
+#define STATUS_LED_PWM_BITS 8
 #define PAD_FWD_SIGN        (+1.0f)
 #define PAD_STEER_SIGN      (-1.0f)
 #define PAD_DEADZONE        0.08f
