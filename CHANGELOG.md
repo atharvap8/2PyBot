@@ -5,6 +5,9 @@ For the main milestones and estimated dates for future work, see the
 
 ## 4.1.0 — One-pull deployment and status ring
 
+- Move GPIO15 ring transmission to I2S1 DMA, clear pixels before boot and skip
+  busy frames to address colour corruption reported when arming under load.
+  Preserve every animation branch from pre-BLDC stepper revision `a8427f0`.
 - Add an active-high GPIO32 blue button LED: boot/wait blink, balancing breathe,
   ready steady-on, arming blink, stop/maintenance pulses and fast error blink.
   Independent hardware PWM/timer keeps the indication running during calibration.

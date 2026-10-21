@@ -2,10 +2,10 @@
  * ============================================================
  *  led_ring.h — WS2812 16-LED expression ring (GPIO 15)
  * ============================================================
- *  Rendering is done with NeoPixelBus over the ESP32 RMT
- *  peripheral: the WS2812 timing is generated in hardware;
- *  interrupts are never disabled by pixel transmission. Rendering remains
- *  rate-limited and independent of the BLDC UART ownership.
+ *  NeoPixelBus sends complete WS2812 frames through ESP32 I2S1 DMA,
+ *  avoiding interrupt-refilled RMT transmission during balancing.
+ *  Rendering is rate-limited; a busy frame is skipped rather than
+ *  waiting in the control loop. GPIO32 uses separate LEDC hardware.
  *
  *  The main loop calls leds_update(li) every iteration; frames
  *  are rate-limited to LED_FPS internally and each frame costs

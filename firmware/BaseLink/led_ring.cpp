@@ -25,8 +25,10 @@
 #include "led_ring.h"
 #include <NeoPixelBus.h>
 
-// RMT channel 0; timing generated in hardware, zero IRQ impact.
-static NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Ws2812xMethod>
+// Send each complete frame from I2S1 DMA. The RMT backend streams through
+// interrupt-refilled memory, making it sensitive to interrupt latency once
+// Bluetooth and the balancing/motor loops are active.
+static NeoPixelBus<NeoGrbFeature, NeoEsp32I2s1Ws2812xMethod>
     ring(LED_RING_COUNT, LED_RING_PIN);
 
 static uint32_t lastFrameMs = 0;
@@ -90,7 +92,12 @@ static void hsv(float h, float s, float v, float& r, float& g, float& b) {
 }
 
 void leds_begin() {
+    digitalWrite(LED_RING_PIN, LOW);
+    pinMode(LED_RING_PIN, OUTPUT);
+    delay(1); // reset/latch any partial frame left by the previous application
     ring.Begin();
+    clearF(); showF();
+    delay(1); // finish the complete black frame before the original boot swirl
     // boot swirl: one rainbow lap, ~0.5 s, blocking is fine in setup()
     for (int t = 0; t < LED_RING_COUNT * 2; t++) {
         clearF();
@@ -111,6 +118,7 @@ void leds_event(uint8_t ev) { eventActive = ev; eventT0 = millis(); }
 void leds_update(const LedInputs& in) {
     uint32_t now = millis();
     if (now - lastFrameMs < (uint32_t)(1000.0f / (P.ledFps < 1 ? 1 : P.ledFps))) return;
+    if (!ring.CanShow()) return; // skip a busy frame rather than stall control
     lastFrameMs = now;
     float t = now / 1000.0f;
     clearF();

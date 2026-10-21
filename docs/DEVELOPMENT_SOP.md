@@ -194,10 +194,24 @@ after bootstrap and leave the robot stationary for that coordinated deployment.
 
 ## Ring animations and ownership
 
-The ESP32 ring uses the original firmware renderer from commit `823aa85`,
+The ESP32 ring uses the original stepper animation policy from commit `a8427f0`,
 including its boot, idle, drive, gesture, fall and sleep animations. There is no
 Radxa display lease or deployment overlay. `PR,HOSTLED,0` advertises this policy;
 old `LS` messages are ignored. Both console and firmware worker stop sending them.
+
+GPIO15 frame transmission uses NeoPixelBus I2S1 DMA instead of interrupt-refilled
+RMT. Startup sends a complete black frame before the boot swirl, and normal
+rendering skips a busy transfer instead of waiting in the control loop. This
+targets the reported per-pixel colour corruption on START; physical confirmation
+is required after deploying the change. The original GRB format and animations
+are retained. Local tests were skipped at the owner's request.
+
+The full stepper animation set is retained: rainbow boot swirl, green arming
+sweeps, red fall flash/fade, HIGH blue laps, LOW green settling arc, gesture
+rainbow, vision-brake pulses, violet climbing/grip dots, shy pink cheeks,
+directional driving beam and amber reverse, stiff amber breathing, idle
+breathing/twinkle/effort tint, green pickup prompt, sleeping ember/double-blink
+and controller-connect greeting.
 
 One-pull disables/stops `2pybot-deployment-leds.service` for the default setup,
 including installations whose old configuration still says `esp32`. Fresh setups
