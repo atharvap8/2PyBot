@@ -37,7 +37,8 @@ void params_applyHardware(bool) { hub.applyTuning(); }
 
 void reset() {
     testTerrainScale=1;
-    params_defaults();fallPrevention.reset();autoClimb=AutoClimb();autoClimb.configure(false);
+    params_defaults();assert(params_set("DRVMODE",1,true)==0);
+    fallPrevention.reset();autoClimb=AutoClimb();autoClimb.configure(false);
     descentGuard.reset();navigation.reset();yawControl.reset(0);
     pitchF=rateF=posM=velF=vCmd=xRef=zInt=uOut=0;
     cmdFwd=cmdSteer=encDiff=diffRateF=lookCmd=steerSteps=diffTarget=0;
@@ -96,6 +97,17 @@ int main() {
     cmdFwd=1;fallPrevention.operatorRef=1;pitchF=20;rateF=100;vCmd=.67f;
     runController(.005f);
     assert(satV && vCmd<=P.motorMa*.001f/P.hubKp+.00001f);
+    // Velocity balancing does not inherit the bypassed current loop's I/Kp
+    // virtual-state clamp. Both directions retain catch acceleration.
+    for(float sign:{-1.0f,1.0f}) {
+        reset();assert(params_set("DRVMODE",2)==0);
+        cmdFwd=sign;pitchF=sign*20;rateF=sign*100;vCmd=sign*1.2f;
+        runController(.005f);
+        assert(sign*vCmd>1.2f && !satV && sign*uOut==P.aMax);
+        vCmd=sign*(hub.velocityLimit()-.001f);
+        runController(.005f);
+        assert(satV && std::fabs(std::fabs(vCmd)-hub.velocityLimit())<.00001f);
+    }
     puts("BLDC production controller: direct full-stick target, predictive governor bypass and balance anti-windup passed");
     return 0;
 }

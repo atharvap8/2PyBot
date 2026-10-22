@@ -12,6 +12,8 @@ int main() {
     testNvs["2pybot-hub:_ver"]=1;
     testNvs["2pybot-hub:ISGN"]=1;
     params_begin();
+    assert(P.drvMode==2); // new unsaved/fresh-NVS default is velocity balancing
+    assert(params_set("DRVMODE",1)==0); // exercise current-mode compatibility below
     assert(P.curSign==-1 && P.rpmSign==-1 && P.maxSpdSt==0 && P.hubVSrc==1);
     assert(P.stepsPerM==P.countsPerM && P.vMax==0 && P.maxSpdEff==0 && P.vNoLoad>.7f && P.vNoLoad<.75f);
     assert(P.maxDriveV==1 && P.spdHead==.7f && P.driveVEff==1);
@@ -24,8 +26,13 @@ int main() {
     assert(params_set("FREERPM",0)==0);
     assert(params_set("ISGN",1)==-2 && params_set("RPMSGN",1)==-2 && params_set("LDIR",0)==-2);
     assert(params_set("DRVMODE",.5f)==-2 && params_set("CURRENT",5000)==-2);
+    assert(params_set("DRVMODE",3)==-2 && params_set("VSIGN",0)==-2 && params_set("HUBVSRC",2)==-2);
+    assert(params_set("DRVMODE",2)==0 && P.driveVEff==1 && P.velSign==-1);
+    assert(params_set("DRIVEV",3)==0 && P.driveVEff<1.8f && P.driveVEff>1.79f);
+    assert(params_set("DRIVEV",1)==0 && params_set("DRVMODE",1)==0 && P.driveVEff==1);
     active=true;
     assert(params_set("DRVMODE",0)==-3 && params_set("LDIR",1)==-3);
+    assert(params_set("DRVMODE",2)==-3 && params_set("VSIGN",1)==-3);
     assert(params_set("HUBKP",3.5f)==0); // live dynamics tuning remains available
     params_save(); assert(testNvs.count("2pybot-bldc4:_ver")==0);
     Serial.output.clear(); Serial.capacity=0;
@@ -36,6 +43,7 @@ int main() {
     assert(Serial.output.find("PR,VDRIVE,")!=std::string::npos);
     assert(Serial.output.find("PR,FALLPREVENT,0\n")!=std::string::npos);
     assert(Serial.output.find("PR,HOSTLED,0\n")!=std::string::npos);
+    assert(Serial.output.find("PR,VELBAL,1\n")!=std::string::npos);
     assert(Serial.output.find("P.\n")!=std::string::npos); // retry did not starve completion
     active=false; params_save(); assert(testNvs["2pybot-bldc4:ISGN"]==-1);
     testNvs["2pybot-bldc4:ISGN"]=1; testNvs["2pybot-bldc4:RPMSGN"]=1;

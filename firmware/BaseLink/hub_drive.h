@@ -31,8 +31,16 @@ public:
     int64_t getPositionR() const;
     float wheelVelL() const { return measuredVelocity(leftWheel); }
     float wheelVelR() const { return measuredVelocity(rightWheel); }
-    bool modeOk() const { return leftWheel.modeOk && rightWheel.modeOk && leftPort.fb().posValid && rightPort.fb().posValid; }
-    bool wheelHealthy(const HubWheel& w) const { return w.modeOk && w.port->fb().posValid && !w.port->fb().fault; }
+    bool modeOk() const { return confirmedMode(leftWheel) && confirmedMode(rightWheel) && leftPort.fb().posValid && rightPort.fb().posValid; }
+    bool wheelHealthy(const HubWheel& w) const { return confirmedMode(w) && w.port->fb().posValid && !w.port->fb().fault; }
+    bool balanceModeSelected() const { return P.drvMode == 1 || P.drvMode == 2; }
+    bool velocityMode() const { return wantedMode() == m0601::MODE_VELOCITY; }
+    float velocityLimit() const {
+        const float protocol = m0601::RPM_CMD_MAX * (2.0f * PI * P.wheelR / 60.0f);
+        return P.vMax > 0 ? fminf(P.vMax, protocol) : protocol;
+    }
+    int16_t velocityCmdL() const { return rpmCommandL; }
+    int16_t velocityCmdR() const { return rpmCommandR; }
     bool linkOk(uint32_t ageMs) const;
     uint8_t faultBits() const { return leftPort.fb().fault | rightPort.fb().fault; }
     const M0601Port& left() const { return leftPort; }
@@ -48,7 +56,8 @@ private:
     void handshake(HubWheel& wheel);
     float measuredVelocity(const HubWheel& wheel) const;
     int64_t counts(const HubWheel& wheel) const;
-    uint8_t wantedMode() const { return P.drvMode > .5f ? m0601::MODE_CURRENT : m0601::MODE_VELOCITY; }
+    uint8_t wantedMode() const { return P.drvMode == 1 ? m0601::MODE_CURRENT : m0601::MODE_VELOCITY; }
+    bool confirmedMode(const HubWheel& w) const { return w.modeOk && w.port->fb().mode == wantedMode(); }
     M0601Port rightPort, leftPort;
     HubWheel rightWheel, leftWheel;
     hub_control::CurrentLoop controller;
@@ -56,6 +65,8 @@ private:
     float balanceAcceleration = 0;
     bool balanceControl = false, recoveryControl = false;
     uint32_t lastDriveUs = 0, lastQueryMs = 0;
+    uint8_t configuredMode = 0;
+    int16_t rpmCommandL = 0, rpmCommandR = 0;
     void reportFaults(HubWheel& wheel);
 };
 extern HubDrive hub;

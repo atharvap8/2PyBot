@@ -181,7 +181,7 @@ void updateStatusLed() {
     if (statusErrorLatched) mode = status_led::ERROR;
     else if (startupGate.maintenance || AT.mode != AT_IDLE) mode = status_led::MAINTENANCE;
     else if (!startupGate.initialized || (P.bootWait > .5f && !hostBootReady)) mode = status_led::BOOT;
-    else if (hardwareReady && (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || P.drvMode < .5f))
+    else if (hardwareReady && (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || !hub.balanceModeSelected()))
         mode = status_led::ERROR;
     else if (state == STATE_BALANCING) mode = status_led::BALANCING;
     else if (motorsRequested) mode = status_led::ARMING;
@@ -200,7 +200,7 @@ void resetController() {
     requestedDriveV=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
     appliedSteerSteps=0.0f;
     driveReferenceActive=false;
-    vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
+    vCmd = hub.velocityMode() ? velF : 0.0f; zInt = 0.0f; uOut = 0.0f;
     xRef = posM;
     steerSteps = 0.0f; diffTarget = encDiff;
     yawControl.reset(encDiff);
@@ -592,7 +592,11 @@ void runController(float dt) {
 
     satA = (fabsf(uOut) > P.aMax) ? 1 : 0;
     uOut = clampf(uOut, -P.aMax, P.aMax);
-    const auto velocity = hub_control::integrateVelocity(vCmd,uOut,velF,dt,P.hubKp,P.motorMa*.001f,P.vMax);
+    // Velocity balance commands the driver's speed loop directly. The current-
+    // loop I/Kp virtual-state bound is inapplicable when that loop is bypassed.
+    const bool velocityDrive = hub.velocityMode();
+    const auto velocity = hub_control::integrateVelocity(vCmd,uOut,velF,dt,
+        velocityDrive ? 0.0f : P.hubKp, P.motorMa*.001f, velocityDrive ? hub.velocityLimit() : P.vMax);
     vCmd = velocity.value;
     satV = velocity.trackingLimited;
 
@@ -616,12 +620,13 @@ void runController(float dt) {
     const bool navigationTurning=navigation.granted && fabsf(navigation.yawRate)>.005f;
     const bool turning = navigationTurning || fabsf(steerIn) > P.steerDb;
     const float target = navigationTurning ? navigation.yawRate*P.trackW*P.stepsPerM*.5f : steerIn*P.maxSteerSt;
-    const float room = P.maxSpdEff>0 ? fmaxf(0,P.maxSpdEff-fabsf(baseSteps)) : P.maxSteerSt;
+    const float actuatorSpeed = velocityDrive ? hub.velocityLimit()*P.stepsPerM : P.maxSpdEff;
+    const float room = actuatorSpeed>0 ? fmaxf(0,actuatorSpeed-fabsf(baseSteps)) : P.maxSteerSt;
     steerSteps = yawControl.update(clampf(target,-P.maxSteerSt,P.maxSteerSt),turning,encDiff,diffRateF,
         lookCmd*(P.lookMaxDeg*DEG_TO_RAD)*P.trackW*P.countsPerM,P.yawKp,P.yawKd,P.yawMaxSt,
         P.yawRelatch,fabsf(pitchF)>P.yawTiltSus,P.steerSlew,room,.1f*P.trackW*P.countsPerM,dt);
     diffTarget = yawControl.heading;
-    appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,P.maxSpdEff);
+    appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,actuatorSpeed);
     wheelTargetL=baseSteps-appliedSteerSteps;
     wheelTargetR=baseSteps+appliedSteerSteps;
     const bool recoveryTorque = fallPrevention.recovering || fabsf(pitchF)>=6.0f || fabsf(rateF)>=40.0f;
@@ -710,6 +715,7 @@ void setup() {
     Serial.printf("[MAIN] countsPerM=%.0f  estimatedFree=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f)  Amax=%.2f m/s^2; predictive governor OFF\n",
                   P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.aMax);
     Serial.println("BS,READY");
+    Serial.printf("[MAIN] DRVMODE=%.0f (1=current balance, 2=velocity balance, 0=velocity bench); VSIGN=%.0f\n",P.drvMode,P.velSign);
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
 
     lastLoopUs = micros();
@@ -867,7 +873,7 @@ void loop() {
     // ---- 3. state machine ----
     if (state == STATE_IDLE) {
         if (motorsRequested && hub.linkOk(HUB_LINK_TIMEOUT_MS) && hub.modeOk() && !hub.faultBits() &&
-            P.drvMode>.5f && !startupGate.maintenance && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
+            hub.balanceModeSelected() && !startupGate.maintenance && (P.bootWait < 0.5f || hostBootReady) && fabsf(pitchF) < P.armAngle) {
             resetController();
             hub.enable();
             state = STATE_BALANCING;
@@ -943,7 +949,7 @@ void loop() {
         Serial.printf("D,%lu,%.2f,%.1f,%.2f,%.3f,%.3f,%.0f,%.0f,%u,%u,%lu,%u,%u,%.2f,%.2f,"
                        "%.3f,%.3f,%.2f,%u,%lu,%.3f,%.2f,%u,%.3f,%.3f,%.3f,%.2f,%.0f,%.0f,"
                        "%u,%u,%u,%.2f,%.3f,%.2f,%.3f,%u,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,"
-                       "%u,%.2f,%u,%.2f,%.3f,%.3f,%.3f,%u,%.3f,%.3f\n",
+                       "%u,%.2f,%u,%.2f,%.3f,%.3f,%.3f,%u,%.3f,%.3f,%.0f,%d,%d\n",
                        (unsigned long)nowMs, pitchF, rateF, uOut, velF,posM-(autoClimb.blend>=.5f?climbXRef:xRef),
                        vCmd * P.stepsPerM, appliedSteerSteps, satV, satA,
                       (unsigned long)loopMaxUs, (unsigned)joySpeedHigh,
@@ -960,7 +966,7 @@ void loop() {
                        (unsigned)autoClimb.kind,autoClimb.exitPending?autoClimb.probeSeconds:autoClimb.flatSeconds,
                        (unsigned)autoClimb.exitBlock,autoClimb.cooldownSeconds,
                        descentGuard.limit,descentGuard.excess,descentGuard.scale,(unsigned)descentGuard.active,
-                       descentGuard.goal,autoClimb.overspeed);
+                       descentGuard.goal,autoClimb.overspeed,P.drvMode,hub.velocityCmdL(),hub.velocityCmdR());
         loopMaxUs = 0;
     }
 

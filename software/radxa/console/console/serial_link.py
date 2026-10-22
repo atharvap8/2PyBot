@@ -265,7 +265,7 @@ class SerialLink:
                          "acEnabled", "acState", "acPolicy", "acBlend", "acError", "acBias", "acFollow",
                          "acFlags", "clZ", "clEx", "clRef", "fpHazard", "clRecover", "acStable",
                          "acKind", "acExit", "acExitBlock", "acCooldown", "dsLimit", "dsExcess", "dsScale",
-                         "dsActive", "dsGoal", "acOverspeed"]
+                         "dsActive", "dsGoal", "acOverspeed", "drvMode", "rpmCmdL", "rpmCmdR"]
                 self.debug = {n: float(x) for n, x in zip(names, f) if x not in ("", None)}
                 self.tel["balancing"] = bool(self.debug.get("bal", 0))
                 return

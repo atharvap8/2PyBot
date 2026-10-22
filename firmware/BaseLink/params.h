@@ -58,18 +58,19 @@
   X(wheelR,    "WHEELR",  WHEEL_RADIUS_M,      0.020f, 0.120f,"MOTOR", "loaded wheel radius (m)")       \
   X(maxSpdSt,  "MAXSPD",  MAX_SPEED_STEPS,     0.0f,25000.0f,"MOTOR", "counts/s; 0 = no firmware speed cap") \
   X(motAccel,  "MAXACC",  MOTOR_ACCEL_LIMIT,1000.0f,150000.0f,"MOTOR","balance acceleration (counts/s^2)") \
-  X(motorMa,   "CURRENT", MOTOR_CURRENT_MA,  300.0f,MOTOR_CURRENT_MAX_MA,"MOTOR","per-motor torque current limit (mA)") \
+  X(motorMa,   "CURRENT", MOTOR_CURRENT_MA,  300.0f,MOTOR_CURRENT_MAX_MA,"MOTOR","current-mode torque limit (mA); velocity uses driver limit") \
   X(supplyV,   "SUPPLYV", SUPPLY_V,            7.0f, 24.0f,"MOTOR", "configured supply; speed estimate only (V)") \
   X(freeRpm,   "FREERPM", 0.0f,               0.0f,500.0f,"MOTOR", "measured free speed; 0 = voltage estimate (rpm)") \
   X(spdHead,   "SPDHEAD", SPEED_HEADROOM,      0.30f, 1.0f,"MOTOR", "legacy compatibility only; no drive cap") \
-  X(drvMode,   "DRVMODE", HUB_DRIVE_MODE,      0.0f,  1.0f,"MOTOR", "1 current balance; 0 bench velocity") \
+  X(drvMode,   "DRVMODE", HUB_DRIVE_MODE,      0.0f,  2.0f,"MOTOR", "0 velocity bench; 1 current balance; 2 velocity balance") \
+  X(velSign,   "VSIGN",   HUB_VELOCITY_SIGN,  -1.0f,  1.0f,"MOTOR", "velocity-command wire polarity (+1/-1)") \
   X(hubKp,     "HUBKP",   HUB_KP,              0.0f, 40.0f,"MOTOR", "common velocity P (A per m/s)") \
   X(hubKi,     "HUBKI",   HUB_KI,              0.0f,100.0f,"MOTOR", "common velocity I (A per m)")   \
   X(hubIntLim, "HUBILIM", HUB_INT_LIM,         0.0f,  3.0f,"MOTOR", "common integral limit (A)")   \
   X(hubKff,    "HUBKFF",  HUB_KFF,             0.0f,  2.0f,"MOTOR", "common acceleration feed-forward") \
   X(hubMass,   "HUBMASS", HUB_MASS_KG,         0.3f, 10.0f,"MOTOR", "robot mass for feed-forward (kg)") \
   X(hubVSrc,   "HUBVSRC", HUB_VEL_SOURCE,      0.0f,  1.0f,"MOTOR", "0 corrected rpm; 1 position velocity") \
-  X(hubAcc,    "HUBACC",  HUB_VEL_ACCEL_BYTE,  0.0f,255.0f,"MOTOR", "bench velocity ramp byte")    \
+  X(hubAcc,    "HUBACC",  HUB_VEL_ACCEL_BYTE,  0.0f,255.0f,"MOTOR", "bench velocity ramp byte; balance uses 0")    \
   X(dirL,      "LDIR",    LEFT_MOTOR_DIR,     -1.0f,  1.0f,"MOTOR", "left direction (+1/-1)")      \
   X(dirR,      "RDIR",    RIGHT_MOTOR_DIR,    -1.0f,  1.0f,"MOTOR", "right direction (+1/-1)")     \
   X(curSign,   "ISGN",    HUB_CURRENT_SIGN,   -1.0f, -1.0f,"MOTOR", "confirmed current polarity (-1)") \

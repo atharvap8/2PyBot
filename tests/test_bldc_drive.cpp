@@ -4,12 +4,13 @@
 bool params_motionActive() { return hub.isEnabled(); }
 void params_applyHardware(bool) { hub.applyTuning(); }
 static int queries=0;
+static uint8_t replyMode=m0601::MODE_CURRENT;
 static void reply(HardwareSerial& serial,uint8_t id) {
     if(serial.tx.empty())return;
     const size_t start=serial.tx.size()-10;
     uint8_t command=serial.tx[start+1];
     if(command==m0601::CMD_MODE) {serial.tx.clear();return;}
-    uint8_t f[10]={id,m0601::MODE_CURRENT,0,0,0,0,0,0,0,0};
+    uint8_t f[10]={id,replyMode,0,0,0,0,0,0,0,0};
     if(command==m0601::CMD_QUERY) {++queries;f[6]=25;}
     f[9]=m0601::crc8(f,9);
     for(auto b:f)serial.rx.push_back(b);
@@ -26,7 +27,7 @@ static void cycle() {
     testMicros+=5000;hub.service(.005f);
 }
 int main() {
-    params_begin();hub.applyTuning();
+    params_begin();assert(P.drvMode==2);assert(params_set("DRVMODE",1)==0);hub.applyTuning();
     for(int i=0;i<8;++i)cycle();
     assert(hub.modeOk() && hub.linkOk(60));
     hub.enable();hub.setSpeeds(.1f*P.countsPerM,.1f*P.countsPerM);cycle();
@@ -71,5 +72,29 @@ int main() {
     hub.enable();
     testMicros+=61000;hub.service(.005f);hub.transmit(.005f);
     assert(!hub.isEnabled() && !hub.modeOk() && hub.currentCmdL()==0 && hub.currentCmdR()==0);
+    // Explicit velocity balancing: confirmed mode 2, robot-forward wire signs,
+    // no extra current PI or balance ramp, and common speed before steering.
+    assert(params_set("DRVMODE",2)==0);
+    assert(hub.velocityMode() && hub.balanceModeSelected() && !hub.modeOk());
+    replyMode=m0601::MODE_VELOCITY;
+    for(int i=0;i<8;++i)cycle();
+    assert(hub.modeOk());
+    assert(params_set("HUBACC",150)==0);
+    hub.enable();hub.setBalanceCommand(.1f*P.countsPerM,.1f*P.countsPerM,6,false);cycle();
+    assert(wireCurrent(Serial1)>0 && wireCurrent(Serial2)<0); // fields now contain signed RPM
+    assert(std::abs(wireCurrent(Serial1))==18 && std::abs(wireCurrent(Serial2))==18);
+    assert(Serial1.tx[6]==0 && Serial2.tx[6]==0);
+    assert(hub.currentCmdL()==0 && hub.currentCmdR()==0);
+    assert(params_set("DRVMODE",1)==-3 && params_set("VSIGN",1)==-3);
+    const float limit=hub.velocityLimit();
+    hub.setBalanceCommand((limit-.1f)*P.countsPerM,(limit+.1f)*P.countsPerM,6,true);cycle();
+    assert(std::abs(wireCurrent(Serial1))==330 && std::abs(wireCurrent(Serial2))==330 && hub.saturated());
+    hub.disable();cycle();cycle();
+    assert(wireCurrent(Serial1)==0 && wireCurrent(Serial2)==0);
+    assert(params_set("DRVMODE",0)==0 && !hub.balanceModeSelected()); // bench stays bench
+    assert(params_set("DRVMODE",1)==0 && !hub.modeOk()); // old mode-2 reply cannot arm current mode
+    replyMode=m0601::MODE_CURRENT;
+    for(int i=0;i<8;++i)cycle();
+    assert(hub.modeOk() && !hub.velocityMode());
     puts("BLDC drive: actual UART polarity, pure-turn symmetry, armed DRIVE-only polling, never-blocking send, mode-loss and timeout disable passed");
 }

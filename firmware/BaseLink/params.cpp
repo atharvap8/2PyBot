@@ -3,6 +3,7 @@
  * Table, bounds and protocol live here; params.h only declares.
  */
 #include "params.h"
+#include "m0601.h"
 
 Params P = {
 #define X(f, k, d, lo, hi, g, desc)  (float)(d),
@@ -41,6 +42,9 @@ void params_recompute() {
     // speed and legacy SPDHEAD are informational, never hidden drive clamps.
     float drive = P.maxDriveV;
     if (P.vMax > 0) drive = fminf(drive, P.vMax);
+    // Velocity packets can represent only +/-330 RPM. This is a protocol
+    // bound, not the removed voltage/free-speed headroom model.
+    if (P.drvMode == 2) drive = fminf(drive, m0601::RPM_CMD_MAX * (2.0f * PI * P.wheelR / 60.0f));
     P.driveVEff  = fmaxf(0.05f, drive);
 }
 
@@ -60,10 +64,11 @@ int params_set(const char* key, float v, bool quiet) {
     if (i < 0) return -1;
     const ParamMeta& m = PARAM_META[i];
     if (!(v >= m.lo && v <= m.hi)) return -2;           // also rejects NaN
-    if ((!strcasecmp(key,"LDIR") || !strcasecmp(key,"RDIR")) && fabsf(v)!=1.0f) return -2;
-    if ((!strcasecmp(key,"DRVMODE") || !strcasecmp(key,"HUBVSRC")) && v!=0.0f && v!=1.0f) return -2;
+    if ((!strcasecmp(key,"LDIR") || !strcasecmp(key,"RDIR") || !strcasecmp(key,"VSIGN")) && fabsf(v)!=1.0f) return -2;
+    if (!strcasecmp(key,"DRVMODE") && v!=0.0f && v!=1.0f && v!=2.0f) return -2;
+    if (!strcasecmp(key,"HUBVSRC") && v!=0.0f && v!=1.0f) return -2;
     if (params_motionActive() && (!strcasecmp(key,"DRVMODE") || !strcasecmp(key,"LDIR") ||
-        !strcasecmp(key,"RDIR") || !strcasecmp(key,"WHEELR") || !strcasecmp(key,"HUBVSRC"))) return -3;
+        !strcasecmp(key,"RDIR") || !strcasecmp(key,"WHEELR") || !strcasecmp(key,"HUBVSRC") || !strcasecmp(key,"VSIGN"))) return -3;
     bool currentChanged = !strcasecmp(key, "CURRENT") || !strcasecmp(key, "DRVMODE");
     *params_ptr(i) = v;
     params_recompute();
@@ -99,10 +104,11 @@ void params_load() {
     for (size_t i = 0; i < PARAM_COUNT; i++) {
         float v = have ? _prefs.getFloat(PARAM_META[i].key, PARAM_META[i].def) : PARAM_META[i].def;
         const ParamMeta& m = PARAM_META[i];
-        const bool discreteSign = !strcmp(m.key,"LDIR") || !strcmp(m.key,"RDIR");
-        const bool discreteMode = !strcmp(m.key,"DRVMODE") || !strcmp(m.key,"HUBVSRC");
+        const bool discreteSign = !strcmp(m.key,"LDIR") || !strcmp(m.key,"RDIR") || !strcmp(m.key,"VSIGN");
+        const bool discreteMode = !strcmp(m.key,"HUBVSRC");
+        const bool driveMode = !strcmp(m.key,"DRVMODE");
         *params_ptr(i) = (v >= m.lo && v <= m.hi && (!discreteSign || fabsf(v)==1) &&
-                         (!discreteMode || v==0 || v==1)) ? v : m.def;
+                         (!discreteMode || v==0 || v==1) && (!driveMode || v==0 || v==1 || v==2)) ? v : m.def;
     }
     _prefs.end();
     params_recompute();
@@ -124,8 +130,8 @@ void params_service() {
     if (dumpRow < 0) return;
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
-        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0};
+        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL"};
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

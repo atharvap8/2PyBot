@@ -180,8 +180,9 @@ class Bot:
             self.api("/api/params/set", {"key": key, "value": value})
         deadline = time.monotonic() + 10
         while True:
-            actual = {p["key"]: p["value"] for p in self.api("/api/params")["params"]}
-            if all(abs(actual.get(k, math.inf) - v) <= max(.0001, abs(v) * .00001) for k, v in values.items()):
+            snapshot = self.api("/api/params")
+            actual = {p["key"]: p["value"] for p in snapshot["params"]}
+            if snapshot.get("complete") and all(abs(actual.get(k, math.inf) - v) <= max(.0001, abs(v) * .00001) for k, v in values.items()):
                 break
             if time.monotonic() > deadline:
                 raise RuntimeError("Parameter readback did not confirm all writes; nothing was saved to NVS")

@@ -17,11 +17,11 @@ def test_firmware_debug_and_host_schema_agree(monkeypatch):
     debug_printf = sketch[sketch.index('Serial.printf("D,'):]
     format_strings = re.match(r'Serial.printf\(((?:"[^"\n]*"\s*)+),', debug_printf).group(1)
     format_text = "".join(re.findall(r'"([^"\n]*)"', format_strings))
-    assert len(re.findall(r"%(?:\.\d+)?(?:ll|l)?[ufd]", format_text)) == 53
+    assert len(re.findall(r"%(?:\.\d+)?(?:ll|l)?[ufd]", format_text)) == 56
     values = [1000, 8, 150, 3.9, .4, .01, 8000, 300, 0, 1, 5100, 1, 1,
               -.5, .6, 1, .2, .55, 1, 0, .9, 26, 38, -.45, .3, .39, 1, 7700, 8300,
               1, 2, 0, 1, .2, 3, .02, 7, -.6, -.15, .25, 0, 0, 2,
-              2,1.5,0,0,.25,.2,.3,1,.075,.2]
+              2,1.5,0,0,.25,.2,.3,1,.075,.2,2,120,-120]
     link._handle("D," + ",".join(map(str, values)))
     assert link.tel["balancing"]
     assert link.debug["wheelL"] == 7700 and link.debug["wheelR"] == 8300
@@ -30,6 +30,7 @@ def test_firmware_debug_and_host_schema_agree(monkeypatch):
     assert link.debug["acEnabled"]==1 and link.debug["acState"]==2 and link.debug["acBlend"]==1
     assert link.debug["clZ"]==-.6 and link.debug["clRecover"]==0
     assert link.debug["acKind"]==2 and link.debug["dsActive"]==1 and link.debug["dsGoal"]==.075
+    assert link.debug["drvMode"]==2 and link.debug["rpmCmdL"]==120 and link.debug["rpmCmdR"]==-120
     link._handle("D,"+",".join(map(str,values[:29])))
     assert "acEnabled" not in link.debug and link.debug["fpRisk"]==.9
     # Older firmware must remain usable; no stale override fields survive.

@@ -7,6 +7,13 @@ HubDrive::HubDrive()
       rightWheel{&rightPort}, leftWheel{&leftPort} {}
 
 void HubDrive::applyTuning() {
+    const uint8_t selected = wantedMode();
+    if (configuredMode && configuredMode != selected) {
+        disable();
+        leftWheel.modeOk = rightWheel.modeOk = false;
+        leftWheel.queryNext = rightWheel.queryNext = false;
+    }
+    configuredMode = selected;
     leftWheel.direction = P.dirL < 0 ? -1 : 1;
     rightWheel.direction = P.dirR < 0 ? -1 : 1;
 }
@@ -81,6 +88,7 @@ void HubDrive::disable() {
     enabled = false; currentLimited = false; controller.reset();
     leftWheel.target = rightWheel.target = leftWheel.current = rightWheel.current = 0;
     balanceControl = recoveryControl = false; balanceAcceleration = 0;
+    rpmCommandL = rpmCommandR = 0;
     lastDriveUs = 0;
 }
 
@@ -104,7 +112,7 @@ void HubDrive::transmit(float dt) {
     if (!healthy) {
         disable();
         for (HubWheel* w : {&leftWheel, &rightWheel}) {
-            if (!w->modeOk) handshake(*w);
+            if (!confirmedMode(*w)) handshake(*w);
             else w->port->sendDriveRaw(0);   // confirmed mode, zero torque
         }
         return;
@@ -117,12 +125,27 @@ void HubDrive::transmit(float dt) {
     if (lastDriveUs) dt = (now - lastDriveUs) * 1e-6f;
     lastDriveUs = now;
     if (wantedMode() == m0601::MODE_VELOCITY) {
+        // Allocate common speed first; turning may use only the remaining
+        // RPM range. Independent wheel clipping would erase catch speed.
+        const float limit = velocityLimit();
+        const float requestedCommon = .5f * (leftWheel.target + rightWheel.target);
+        const float common = hub_control::clip(requestedCommon, -limit, limit);
+        const float requestedTurn = .5f * (rightWheel.target - leftWheel.target);
+        const float room = fmaxf(0, limit - fabsf(common));
+        const float turn = hub_control::clip(requestedTurn, -room, room);
         const float scale = 60 / (2 * PI * P.wheelR);
-        leftPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(leftWheel.target * scale * leftWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
-        rightPort.sendDriveRaw(enabled ? lroundf(hub_control::clip(rightWheel.target * scale * rightWheel.direction, -330, 330)) : 0, (uint8_t)P.hubAcc);
+        rpmCommandL = enabled ? lroundf(hub_control::clip((common-turn) * scale * leftWheel.direction * P.velSign, -m0601::RPM_CMD_MAX, m0601::RPM_CMD_MAX)) : 0;
+        rpmCommandR = enabled ? lroundf(hub_control::clip((common+turn) * scale * rightWheel.direction * P.velSign, -m0601::RPM_CMD_MAX, m0601::RPM_CMD_MAX)) : 0;
+        const uint8_t ramp = balanceControl ? 0 : (uint8_t)P.hubAcc;
+        leftPort.sendDriveRaw(rpmCommandL, ramp);
+        rightPort.sendDriveRaw(rpmCommandR, ramp);
+        currentLimited = enabled && (fabsf(common-requestedCommon) > .00001f || fabsf(turn-requestedTurn) > .00001f);
+        // The driver's velocity loop chooses current; these are not current
+        // setpoints. Real current remains available in the HM feedback fields.
         leftWheel.current = rightWheel.current = 0;
         return;
     }
+    rpmCommandL = rpmCommandR = 0;
     hub_control::Currents currents;
     if (enabled) {
         const hub_control::Settings settings{P.hubKp, P.hubKi, P.hubIntLim, P.hubKff, P.hubMass, P.wheelR, M0601_KT,
