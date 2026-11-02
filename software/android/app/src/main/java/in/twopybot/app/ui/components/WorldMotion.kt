@@ -70,7 +70,7 @@ class WorldMotion {
             previousLeft = tel.encL; previousRight = tel.encR; pitchSign = sign
             sampleAt = nowMs; firmwareMs = tel.ms; debugMs = debug["ms"]
             val position = WorldFrame.odometry(tel.x,tel.y)
-            target = WorldPose(position[0],position[2],orientation,tel.pitch*sign,
+            target = WorldPose(position[0],position[2],orientation,debug["pF"]?.takeIf { it.isFinite() } ?: tel.pitch*sign,
                 debug["roll"]?.takeIf { it.isFinite() } ?: 0f,
                 -Math.floorMod(tel.encL,4096L)*360f/4096f,
                 -Math.floorMod(tel.encR,4096L)*360f/4096f,support.symbolicLift,support)

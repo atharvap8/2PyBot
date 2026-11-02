@@ -31,10 +31,10 @@ private val HINTS = mapOf(
     "MOTOR" to "M0601 BLDC geometry, common/turn current loops and speed limits. " +
         "MAXSPD=0 / VMAX=0 means uncapped; VNOLOAD is an estimate. ISGN and RPMSGN are fixed at -1. " +
         "Stop before saving or changing motor mode/direction.",
-    "DRIVE"   to "Speed scaling and stick shaping. SNAPIN is the cone around straight-ahead " +
-        "where steering is forced to zero.",
-    "YAW"     to "Differential steering and heading hold. YAWKP/YAWKD act on encoder counts, " +
-        "so they need rescaling whenever the wheel radius changes.",
+    "DRIVE"   to "Steering defaults to linear response. LOWSTR=1 keeps full steering in both speed modes. " +
+        "Camera-axis snapping remains separate; predictive fall-prevention shaping is removed.",
+    "YAW"     to "MAXSTR is differential encoder counts/s, not microsteps. Default is about 2915 (3 rad/s). " +
+        "STRSLEW=0 and HUBYAWSL=0 select direct response. Tap Edit for an exact value.",
     "SAFETY"  to "Arming window, fall cutoffs, link timeouts.",
     "IMU"     to "Filter cutoff, Mahony gains, sign conventions. Verify a sign by tilting the " +
         "robot and watching the gauge before you trust it.",

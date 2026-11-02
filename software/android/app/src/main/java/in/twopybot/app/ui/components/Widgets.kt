@@ -213,6 +213,8 @@ fun TrailMap(trail: List<Pair<Float, Float>>, x: Float, y: Float, headingDeg: Fl
 fun ParamSlider(p: Param, onCommit: (Float) -> Unit) {
     var live by remember(p.key, p.value) { mutableStateOf(p.value) }
     var dragging by remember { mutableStateOf(false) }
+    var editing by remember(p.key) { mutableStateOf(false) }
+    var entry by remember(p.key) { mutableStateOf("") }
     val shown = if (dragging) live else p.value
 
     Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
@@ -223,6 +225,7 @@ fun ParamSlider(p: Param, onCommit: (Float) -> Unit) {
             }
             Text(fmt(shown), style = Mono.copy(fontSize = 14.sp),
                  color = if (p.dirty) Amber else Cyan)
+            if (p.lo < p.hi) TextButton(onClick={entry=p.value.toString();editing=true}) { Text("Edit") }
         }
         Slider(
             enabled = p.lo < p.hi,
@@ -240,6 +243,17 @@ fun ParamSlider(p: Param, onCommit: (Float) -> Unit) {
             Text(fmt(p.lo), fontSize = 10.sp, color = TextDim)
             Text(fmt(p.hi), fontSize = 10.sp, color = TextDim)
         }
+    }
+    if (editing) {
+        val value=entry.toFloatOrNull()?.takeIf { it.isFinite() && it in p.lo..p.hi }
+        AlertDialog(onDismissRequest={editing=false},title={Text(p.key)},
+            text={Column {
+                Text(p.desc)
+                OutlinedTextField(entry,{entry=it},singleLine=true,label={Text("${fmt(p.lo)} to ${fmt(p.hi)}")},
+                    isError=value==null)
+            }},
+            confirmButton={TextButton(onClick={value?.let(onCommit);editing=false},enabled=value!=null) {Text("Apply")}},
+            dismissButton={TextButton(onClick={editing=false}) {Text("Cancel")}})
     }
 }
 

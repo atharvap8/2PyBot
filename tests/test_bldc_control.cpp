@@ -1,5 +1,4 @@
 #include "hub_control.h"
-#include "fall_prevention.h"
 #include <cassert>
 #include <cstdio>
 #include <deque>
@@ -76,11 +75,13 @@ int main() {
     assert(moving.value>1.5f); // tracking anti-windup is not a vehicle speed limit
     auto explicitLimit=integrateVelocity(1,6,1,.005f,settings.kp,settings.currentLimit,1);
     assert(explicitLimit.value==1 && explicitLimit.trackingLimited);
-    FallPrevention reference;
-    for(int tick=0;tick<400;++tick)reference.update(1,1,0,0,1.2f,0,6,55,.005f,false);
-    assert(std::fabs(reference.operatorRef-1)<.00001f && std::fabs(reference.effectiveRef-1)<.00001f);
-    assert(!(reference.reasons & FallPrevention::SPEED_MARGIN));
-    assert(reference.allocateSteering(20000,1000,0)==1000);
+    Steering direct;direct.reset(0);
+    assert(direct.update(3000,true,0,0,0,1.5f,.03f,800,2000,false,0,4000,200,.005f)==3000);
+    assert(direct.update(-3000,true,100,200,0,1.5f,.03f,800,2000,false,0,4000,200,.005f)==-3000);
+    assert(direct.update(0,false,150,200,0,1.5f,.03f,800,2000,false,0,4000,200,.005f)==0);
+    assert(direct.justReleased && direct.heading==150);
+    loop.commonIntegral=.2f;loop.yawIntegral=.3f;loop.yawCurrent=.4f;loop.resetYaw();
+    assert(loop.commonIntegral==.2f && loop.yawIntegral==0 && loop.yawCurrent==0);
     Steering steer; steer.reset(0);
     float prev=0;
     for(int tick=0;tick<200;++tick) {

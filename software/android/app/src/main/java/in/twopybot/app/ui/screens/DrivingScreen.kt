@@ -34,6 +34,8 @@ fun DrivingScreen(vm: BotViewModel) {
     val connected by vm.repo.connected.collectAsStateWithLifecycle()
     val params by vm.repo.params.collectAsStateWithLifecycle()
     val pitchSign = if((params.firstOrNull { it.key == "PITCHSGN" }?.value ?: -1f) > 0f) 1f else -1f
+    val trim = params.firstOrNull { it.key == "TRIM" }?.value ?: 0f
+    val controlPitch = debug["pF"] ?: ((tel.pitch - trim) * pitchSign)
     val support = supportEvidence(tel,debug,connected)
     var follow by rememberSaveable { mutableStateOf(true) }
     var reset by remember { mutableIntStateOf(0) }
@@ -48,7 +50,8 @@ fun DrivingScreen(vm: BotViewModel) {
         Spacer(Modifier.height(8.dp))
         Text(if(!connected || tel.stale) "NO LINK" else if(tel.balancing) "BALANCING" else "IDLE",
             color=if(!connected || tel.stale) Amber else if(tel.balancing) Green else TextDim,fontSize=11.sp)
-        Text("Pitch %.1f°".format(tel.pitch*pitchSign),color=TextHi,fontSize=12.sp)
+        Text("Control pitch %.1f°".format(controlPitch),color=TextHi,fontSize=12.sp)
+        Text("Raw IMU %.2f°".format(tel.pitch),color=TextDim,fontSize=10.sp)
         Text("Heading %.0f°".format(tel.heading),color=TextDim,fontSize=11.sp)
         Text("Loop %.1f ms".format((debug["loopMax"] ?: 0f)/1000),color=TextDim,fontSize=11.sp)
         Text("Encoder X %.2f · Y %.2f m".format(tel.x,tel.y),color=TextDim,fontSize=10.sp)
@@ -93,7 +96,7 @@ fun DrivingScreen(vm: BotViewModel) {
     }
     val scenePane:@Composable (Modifier)->Unit={ modifier ->
         BoxWithConstraints(modifier.clip(RoundedCornerShape(16.dp)).background(Panel)) {
-            RobotScene(tel,tof,Modifier.fillMaxSize(),trail,follow,reset,{follow=false},debug,connected,pitchSign,guides)
+            RobotScene(tel.copy(pitch=tel.pitch-trim),tof,Modifier.fillMaxSize(),trail,follow,reset,{follow=false},debug,connected,pitchSign,guides)
             Row(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Ink.copy(alpha=.7f)).padding(horizontal=14.dp,vertical=10.dp),
                 horizontalArrangement=Arrangement.SpaceBetween) {
                 Text(if(follow) "CHASE / LIVE 3D" else "EXPLORE / LIVE 3D",color=TextHi,fontSize=10.sp,letterSpacing=1.sp)
@@ -131,7 +134,7 @@ fun DrivingScreen(vm: BotViewModel) {
                 }
                 Text(motion,color=if(connected && !tel.stale) Cyan else TextDim,fontSize=11.sp,letterSpacing=1.sp)
                 HorizontalDivider(Modifier.padding(vertical=14.dp),color=Line)
-                InstrumentRow("Pitch","%.1f°".format(tel.pitch*pitchSign))
+                InstrumentRow("Control pitch","%.1f°".format(controlPitch))
                 InstrumentRow("Heading","%.0f°".format(tel.heading))
                 InstrumentRow("Loop","%.1f ms".format((debug["loopMax"]?:0f)/1000))
                 InstrumentRow("Support",support.label)
@@ -147,7 +150,7 @@ fun DrivingScreen(vm: BotViewModel) {
             }
             scenePane(Modifier.weight(1f).fillMaxWidth())
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                `in`.twopybot.app.ui.components.Tile("Pitch","%.1f°".format(tel.pitch*pitchSign),TextHi,Modifier.weight(1f))
+                `in`.twopybot.app.ui.components.Tile("Pitch ctrl","%.1f°".format(controlPitch),TextHi,Modifier.weight(1f))
                 `in`.twopybot.app.ui.components.Tile("Heading","%.0f°".format(tel.heading),TextHi,Modifier.weight(1f))
                 `in`.twopybot.app.ui.components.Tile("Link","%.0f Hz".format(tel.rxHz),Cyan,Modifier.weight(1f))
             }

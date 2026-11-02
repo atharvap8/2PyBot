@@ -1,4 +1,4 @@
-/* 2PyBot v4.1.0: ESP32-WROOM + two M0601 RS485 BLDC hubs.
+/* 2PyBot v4.1.1: ESP32-WROOM + two M0601 RS485 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */
@@ -43,7 +43,7 @@
 #define HUB_YAW_KP          1.5f
 #define HUB_YAW_KI          2.0f
 #define HUB_YAW_INT_LIM     0.35f
-#define HUB_YAW_CURRENT_SLEW 6.0f
+#define HUB_YAW_CURRENT_SLEW 0.0f // direct differential-current response
 
 #define WHEEL_RADIUS_M      0.0520f
 #define COUNTS_PER_M        ((float)ENCODER_CPR / (2.0f * PI * WHEEL_RADIUS_M))
@@ -52,7 +52,7 @@
 #define PITCH_FWD_SIGN      (-1.0f)
 #define ENC_FWD_SIGN        (+1.0f)
 #define RATE_FWD_SIGN       (+1.0f)
-#define PITCH_TRIM_DEG      1.54042f
+#define PITCH_TRIM_DEG      -1.4f // owner-confirmed raw neutral IMU angle
 
 // Keep the supplied LQI design; the actuator loop and speed windup are
 // corrected separately rather than guessing new body gains without a log.
@@ -90,8 +90,8 @@
 #define DRIVE_DEADBAND      0.03f
 #define JOY_FWD_SCALE       (-0.2f)
 #define JOY_STEER_SCALE     1.0f
-#define MAX_STEER_STEPS     (1.5f * TRACK_WIDTH_M * COUNTS_PER_M * 0.5f)
-#define STEER_SLEW          (4.0f * TRACK_WIDTH_M * COUNTS_PER_M * 0.5f)
+#define MAX_STEER_STEPS     (3.0f * TRACK_WIDTH_M * COUNTS_PER_M * 0.5f)
+#define STEER_SLEW          0.0f // no commanded-turn slew
 #define STEER_DEADBAND      0.05f
 #define YAW_HOLD_KP         1.5f
 #define YAW_HOLD_KD         0.03f
@@ -149,11 +149,11 @@
 #define STICK_DEADZONE      0.10f
 #define SNAP_IN_DEG         10.0f
 #define SNAP_OUT_DEG        26.0f
-#define EXPO_STEER          0.65f
+#define EXPO_STEER          0.0f
 #define EXPO_DRIVE          0.35f
 #define STICK_AUTOCAL       1
 #define SPEED_LO_DRIVE_SCALE 0.50f
-#define SPEED_LO_STEER_SCALE 0.50f
+#define SPEED_LO_STEER_SCALE 1.0f
 #define SPEED_BOOT_HIGH     0
 
 // Supplied BLDC harness: pan moved to 26; zoom is 0, torch remains 2.

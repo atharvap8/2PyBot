@@ -1,5 +1,9 @@
 # Predictive fall prevention — local revision 3.9.0
 
+**Historical document.** The governor described below is removed from production
+firmware in 4.1.1. It cannot be enabled by app/NVS settings. Hard tilt/rate/fault
+stops and the balance controller remain. See [4.1.1](../RELEASE_4_1_1.md).
+
 Revision 3.10.0 adds [automatic climb](auto-climb.md) and refines climb recovery:
 the mild 25% latch no longer drains slope compensation. Immediate high hazard,
 velocity saturation and conditional acceleration anti-windup retain priority.
@@ -40,7 +44,8 @@ allocator around the existing LQR/LQI, evaluated at the 200 Hz control rate.
   acceleration. A released stick remains in braking mode until measured motion
   settles, instead of prematurely switching to position hold.
 
-These initial constants are fixed in `firmware/BaseLink/fall_prevention.h`.
+The legacy implementation is archived in `tools/sims/legacy/fall_prevention.h`
+for historical simulation only; these descriptions are not current behaviour.
 There are still 107 NVS parameters; existing gains, `MAXSPD`, `MAXACC`, arming,
 startup acknowledgement and fall/rate cutoffs are preserved.
 
@@ -61,11 +66,10 @@ headroom. No reduced fall count is claimed before that physical test.
 
 ```sh
 python -m pytest -q
-python3 scripts/diagnostics/check_fall_prevention.py \
-  --replay /home/radxa/archives/drive-tests/drive-20261013-131741/telemetry.csv
+python3 scripts/firmware/check_bldc.py
 ```
 
-The C++ harness compiles the actual sketch's `runController()` with hardware
+The retired governor harness compiled the sketch's `runController()` with hardware
 dependencies stubbed. It checks both reversal directions, bounded reference
 slew, predictive risk, recovery hysteresis, stiff/normal hold, climb, airborne
 behaviour, stale ToF reference clipping and steering allocation. Recorded-state

@@ -40,6 +40,7 @@ public:
     float currentCmdL() const { return leftWheel.current; }
     float currentCmdR() const { return rightWheel.current; }
     bool saturated() const { return currentLimited; }
+    void resetYaw() { controller.resetYaw(); }
     void applyTuning();
     void printStatus() const;
 

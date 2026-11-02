@@ -2,12 +2,16 @@ package `in`.twopybot.app.net
 
 import android.content.Context
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import kotlinx.coroutines.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.webrtc.*
 import java.util.concurrent.TimeUnit
+import java.io.IOException
+import kotlin.coroutines.resumeWithException
 
 /**
  * WHEP (WebRTC-HTTP Egress Protocol) client for MediaMTX.
@@ -20,7 +24,14 @@ import java.util.concurrent.TimeUnit
  * Hardware decode is requested via DefaultVideoDecoderFactory, which uses
  * MediaCodec when the phone has an H.264 decoder (every modern phone does).
  */
-class WhepClient(private val context: Context) {
+class WhepClient(context: Context) {
+    private val context = context.applicationContext
+    private val main = Handler(Looper.getMainLooper())
+    private var generation = 0L
+    private var remoteVideo: VideoTrack? = null
+    private var sink: VideoSink? = null
+    private var signalling: Call? = null
+    private var resourceUrl: String? = null
 
     private var factory: PeerConnectionFactory? = null
     private var pc: PeerConnection? = null
@@ -28,9 +39,37 @@ class WhepClient(private val context: Context) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
         .build()
 
     var onState: ((String) -> Unit)? = null
+
+    private fun state(epoch: Long, value: String) {
+        main.post { if (epoch == generation) onState?.invoke(value) }
+    }
+
+    /** A renderer is a temporary UI attachment, not the owner of the connection. */
+    fun attachSink(value: VideoSink) {
+        if (sink === value) return
+        sink?.let { remoteVideo?.removeSink(it) }
+        sink = value
+        remoteVideo?.addSink(value)
+    }
+
+    fun detachSink(value: VideoSink) {
+        if (sink !== value) return
+        remoteVideo?.removeSink(value)
+        sink = null
+    }
+
+    private fun receiveTrack(epoch: Long, value: VideoTrack?) {
+        main.post {
+            if (epoch != generation || value == null || remoteVideo === value) return@post
+            sink?.let { remoteVideo?.removeSink(it) }
+            remoteVideo = value
+            sink?.let { value.addSink(it) }
+        }
+    }
 
     fun egl(): EglBase = eglBase ?: EglBase.create().also { eglBase = it }
 
@@ -47,11 +86,13 @@ class WhepClient(private val context: Context) {
             .createPeerConnectionFactory()
     }
 
-    /** Connect and render into [sink]. Safe to call repeatedly; reconnects. */
-    suspend fun connect(url: String, sink: VideoSink) = withContext(Dispatchers.IO) {
+    /** Native peer lifecycle is serialized on Main; only HTTP runs on IO. */
+    suspend fun connect(url: String) = withContext(Dispatchers.Main.immediate) {
         close()
+        val epoch = generation
+        try {
         ensureFactory()
-        onState?.invoke("connecting")
+        state(epoch, "connecting")
 
         // No ICE servers: robot and phone share a link, host candidates suffice.
         val cfg = PeerConnection.RTCConfiguration(emptyList<PeerConnection.IceServer>()).apply {
@@ -62,12 +103,18 @@ class WhepClient(private val context: Context) {
         }
 
         val gathered = CompletableDeferred<Unit>()
-        pc = factory!!.createPeerConnection(cfg, object : PeerConnection.Observer {
+        val connection = factory!!.createPeerConnection(cfg, object : PeerConnection.Observer {
             override fun onIceCandidate(c: IceCandidate?) {}
             override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
             override fun onSignalingChange(s: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
-                onState?.invoke(s?.name?.lowercase() ?: "?")
+                state(epoch, when (s) {
+                    PeerConnection.IceConnectionState.CONNECTED, PeerConnection.IceConnectionState.COMPLETED -> "connected"
+                    PeerConnection.IceConnectionState.FAILED -> "failed"
+                    PeerConnection.IceConnectionState.DISCONNECTED -> "disconnected"
+                    PeerConnection.IceConnectionState.CLOSED -> "closed"
+                    else -> "connecting"
+                })
             }
             override fun onIceConnectionReceivingChange(b: Boolean) {}
             override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {
@@ -78,65 +125,89 @@ class WhepClient(private val context: Context) {
             override fun onDataChannel(d: DataChannel?) {}
             override fun onRenegotiationNeeded() {}
             override fun onTrack(transceiver: RtpTransceiver?) {
-                (transceiver?.receiver?.track() as? VideoTrack)?.addSink(sink)
+                receiveTrack(epoch, transceiver?.receiver?.track() as? VideoTrack)
             }
             override fun onAddTrack(r: RtpReceiver?, s: Array<out MediaStream>?) {
-                (r?.track() as? VideoTrack)?.addSink(sink)
+                receiveTrack(epoch, r?.track() as? VideoTrack)
             }
-        }) ?: run { onState?.invoke("factory failed"); return@withContext }
+        }) ?: throw IOException("Peer factory failed")
+        pc = connection
 
-        pc!!.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
+        connection.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
             RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY))
 
-        val offer = suspendCancellableSdp { obs -> pc!!.createOffer(obs, MediaConstraints()) }
-            ?: run { onState?.invoke("offer failed"); return@withContext }
-        setLocal(offer)
+        val offer = suspendCancellableSdp { obs -> connection.createOffer(obs, MediaConstraints()) }
+            ?: throw IOException("SDP offer failed")
+        if (epoch != generation) return@withContext
+        setDescription(connection, offer, true)
 
         // brief window for host candidates; do not block forever on a bad link
         withTimeoutOrNull(700) { gathered.await() }
-        val sdp = pc!!.localDescription?.description ?: offer.description
+        if (epoch != generation) return@withContext
+        val sdp = connection.localDescription?.description ?: offer.description
 
-        val answer = runCatching {
-            http.newCall(
+        val call = http.newCall(
                 Request.Builder().url(url)
                     .post(sdp.toRequestBody("application/sdp".toMediaType()))
                     .header("Content-Type", "application/sdp")
                     .build()
-            ).execute().use { r ->
+            )
+        signalling = call
+        val (answer, location) = withContext(Dispatchers.IO) {
+            call.execute().use { r ->
                 if (!r.isSuccessful) throw java.io.IOException("WHEP ${r.code}")
-                r.body!!.string()
+                Pair(r.body?.string() ?: throw IOException("Empty WHEP answer"),
+                    r.header("Location")?.let { r.request.url.resolve(it)?.toString() })
             }
-        }.getOrElse {
-            Log.w("Whep", "signalling failed", it)
-            onState?.invoke("no stream (${it.message})")
-            return@withContext
+        }
+        if (epoch != generation) return@withContext
+        signalling = null
+        resourceUrl = location
+        setDescription(connection, SessionDescription(SessionDescription.Type.ANSWER, answer), false)
+        } catch (cancelled: CancellationException) {
+            if (epoch == generation) close()
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("Whep", "connection failed", error)
+            if (epoch == generation) {
+                close()
+                onState?.invoke("error: ${error.message}")
+            }
+        }
+    }
+
+    private suspend fun setDescription(connection: PeerConnection, sdp: SessionDescription, local: Boolean): Unit =
+        suspendCancellableCoroutine { cont ->
+            val observer = object : SdpObserverAdapter() {
+                override fun onSetSuccess() { if (cont.isActive) cont.resume(Unit) {} }
+                override fun onSetFailure(e: String?) {
+                    if (cont.isActive) cont.resumeWithException(IOException(e ?: "SDP rejected"))
+                }
+            }
+            if (local) connection.setLocalDescription(observer, sdp) else connection.setRemoteDescription(observer, sdp)
         }
 
-        setRemote(SessionDescription(SessionDescription.Type.ANSWER, answer))
-        onState?.invoke("connected")
-    }
-
-    private suspend fun setLocal(sdp: SessionDescription) = suspendCancellableCoroutineUnit { cont ->
-        pc!!.setLocalDescription(object : SdpObserverAdapter() {
-            override fun onSetSuccess() { cont() }
-            override fun onSetFailure(e: String?) { cont() }
-        }, sdp)
-    }
-
-    private suspend fun setRemote(sdp: SessionDescription) = suspendCancellableCoroutineUnit { cont ->
-        pc!!.setRemoteDescription(object : SdpObserverAdapter() {
-            override fun onSetSuccess() { cont() }
-            override fun onSetFailure(e: String?) { onState?.invoke("answer rejected"); cont() }
-        }, sdp)
-    }
-
     fun close() {
+        generation++
+        signalling?.cancel()
+        signalling = null
+        sink?.let { runCatching { remoteVideo?.removeSink(it) } }
+        remoteVideo = null
+        runCatching { pc?.close() }
         runCatching { pc?.dispose() }
         pc = null
+        resourceUrl?.let { resource ->
+            http.newCall(Request.Builder().url(resource).delete().build()).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {}
+                override fun onResponse(call: Call, response: Response) { response.close() }
+            })
+        }
+        resourceUrl = null
     }
 
     fun release() {
         close()
+        sink = null
         runCatching { factory?.dispose() }
         factory = null
         runCatching { eglBase?.release() }
@@ -163,10 +234,4 @@ private suspend fun suspendCancellableSdp(
             if (cont.isActive) cont.resume(null) {}
         }
     })
-}
-
-private suspend fun suspendCancellableCoroutineUnit(
-    block: (() -> Unit) -> Unit
-): Unit = suspendCancellableCoroutine { cont ->
-    block { if (cont.isActive) cont.resume(Unit) {} }
 }

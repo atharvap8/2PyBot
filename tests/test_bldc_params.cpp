@@ -14,6 +14,8 @@ int main() {
     params_begin();
     assert(P.curSign==-1 && P.rpmSign==-1 && P.maxSpdSt==0 && P.hubVSrc==1);
     assert(P.drvMode==1 && P.supplyV==18 && P.hubMass==2.6f);
+    assert(P.pitchTrim==-1.4f && P.maxSteerSt>2900 && P.steerSlew==0 && P.hubYawSlew==0);
+    assert(P.expoSteer==0 && P.spdLoStr==1);
     assert(P.stepsPerM==P.countsPerM && P.vMax==0 && P.maxSpdEff==0 && P.vNoLoad>1.08f && P.vNoLoad<1.1f);
     assert(P.maxDriveV==1 && P.spdHead==.7f && P.driveVEff==1);
     assert(params_set("SPDHEAD",.3f)==0 && P.driveVEff==1); // saved legacy value cannot limit drive

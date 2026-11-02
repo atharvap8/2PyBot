@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import `in`.twopybot.app.BuildConfig
 import `in`.twopybot.app.data.BotRepository
 import `in`.twopybot.app.data.SessionRecorder
+import `in`.twopybot.app.net.LiveVideoSession
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.json.*
@@ -19,6 +20,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("2pybot", 0)
     val recorder = SessionRecorder(File(app.filesDir, "sessions"))
     val repo = BotRepository(prefs.getString("host", BuildConfig.DEFAULT_HOST)!!, recorder)
+    val video = LiveVideoSession(app.applicationContext, viewModelScope)
 
     val snack = MutableStateFlow<String?>(null)
     val trail = MutableStateFlow<List<Pair<Float, Float>>>(emptyList())
@@ -26,6 +28,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         repo.start()
+        if (prefs.getBoolean("video_requested", false)) video.start(repo.whepUrl())
         viewModelScope.launch { repo.refreshStatus(); repo.refreshParams() }
         viewModelScope.launch {
             while (isActive) {
@@ -38,11 +41,25 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     fun setHost(h: String) {
         prefs.edit().putString("host", h).apply()
         repo.setHost(h)
+        if (video.requested.value) video.start(repo.whepUrl())
         toast("robot address set to $h")
     }
 
     fun toast(m: String) { snack.value = m }
     fun clearToast() { snack.value = null }
+
+    fun startVideo() {
+        prefs.edit().putBoolean("video_requested", true).apply()
+        video.start(repo.whepUrl())
+    }
+    fun stopVideo() {
+        prefs.edit().putBoolean("video_requested", false).apply()
+        video.stop()
+    }
+    override fun onCleared() {
+        video.release()
+        super.onCleared()
+    }
 
     fun refreshFirmware() = viewModelScope.launch { repo.refreshFirmware() }
     fun reflashLatest() = viewModelScope.launch {

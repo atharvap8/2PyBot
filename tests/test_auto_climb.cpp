@@ -4,7 +4,6 @@
 #define DISABLED 0x00 // Arduino GPIO headers reserve this macro
 #define constrain(x,a,b) ((x)<(a)?(a):(x)>(b)?(b):(x))
 #include "../firmware/BaseLink/auto_climb.h"
-#include "../firmware/BaseLink/fall_prevention.h"
 #include "../firmware/BaseLink/descent_guard.h"
 
 void step(AutoClimb& ac,float goal=.9f,float velocity=.1f,float pitch=5.5f,float rate=0,
@@ -79,11 +78,6 @@ int main() {
     ac.resetDynamics();assert(!ac.enabled);ac.configure(true);run(ac,650);assert(ac.active);
     // Invalid observations cannot create automatic entry.
     ac=AutoClimb();step(ac,NAN);assert(!ac.active && ac.blend==0);
-    FallPrevention fp;fp.recovering=true;
-    fp.update(.25f,0,3,60,0,1.669f,3.927f,55,.005f,false);
-    assert(fp.risk==.25f && fp.hazardRisk==0 && fp.climbRecoveryScale()==0);
-    fp.update(.25f,0,20,100,0,1.669f,3.927f,55,.005f,false);
-    assert(fp.climbRecoveryScale()==1);
     for(int sign : {-1,1}) {
         DescentGuard guard;
         for(int i=0;i<150;++i)guard.update(sign*.25f,sign*.60f,true,true,false,.005f);

@@ -45,7 +45,7 @@ fun SettingsScreen(vm: BotViewModel) {
     }
 
     WorkspaceColumns(first={
-        WorkspaceTitle("Robot setup","Connection & device services")
+        WorkspaceTitle("Robot setup","App ${BuildConfig.VERSION_NAME} · Connection & device services")
 
         Section("Robot address",
             "10.42.0.1 is the Radxa's own hotspot gateway. Use the LAN address instead " +

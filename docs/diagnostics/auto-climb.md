@@ -140,7 +140,9 @@ detector logic; physical automatic climbing remains to be validated by this test
 ## Verification
 
 `python -m pytest -q` checks host/schema/startup/vision compatibility.
-`python3 scripts/diagnostics/check_fall_prevention.py --replay <45-second-CSV>`
+The old predictive-governor replay harness is retired in 4.1.1. Current native
+controller checks use `python3 scripts/firmware/check_bldc.py`; historical CSV
+replay requires the corresponding historical revision.
 compiles the actual production controller against hardware stubs, checks mild
 integral retention/anti-windup and bumpless bounded transitions, then runs auto
 detector cases for flat driving, both directions, overspeed, turns, impacts,

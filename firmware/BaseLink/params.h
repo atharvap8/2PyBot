@@ -76,7 +76,7 @@
   X(hubYawKp,  "HUBYAWKP",HUB_YAW_KP,         0.0f, 10.0f,"MOTOR", "differential velocity P (A per m/s)") \
   X(hubYawKi,  "HUBYAWKI",HUB_YAW_KI,         0.0f, 30.0f,"MOTOR", "differential velocity I (A per m)") \
   X(hubYawLim, "HUBYAWIL",HUB_YAW_INT_LIM,    0.0f,  1.0f,"MOTOR", "turn integral limit (A)")     \
-  X(hubYawSlew,"HUBYAWSL",HUB_YAW_CURRENT_SLEW,0.5f,30.0f,"MOTOR", "turn current slew (A/s)")     \
+  X(hubYawSlew,"HUBYAWSL",HUB_YAW_CURRENT_SLEW,0.0f,30.0f,"MOTOR", "turn current slew; 0 = direct (A/s)")     \
   /* ---------- DRIVE INPUT ---------- */                                                     \
   X(maxDriveV, "DRIVEV",  MAX_DRIVE_VEL_MS,    0.05f,  3.0f, "DRIVE",   "full-stick speed (m/s)")       \
   X(driveDb,   "DRIVEDB", DRIVE_DEADBAND,      0.0f,   0.3f, "DRIVE",   "stick deadband -> position hold")\
@@ -92,7 +92,7 @@
   X(expoDrive, "EXPODRV", EXPO_DRIVE,          0.0f,   1.0f, "DRIVE",   "drive expo")                   \
   /* ---------- YAW / STEERING ---------- */                                                  \
   X(maxSteerSt,"MAXSTR",  MAX_STEER_STEPS,   200.0f, 9000.0f,"YAW",     "max differential (counts/s)")  \
-  X(steerSlew, "STRSLEW", STEER_SLEW,       1000.0f,40000.0f,"YAW",     "steer slew (counts/s^2)")      \
+  X(steerSlew, "STRSLEW", STEER_SLEW,          0.0f,40000.0f,"YAW",     "steer slew; 0 = direct (counts/s^2)")      \
   X(steerDb,   "STRDB",   STEER_DEADBAND,      0.0f,   0.3f, "YAW",     "steer deadband")               \
   X(yawKp,     "YAWKP",   YAW_HOLD_KP,         0.0f,  20.0f, "YAW",     "heading hold P (steps/s per count)")\
   X(yawKd,     "YAWKD",   YAW_HOLD_KD,         0.0f,   1.0f, "YAW",     "heading hold D")               \
@@ -124,6 +124,7 @@
   X(ledFront,  "LEDFRONT",LED_FRONT_INDEX,     0.0f,  63.0f, "LED",     "which LED faces forward")      \
   /* ---------- PAYLOAD (torch duty stays hard-capped in payload.h) ---------- */             \
   X(servoYawR, "SVYAWR",  SERVO_YAW_RATE_DPS,  5.0f, 300.0f, "PAYLOAD", "pan rate (deg/s)")             \
+  X(camExpo,   "PANCURVE",0.65f,               0.0f,   1.0f,"PAYLOAD", "camera-pan stick expo") \
   X(servoZoomR,"SVZOOMR", SERVO_ZOOM_RATE_DPS, 5.0f, 300.0f, "PAYLOAD", "zoom rate (deg/s)")            \
   X(svYawMin,  "SVYAWMIN",SERVO_YAW_MIN_DEG,   0.0f, 270.0f, "PAYLOAD", "pan min (deg)")                \
   X(svYawMax,  "SVYAWMAX",SERVO_YAW_MAX_DEG,   0.0f, 270.0f, "PAYLOAD", "pan max (deg)")                \

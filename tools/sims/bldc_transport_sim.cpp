@@ -12,7 +12,7 @@
 #include <random>
 #include <string>
 #include "hub_control.h"
-#include "fall_prevention.h"
+#include "legacy/fall_prevention.h" // historical reproduction only, not production control
 
 static const float PI_F = 3.14159265f;
 static double envd(const char* k,double d){const char* v=getenv(k);return v?atof(v):d;}

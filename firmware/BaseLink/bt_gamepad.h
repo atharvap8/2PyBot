@@ -158,7 +158,7 @@ static inline float _expo(float v, float e) {
 // Radial deadzone + rescale + cardinal snap + expo.
 // x = lateral axis, y = forward axis. Outputs written through pointers.
 // snap != 0 applies the "protect straight ahead" taper to the x output.
-static void _shapeStick(float x, float y, bool snap, float* outY, float* outX) {
+static void _shapeStick(float x, float y, bool snap, float* outY, float* outX, float lateralExpo = -1.0f) {
     float r = sqrtf(x * x + y * y);
     if (r < P.stickDz) { *outY = 0.0f; *outX = 0.0f; return; }
 
@@ -176,7 +176,7 @@ static void _shapeStick(float x, float y, bool snap, float* outY, float* outX) {
                         P.snapOut * (float)DEG_TO_RAD, ang);
     }
     *outY = _expo(y, P.expoDrive);
-    *outX = _expo(x * w, P.expoSteer);
+    *outX = _expo(x * w, lateralExpo < 0 ? P.expoSteer : lateralExpo);
 }
 
 // Call once per control loop. Cheap: drains the BT event queue and maps.
@@ -218,9 +218,9 @@ inline void btgamepad_update() {
 
 #if PAD_STEER_ON_LEFT_STICK
     // LEFT stick does both -> snap protects straight ahead
-    _shapeStick(rawX, rawY, true, &fwdNorm, &steerNorm);
+    _shapeStick(rawX, rawY, false, &fwdNorm, &steerNorm); // direct steering: no cardinal-snap suppression
     // RIGHT stick is the camera; snap keeps a pure pan from creeping the zoom
-    _shapeStick(rawRX, rawRY, true, &zoomNorm, &panNorm);
+    _shapeStick(rawRX, rawRY, true, &zoomNorm, &panNorm, P.camExpo);
     joyPanX  = panNorm  * P.padYawSgn;
     joyZoomY = zoomNorm * P.padZoomSgn;
 #else

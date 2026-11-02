@@ -31,6 +31,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false          // keep WebRTC's JNI surface intact
+            signingConfig = signingConfigs.getByName("debug") // stable project development key, restored by CI
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"),
                           "proguard-rules.pro")
         }
@@ -45,6 +46,13 @@ android {
     buildFeatures { compose = true; buildConfig = true }
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+}
+
+tasks.register<Copy>("exportReleaseApk") {
+    dependsOn("assembleRelease")
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    into(rootProject.file("../../build/android-release"))
+    rename { "2PyBot-v${android.defaultConfig.versionName}.apk" }
 }
 
 dependencies {

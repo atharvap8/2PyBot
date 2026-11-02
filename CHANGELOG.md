@@ -3,6 +3,21 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.1.1 — Direct steering and persistent video
+
+- Set the confirmed raw neutral TRIM to -1.4 degrees with a targeted input-profile
+  migration, retaining the current-mode 18 V / 2.6 kg setup and existing additions.
+- Remove the predictive fall-prevention governor from production firmware. Keep
+  tilt/rate/fault/current stops and balance-priority torque allocation.
+- Default steering to 3 rad/s (about 2915 differential encoder counts/s), direct
+  command/current response, linear steer expo and full steering in LOW/HIGH.
+  Remove drive-stick cardinal snap and clear stale yaw integral on release.
+- Require an orientation pose to remain stable for two seconds. Retain the video
+  session across layout/configuration changes and reattach renderers without
+  closing playback; retry network failures until explicit Stop.
+- Display trimmed control pitch separately from raw IMU angle. Publish a signed,
+  installable release APK using the stable project development signing key.
+
 ## 4.1.0 — One-pull deployment and status ring
 
 - Return to current-only control for the owner's 5S / 18 V, 2.6 kg bot. Remove

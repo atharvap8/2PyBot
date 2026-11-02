@@ -9,7 +9,6 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
-import textwrap
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -18,7 +17,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.font_manager import findfont
-from matplotlib.ticker import MaxNLocator
 import numpy as np
 from PIL import Image as PILImage, ImageDraw
 from pypdf import PdfReader
@@ -495,7 +493,7 @@ def make_report(out,data,catalog,aggregate,reboot_start):
     for name,digest in s["source_files_sha256"].items():
         para(escape(name),"Heading3");para(digest[:32]+"<br/>"+digest[32:],"Small")
     para("Analysis source references","Heading2")
-    for name in ("firmware/BaseLink/BaseLink.ino","firmware/BaseLink/fall_prevention.h","firmware/BaseLink/stepper_control.cpp"):
+    for name in ("firmware/BaseLink/BaseLink.ino","tools/sims/legacy/fall_prevention.h","firmware/BaseLink/hub_control.h"):
         path=ROOT/name;digest=hashlib.sha256(path.read_bytes()).hexdigest()
         para(escape(name),"Small");para(digest[:32]+"<br/>"+digest[32:],"Small")
     para("The generator, raw analytic summary, aligned samples, episode metrics and caption index are included in the figure pack. "

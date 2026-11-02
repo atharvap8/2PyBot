@@ -42,6 +42,8 @@ public:
         previousTarget = commonTarget;
     }
 
+    void resetYaw() { yawIntegral = yawCurrent = 0; }
+
     Currents update(float leftTarget, float rightTarget, float leftVelocity,
                     float rightVelocity, float dt, const Settings& s,
                     float balanceAcceleration = NAN, bool recovering = false) {
@@ -79,7 +81,8 @@ public:
         const float yawError = .5f * ((rightTarget - leftTarget) - (rightVelocity - leftVelocity));
         const float yawPre = s.yawKp * yawError + yawIntegral;
         const float wanted = clip(yawPre, -room, room);
-        const float slewed = yawCurrent + clip(wanted - yawCurrent, -s.yawCurrentSlew * dt, s.yawCurrentSlew * dt);
+        const float slewed = s.yawCurrentSlew > 0 ?
+            yawCurrent + clip(wanted - yawCurrent, -s.yawCurrentSlew * dt, s.yawCurrentSlew * dt) : wanted;
         // Track both saturation and slew limiting: no stored turn kick after a shove.
         if (!((yawPre > slewed && yawError > 0) || (yawPre < slewed && yawError < 0)))
             yawIntegral = clip(yawIntegral + s.yawKi * yawError * dt, -s.yawIntegralLimit, s.yawIntegralLimit);
@@ -97,12 +100,15 @@ private:
 struct Steering {
     float command = 0, heading = 0;
     bool releasing = false;
+    bool wasTurning = false, justReleased = false;
 
-    void reset(float differential) { command = 0; heading = differential; releasing = false; }
+    void reset(float differential) { command = 0; heading = differential; releasing = wasTurning = justReleased = false; }
 
     float update(float target, bool turning, float differential, float differentialRate,
                  float look, float kp, float kd, float holdLimit, float relatch,
-                 bool suspend, float slew, float room, float settleRate, float dt) {
+                  bool suspend, float slew, float room, float settleRate, float dt) {
+        justReleased = wasTurning && !turning;
+        wasTurning = turning;
         if (turning) {
             heading = differential;
             releasing = true;
@@ -119,7 +125,7 @@ struct Steering {
             target = suspend ? 0 : clip(kp * error - kd * differentialRate, -holdLimit, holdLimit);
         }
         target = clip(target, -room, room);
-        command += clip(target - command, -slew * dt, slew * dt);
+        command = slew > 0 ? command + clip(target-command,-slew*dt,slew*dt) : target;
         command = clip(command, -room, room);
         return command;
     }

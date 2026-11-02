@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.1.0, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.1.1, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -38,7 +38,6 @@
 #include "terrain.h"
 #include "tof_guard.h"
 #include "startup_gate.h"
-#include "fall_prevention.h"
 #include "auto_climb.h"
 #include "descent_guard.h"
 #include "navigation_lease.h"
@@ -122,13 +121,13 @@ uint32_t radxaLastRx = 0;
 float    radxaFwd = 0.0f, radxaSteer = 0.0f;
 uint8_t  radxaEn = 0, radxaEnPrev = 0;
 ToFGuard tofGuard;
-FallPrevention fallPrevention;
 AutoClimb autoClimb;
 DescentGuard descentGuard;
 NavigationLease navigation;
 float climbXRef=0.0f,climbIntegral=0.0f,climbDriveRef=0.0f,climbRecovery=0.0f;
 bool climbReferenceInitialized=false;
 float requestedDriveV = 0.0f;
+float effectiveDriveV = 0.0f;
 float appliedBalanceScale = 1.0f;
 float wheelTargetL = 0.0f, wheelTargetR = 0.0f;
 float appliedSteerSteps = 0.0f;
@@ -192,12 +191,11 @@ void updateStatusLed() {
 
 void resetController() {
     navigation.reset();
-    fallPrevention.reset();
     autoClimb.resetDynamics();
     descentGuard.reset();
     climbXRef=posM;climbIntegral=climbDriveRef=climbRecovery=0;
     climbReferenceInitialized=false;
-    requestedDriveV=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
+    requestedDriveV=effectiveDriveV=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
     appliedSteerSteps=0.0f;
     driveReferenceActive=false;
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
@@ -469,19 +467,18 @@ void runController(float dt) {
     float th = pitchF * DEG_TO_RAD;      // rad
     float om = rateF  * DEG_TO_RAD;      // rad/s
 
-    // Preserve terrain adaptation and normal pitch/rate feedback. The
-    // predictive drive-reference governor is bypassed for this diagnostic.
+    // Direct reference: the predictive fall-prevention governor is removed.
     const bool  airborne = terrain_airborne() && P.airFreeze > 0.5f;
     const float driveScale = P.driveVEff+autoClimb.referenceBlend*(P.climbVel-P.driveVEff);
     // Full-stick and autonomy targets follow DRIVEV, without free-speed derating.
     float nominalDriveV=navigation.granted?clampf(navigation.velocity,-P.driveVEff,P.driveVEff):cmdFwd*driveScale;
     requestedDriveV = navigation.granted?nominalDriveV:descentGuard.limitReference(nominalDriveV);
-    fallPrevention.directReference(requestedDriveV,pitchF,rateF);
+    effectiveDriveV=requestedDriveV;
     // An explicitly enabled obstacle guard still takes effect immediately.
     if (!navigation.granted && tofGuard.enabled) {
         const float boundedRef = driveScale>0.0f ?
-            tofGuard.apply(fallPrevention.operatorRef/driveScale,driveScale,millis())*driveScale : 0.0f;
-        fallPrevention.constrainForwardReference(boundedRef,velF);
+            tofGuard.apply(effectiveDriveV/driveScale,driveScale,millis())*driveScale : 0.0f;
+        effectiveDriveV=fminf(effectiveDriveV,boundedRef);
     }
     const bool wasAutomatic=autoClimb.active;
     const bool wasLimited=autoClimb.actuatorLimited;
@@ -492,7 +489,7 @@ void runController(float dt) {
     autoClimb.update(nominalDriveV,velF,pitchF,rateF,cmdSteer,
                      wheelTargetL/P.stepsPerM,wheelTargetR/P.stepsPerM,
                      velF-wheelDiffVelocity,velF+wheelDiffVelocity,P.driveVEff,
-                     fallPrevention.hazardRisk,terrain_airborne(),stiffHold || gestSeq!=nullptr,satA!=0,dt,
+                     0.0f,terrain_airborne(),stiffHold || gestSeq!=nullptr,satA!=0,dt,
                      navigation.granted?nominalDriveV:cmdFwd*P.driveVEff);
     const bool descentEligible=(autoClimb.enabled && autoClimb.policy==AutoClimb::AUTOMATIC) ||
                                autoClimb.policy==AutoClimb::FORCE_CLIMB;
@@ -512,12 +509,12 @@ void runController(float dt) {
     if(autoClimb.actuatorLimited && !wasLimited)
         Serial.println("[AUTOCLIMB] LIMITED: wheel command/encoder mismatch; check load/driver/supply");
     climbMode=autoClimb.blend>.001f || autoClimb.active; // retain shadow C state during exit verification
-    float vIn = fallPrevention.effectiveRef;
+    float vIn = effectiveDriveV;
     const float deadband = P.driveDb*P.driveVEff;
-    if(fabsf(requestedDriveV)>deadband || fabsf(fallPrevention.operatorRef)>deadband)
+    if(fabsf(requestedDriveV)>deadband || fabsf(effectiveDriveV)>deadband)
         driveReferenceActive=true;
-    if(fabsf(requestedDriveV)<=deadband && fabsf(fallPrevention.operatorRef)<=deadband &&
-       fabsf(velF)<.05f && !fallPrevention.recovering) driveReferenceActive=false;
+    if(fabsf(requestedDriveV)<=deadband && fabsf(effectiveDriveV)<=deadband && fabsf(velF)<.05f)
+        driveReferenceActive=false;
     bool driving = driveReferenceActive;
     // Accelerating/roughness must not weaken attitude feedback while the
     // velocity-error term remains at full strength. This caused the recorded
@@ -534,10 +531,6 @@ void runController(float dt) {
         zInt = 0.0f;
         uOut = -(k2 * (velF - vIn) + k3t * th + k4t * om);
     } else {
-        if(fallPrevention.recovering) {
-            xRef += (posM-xRef)*clampf(2.0f*fallPrevention.risk*dt,0.0f,1.0f);
-            zInt -= zInt*clampf(2.0f*fallPrevention.risk*dt,0.0f,1.0f);
-        }
         // Position hold / go-to: full LQI vector. Position error is
         // clamped so a big displacement asks for a gentle walk back,
         // never a sprint that eats the balance headroom.
@@ -567,12 +560,8 @@ void runController(float dt) {
             climbDriveRef=fminf(climbDriveRef,cap);
         }
         if(airborne)climbDriveRef=0;
-        climbRecovery=fallPrevention.climbRecoveryScale();
-        climbXRef+=climbDriveRef*(1.0f-climbRecovery)*dt;
-        if(climbRecovery>0) {
-            const float bleed=clampf(2.0f*climbRecovery*dt,0,1);
-            climbXRef+=(posM-climbXRef)*bleed;climbIntegral-=climbIntegral*bleed;
-        }
+        climbRecovery=0;
+        climbXRef+=climbDriveRef*dt;
         climbXRef=clampf(climbXRef,posM-P.exClamp,posM+P.exClamp);
         const float climbError=posM-climbXRef;
         const float dz=airborne || autoClimb.blend<.05f?0.0f:climbError*dt;
@@ -621,10 +610,11 @@ void runController(float dt) {
         lookCmd*(P.lookMaxDeg*DEG_TO_RAD)*P.trackW*P.countsPerM,P.yawKp,P.yawKd,P.yawMaxSt,
         P.yawRelatch,fabsf(pitchF)>P.yawTiltSus,P.steerSlew,room,.1f*P.trackW*P.countsPerM,dt);
     diffTarget = yawControl.heading;
-    appliedSteerSteps = fallPrevention.allocateSteering(baseSteps,steerSteps,P.maxSpdEff);
+    if (yawControl.justReleased) hub.resetYaw();
+    appliedSteerSteps = steerSteps;
     wheelTargetL=baseSteps-appliedSteerSteps;
     wheelTargetR=baseSteps+appliedSteerSteps;
-    const bool recoveryTorque = fallPrevention.recovering || fabsf(pitchF)>=6.0f || fabsf(rateF)>=40.0f;
+    const bool recoveryTorque = fabsf(pitchF)>=6.0f || fabsf(rateF)>=40.0f;
     hub.setBalanceCommand(wheelTargetL,wheelTargetR,uOut,recoveryTorque);
 }
 
@@ -666,7 +656,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.1.0 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.1.1 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();
@@ -707,7 +697,7 @@ void setup() {
     btgamepad_syncArmed(false);
 
     updateStatusLed();
-    Serial.printf("[MAIN] countsPerM=%.0f  estimatedFree=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f)  Amax=%.2f m/s^2; predictive governor OFF\n",
+    Serial.printf("[MAIN] countsPerM=%.0f  estimatedFree=%.2f m/s  fullStick=%.2f m/s (DRIVEV %.2f)  Amax=%.2f m/s^2; predictive governor REMOVED\n",
                   P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.aMax);
     Serial.println("BS,READY");
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
@@ -950,13 +940,13 @@ void loop() {
                       (unsigned)(state == STATE_BALANCING), cmdFwd, cmdSteer,
                       TERR.accelMag, TERR.rough, TERR.soften,
                       (unsigned)TERR.state, (unsigned long)TERR.drops,
-                      fallPrevention.risk,fallPrevention.predictedTilt,(unsigned)fallPrevention.reasons,
-                      requestedDriveV,fallPrevention.operatorRef,fallPrevention.effectiveRef,
+                       0.0f,0.0f,0u,
+                       requestedDriveV,effectiveDriveV,effectiveDriveV,
                        appliedBalanceScale,wheelTargetL,wheelTargetR,
                        (unsigned)autoClimb.enabled,(unsigned)autoClimb.state,(unsigned)autoClimb.policy,
                        autoClimb.blend,autoClimb.trackingError,autoClimb.pitchBias,autoClimb.followingError,
                        (unsigned)autoClimb.flags,climbIntegral,posM-climbXRef,climbDriveRef,
-                       fallPrevention.hazardRisk,climbRecovery,autoClimb.stableSeconds,
+                        0.0f,climbRecovery,autoClimb.stableSeconds,
                        (unsigned)autoClimb.kind,autoClimb.exitPending?autoClimb.probeSeconds:autoClimb.flatSeconds,
                        (unsigned)autoClimb.exitBlock,autoClimb.cooldownSeconds,
                        descentGuard.limit,descentGuard.excess,descentGuard.scale,(unsigned)descentGuard.active,

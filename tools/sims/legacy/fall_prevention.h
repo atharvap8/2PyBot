@@ -2,6 +2,7 @@
 #include <cmath>
 #include <stdint.h>
 
+// Historical simulation fixture only; not included in production firmware.
 // Reference governor, not a replacement for LQR and not a wheel-velocity stop.
 // Operator-reference shaping is separate from physical balance acceleration.
 struct FallPrevention {

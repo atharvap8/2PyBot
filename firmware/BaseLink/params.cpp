@@ -89,6 +89,7 @@ void params_save() {
         _prefs.putFloat(PARAM_META[i].key, *params_ptr(i));
     _prefs.putUChar("_ver", 1);
     _prefs.putUChar("_cur5s", 1);
+    _prefs.putUChar("_input2", 1);
     _prefs.end();
     Serial.println("PS!,saved");
 }
@@ -98,6 +99,7 @@ void params_load() {
     _prefs.begin(NVS_NS, true);
     bool have = _prefs.getUChar("_ver", 0) == 1;
     const bool migrate = _prefs.getUChar("_cur5s", 0) != 1;
+    const bool migrateInput = _prefs.getUChar("_input2", 0) != 1;
     for (size_t i = 0; i < PARAM_COUNT; i++) {
         float v = have ? _prefs.getFloat(PARAM_META[i].key, PARAM_META[i].def) : PARAM_META[i].def;
         const ParamMeta& m = PARAM_META[i];
@@ -116,6 +118,13 @@ void params_load() {
         P.motorMa=MOTOR_CURRENT_MA;P.maxSpdSt=MAX_SPEED_STEPS;P.freeRpm=0;
         P.motAccel=6.0f*M0601_CPR/(2.0f*PI*P.wheelR);
         Serial.println("[PARAM] Current-mode 18 V / 2.6 kg baseline loaded in RAM; PS saves it");
+    }
+    if (migrateInput) {
+        if (have) P.camExpo=P.expoSteer;
+        P.pitchTrim=PITCH_TRIM_DEG;
+        P.maxSteerSt=3.0f*P.trackW*M0601_CPR/(2.0f*PI*P.wheelR)*.5f;
+        P.steerSlew=0;P.hubYawSlew=0;P.spdLoStr=1;P.expoSteer=0;
+        Serial.println("[PARAM] Direct steering and raw TRIM=-1.4 loaded in RAM; PS saves it");
     }
     params_recompute();
     params_applyHardware(true);
@@ -136,8 +145,8 @@ void params_service() {
     if (dumpRow < 0) return;
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
-        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0};
+        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE"};
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

@@ -1,7 +1,6 @@
 // Compile the actual runController(), not a reimplementation of its policy.
 #include "params.h"
 #include "hub_drive.h"
-#include "fall_prevention.h"
 #include "tof_guard.h"
 #include "auto_climb.h"
 #include "descent_guard.h"
@@ -17,11 +16,11 @@ constexpr float DEG_TO_RAD=PI/180;
 float pitchF=0,rateF=0,posM=0,velF=0,vCmd=0,xRef=0,zInt=0,uOut=0;
 float cmdFwd=0,cmdSteer=0,encDiff=0,diffRateF=0,lookCmd=0,steerSteps=0,diffTarget=0;
 float requestedDriveV=0,appliedBalanceScale=1,wheelTargetL=0,wheelTargetR=0,appliedSteerSteps=0;
+float effectiveDriveV=0;
 float climbXRef=0,climbIntegral=0,climbDriveRef=0,climbRecovery=0;
 bool climbMode=false,stiffHold=false,driveReferenceActive=false,climbReferenceInitialized=false;
 uint8_t satV=0,satA=0;
 void* gestSeq=nullptr;
-FallPrevention fallPrevention;
 ToFGuard tofGuard;
 AutoClimb autoClimb;
 DescentGuard descentGuard;
@@ -37,7 +36,7 @@ void params_applyHardware(bool) { hub.applyTuning(); }
 
 void reset() {
     testTerrainScale=1;
-    params_defaults();fallPrevention.reset();autoClimb=AutoClimb();autoClimb.configure(false);
+    params_defaults();effectiveDriveV=0;autoClimb=AutoClimb();autoClimb.configure(false);
     descentGuard.reset();navigation.reset();yawControl.reset(0);
     pitchF=rateF=posM=velF=vCmd=xRef=zInt=uOut=0;
     cmdFwd=cmdSteer=encDiff=diffRateF=lookCmd=steerSteps=diffTarget=0;
@@ -51,10 +50,9 @@ int main() {
     reset();
     assert(P.driveVEff==1 && P.vNoLoad>1 && P.maxDriveV==1 && P.supplyV==18);
     cmdFwd=1;runController(.005f);
-    assert(fallPrevention.operatorRef==1 && fallPrevention.effectiveRef==1);
-    assert(fallPrevention.steeringScale==1 && !fallPrevention.recovering);
+    assert(requestedDriveV==1 && effectiveDriveV==1);
     pitchF=25;rateF=100;runController(.005f);
-    assert(fallPrevention.effectiveRef==1 && fallPrevention.steeringScale==1);
+    assert(effectiveDriveV==1);
     // Actual pre-fall frames: terrain feedback suppression erased/reversed
     // the forward catch even though the velocity demand was still full scale.
     reset();testTerrainScale=.55f;cmdFwd=1;velF=.608f;pitchF=5.85f;rateF=8.4f;
@@ -64,18 +62,18 @@ int main() {
     runController(.005f);
     assert(appliedBalanceScale==1 && uOut>2.1f); // recorded old output: -0.05
     for(const auto& sample:captured) {
-        reset();cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=sample[1];pitchF=sample[2];rateF=sample[3];vCmd=.7253f;
+        reset();cmdFwd=1;velF=sample[1];pitchF=sample[2];rateF=sample[3];vCmd=.7253f;
         runController(.005f);
         assert(uOut>0 && vCmd>.7253f && std::fabs(requestedDriveV-P.driveVEff)<1e-5f);
     }
     reset();
-    cmdFwd=1;fallPrevention.operatorRef=1;velF=.806f;vCmd=.725f;pitchF=15.2f;rateF=130.9f;
+    cmdFwd=1;velF=.806f;vCmd=.725f;pitchF=15.2f;rateF=130.9f;
     runController(.005f);
-    assert(std::fabs(requestedDriveV-P.driveVEff)<1e-5f && fallPrevention.operatorRef<=1);
+    assert(std::fabs(requestedDriveV-P.driveVEff)<1e-5f && effectiveDriveV<=1);
     assert(uOut==P.aMax && vCmd>.725f && !satV);
     assert(.5f*(wheelTargetL+wheelTargetR)/P.stepsPerM>.725f);
     reset();
-    cmdFwd=1;fallPrevention.operatorRef=P.driveVEff;velF=1.2f;vCmd=1.2f;
+    cmdFwd=1;velF=1.2f;vCmd=1.2f;
     runController(.005f);
     assert(vCmd>1.2f); // balance is still free to outrun the stick reference
     // Measured free speed remains informational; DRIVEV is unchanged.
@@ -89,11 +87,11 @@ int main() {
     navigation.granted=false;
     reset();
     params_set("MAXSPD",P.countsPerM*.8f,true);
-    cmdFwd=1;fallPrevention.operatorRef=.8f;velF=.9f;vCmd=.8f;pitchF=15;rateF=100;
+    cmdFwd=1;velF=.9f;vCmd=.8f;pitchF=15;rateF=100;
     runController(.005f);
     assert(std::fabs(vCmd-.8f)<.00001f && uOut==P.aMax && satV);
     reset();
-    cmdFwd=1;fallPrevention.operatorRef=1;pitchF=20;rateF=100;vCmd=.67f;
+    cmdFwd=1;pitchF=20;rateF=100;vCmd=.67f;
     runController(.005f);
     assert(satV && vCmd<=P.motorMa*.001f/P.hubKp+.00001f);
     puts("BLDC production controller: direct full-stick target, predictive governor bypass and balance anti-windup passed");
