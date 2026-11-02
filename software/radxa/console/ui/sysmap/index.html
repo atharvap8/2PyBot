@@ -23,6 +23,11 @@
   <div class="hstat">Serial <b id="h-port">–</b> <span id="h-baud"></span></div>
   <div class="hstat"><i class="dot" id="h-dot"></i><b id="h-live">Connecting</b> <span id="h-rate"></span></div>
   <button class="hstat errs" id="h-errs" hidden></button>
+  <div class="zoom" role="group" aria-label="Map size">
+    <button id="z-out" title="Smaller (minus key)" aria-label="Smaller">−</button>
+    <button id="z-val" title="Fit to window (0 key)">100%</button>
+    <button id="z-in" title="Larger (plus key)" aria-label="Larger">+</button>
+  </div>
   <button class="estop" id="estop" title="Sends the same stop as the console E-STOP. Never arms.">Stop robot</button>
 </header>
 

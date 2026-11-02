@@ -317,9 +317,28 @@ setInterval(() => {
 }, 1000);
 
 // ------------------------------------------------------------- layout & UI
+// Map size: 100% = fit to window. Browser zoom (Ctrl +) cannot enlarge the map
+// because fit() rescales to the window, so the page has its own control.
+const ZOOM_STEPS = [0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2];
+let zoom = 1;
+try { zoom = Number(localStorage.getItem("sysmap.zoom")) || 1; } catch { /* storage unavailable */ }
+
+function setZoom(z) {
+  zoom = Math.min(2, Math.max(0.8, z));
+  try { localStorage.setItem("sysmap.zoom", String(zoom)); } catch { /* ignore */ }
+  $("#z-val").textContent = Math.round(zoom * 100) + "%";
+  fit();
+}
+
+function stepZoom(dir) {
+  const i = ZOOM_STEPS.findIndex((v) => v >= zoom - 1e-6);
+  const next = dir > 0 ? ZOOM_STEPS.find((v) => v > zoom + 1e-6) : [...ZOOM_STEPS].reverse().find((v) => v < zoom - 1e-6);
+  setZoom(next ?? ZOOM_STEPS[Math.max(0, i)]);
+}
+
 function fit() {
   const box = $("#fit");
-  const s = Math.max(0.55, Math.min(box.clientWidth / STAGE.w, box.clientHeight / STAGE.h));
+  const s = Math.max(0.55, Math.min(box.clientWidth / STAGE.w, box.clientHeight / STAGE.h)) * zoom;
   const st = $("#stage");
   st.style.transform = `scale(${s})`;
   st.style.marginRight = `${STAGE.w * (s - 1)}px`;
@@ -355,11 +374,18 @@ $("#estop").addEventListener("click", async () => {
 });
 
 document.addEventListener("keydown", (e) => {
+  if (e.target.matches?.("input, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === "Escape") { userPicked = false; render(); }
+  else if (e.key === "+" || e.key === "=") stepZoom(1);
+  else if (e.key === "-") stepZoom(-1);
+  else if (e.key === "0") setZoom(1);
 });
+$("#z-in").addEventListener("click", () => stepZoom(1));
+$("#z-out").addEventListener("click", () => stepZoom(-1));
+$("#z-val").addEventListener("click", () => setZoom(1));
 
 $("#h-host").textContent = location.host;
 buildLegend(); buildWires(); buildNodes(); buildPins(); initTabs();
-addEventListener("resize", fit); fit();
+addEventListener("resize", fit); setZoom(zoom);
 requestAnimationFrame(animate);
 connect();
