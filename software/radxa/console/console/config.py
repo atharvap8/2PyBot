@@ -5,6 +5,7 @@ import os
 SERIAL_PORT   = os.environ.get("BOT_SERIAL", "/dev/ttyUSB0")
 SERIAL_BAUD   = int(os.environ.get("BOT_BAUD", "460800"))
 HTTP_PORT     = int(os.environ.get("BOT_PORT", "8080"))
+SYSMAP_PORT   = int(os.environ.get("BOT_SYSMAP_PORT", "6969"))   # 0 disables the map port
 
 ENCODER_CPR   = 4096          # MT6816 with 4x quadrature decode
 TRACK_WIDTH_M = 0.155         # only used for map dead-reckoning

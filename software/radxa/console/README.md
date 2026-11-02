@@ -18,9 +18,21 @@ The Kotlin/Compose client is in [software/android](../../android/README.md).
 | `console/camera.py` | V4L2 controls, exposure/gain adjustment, profiles, JPEG snapshots |
 | `console/stream.py` | Camera mode selection, encoder startup, progress metrics, process supervision |
 | `console/tof.py`, `console/tof_worker.py` | Isolated VL53L5CX reader, 8×8 telemetry, optional forward-reference guard |
+| `console/sysmap.py`, `console/sysmap_health.py` | Live system map on port 6969 and `/sysmap/`: health rules, root-cause pass, snapshot stream |
+| `console/sysmap_demo.py` | Simulated robot for the map, no hardware needed |
 | `ui/` | Browser shell, shared parameter renderer, twelve tabs |
+| `ui/sysmap/` | System map page: layout model, renderer, theme |
 | `native/` | Allwinner Cedar H.264 publisher and probe source |
 | `systemd/` | Installer templates for console and MediaMTX |
+
+## System map
+
+`http://10.42.0.1:6969` (also `:8080/sysmap/`) draws every board, sensor, motor
+and bus where it sits in the robot, coloured by its own health. One failure
+shows as one flashing red block; blocks that depend on it show WAIT. It runs in
+the console process, reads the console's objects and never opens the serial
+port. `BOT_SYSMAP_PORT=0` disables the separate port. See
+[System map GUI](../../../docs/SYSTEM_MAP_GUI.md).
 
 ## Firmware connection
 

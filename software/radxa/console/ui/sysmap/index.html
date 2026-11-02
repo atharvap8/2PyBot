@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2PyBot Link</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='13' fill='none' stroke='%23f08a4b' stroke-width='3'/><circle cx='16' cy='16' r='5' fill='%23f08a4b'/></svg>">
+<link rel="stylesheet" href="static/sysmap.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2.5"/><circle cx="16" cy="16" r="5" fill="currentColor"/><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+    <div><b>2PyBot Link</b><span>Live system map</span></div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="map" aria-selected="true">Map</button>
+    <button role="tab" data-tab="pins" aria-selected="false">Pins</button>
+    <button role="tab" data-tab="log" aria-selected="false">Log</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="hstat">Console <b id="h-host">–</b></div>
+  <div class="hstat">Serial <b id="h-port">–</b> <span id="h-baud"></span></div>
+  <div class="hstat"><i class="dot" id="h-dot"></i><b id="h-live">Connecting</b> <span id="h-rate"></span></div>
+  <button class="hstat errs" id="h-errs" hidden></button>
+  <button class="estop" id="estop" title="Sends the same stop as the console E-STOP. Never arms.">Stop robot</button>
+</header>
+
+<main>
+  <section id="tab-map" class="view">
+    <div id="fit"><div id="stage">
+      <svg id="wires" aria-hidden="true"></svg>
+      <div class="legend" id="legend"></div>
+      <div id="nodes"></div>
+      <div class="bot">
+        <div class="botframe"><img src="static/bot.jpg" alt="2PyBot, front three-quarter view"></div>
+      </div>
+      <div class="botcap">
+        <h1>2PyBot</h1>
+        <div class="chips"><span id="b-state">–</span><span>Pitch <b id="b-pitch">–</b></span><span>Yaw <b id="b-yaw">–</b></span><span>Speed <b id="b-speed">–</b></span></div>
+      </div>
+      <aside class="insp" id="insp" aria-live="polite"></aside>
+      <div class="lost" id="lost" hidden>Lost connection to the console. Retrying…</div>
+    </div></div>
+  </section>
+
+  <section id="tab-pins" class="view page" hidden>
+    <h2>ESP32 pin map</h2><table id="pins-esp32"></table>
+    <h2>Radxa interfaces</h2><table id="pins-radxa"></table>
+    <p class="hint">From firmware/BaseLink/config.h (v4) and the console settings. Edit ui/sysmap/model.js when the wiring changes.</p>
+  </section>
+
+  <section id="tab-log" class="view page" hidden>
+    <div class="logbar">
+      <input id="log-filter" type="search" placeholder="Filter, for example HUB or IMU" aria-label="Filter log">
+      <label><input type="checkbox" id="log-errors"> Problems only</label>
+    </div>
+    <ol id="log" class="loglist"></ol>
+  </section>
+</main>
+
+<script type="module" src="static/sysmap.js"></script>
+</body>
+</html>

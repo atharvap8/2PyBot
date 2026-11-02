@@ -10,11 +10,11 @@ import hashlib
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
-from fastapi.responses import FileResponse, Response, JSONResponse
+from fastapi.responses import FileResponse, Response, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .config import HTTP_PORT, SNAPSHOT_PATH
+from .config import HTTP_PORT, SNAPSHOT_PATH, SYSMAP_PORT
 from .readiness import HOTSPOT_ADDRESS, publish_ready, readiness
 from .serial_link import link
 from .tof import tof
@@ -220,7 +220,7 @@ async def autonomy_stop():autonomy.stop();return autonomy.status()
 @app.middleware("http")
 async def firmware_mutation_gate(request,call_next):
     internal=request.url.path.startswith("/api/internal/deployment/")
-    if request.method not in ("GET","HEAD","OPTIONS") and not internal and request.url.path not in ("/api/firmware/reflash","/api/estop") and firmware.blocked():
+    if request.method not in ("GET","HEAD","OPTIONS") and not internal and request.url.path not in ("/api/firmware/reflash","/api/estop","/sysmap/api/estop") and firmware.blocked():
         return JSONResponse({"detail":"Controller firmware maintenance is in progress"},status_code=409)
     return await call_next(request)
 
@@ -559,6 +559,23 @@ async def ws(sock: WebSocket):
 
 
 # ============================================================
+#  system map — own port (SYSMAP_PORT, default 6969) and /sysmap/
+# ============================================================
+# Imported here because create_app needs estop() and host_ready() from above.
+from . import sysmap
+
+sysmap_app = sysmap.create_app(link, tof, stream.streamer, host_ready, estop)
+
+
+@app.get("/sysmap")
+def sysmap_redirect():
+    return RedirectResponse("/sysmap/")
+
+
+app.mount("/sysmap", sysmap_app, name="sysmap")
+
+
+# ============================================================
 #  UI
 # ============================================================
 if os.path.isdir(UI_DIR):
@@ -601,8 +618,49 @@ def index():
 
 
 def main():
+    import contextlib
+    import signal
+
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT, log_level="warning")
+
+    class _Server(uvicorn.Server):
+        # Two servers share one process; signals are handled once, below.
+        def install_signal_handlers(self):  # uvicorn < 0.29
+            pass
+
+        @contextlib.contextmanager
+        def capture_signals(self):  # uvicorn >= 0.29
+            yield
+
+    servers = [_Server(uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="warning"))]
+    if SYSMAP_PORT > 0 and SYSMAP_PORT != HTTP_PORT:
+        servers.append(_Server(uvicorn.Config(sysmap_app, host="0.0.0.0", port=SYSMAP_PORT,
+                                              log_level="warning", lifespan="off")))
+
+    async def serve():
+        loop = asyncio.get_running_loop()
+
+        def stop():
+            for server in servers:
+                server.should_exit = True
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop)
+        async def optional(server):
+            try:
+                await server.serve()
+            except (SystemExit, Exception) as exc:  # uvicorn exits on a bind error
+                link._log(f"[console] system map on :{server.config.port} stopped: {exc!r}")
+
+        console = asyncio.ensure_future(servers[0].serve())
+        extra = [asyncio.ensure_future(optional(s)) for s in servers[1:]]
+        await console  # the console is the service; the map must never take it down
+        for server in servers[1:]:
+            server.should_exit = True
+        await asyncio.gather(*extra, return_exceptions=True)
+
+    asyncio.run(serve())
 
 
 if __name__ == "__main__":
