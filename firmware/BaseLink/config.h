@@ -18,21 +18,18 @@
 // Confirmed by the owner. Not inherited from either old NVS namespace.
 #define HUB_CURRENT_SIGN    (-1.0f)
 #define HUB_RPM_SIGN        (-1.0f)
-// Independent velocity-command polarity; verify wheel direction before arming.
-#define HUB_VELOCITY_SIGN   (-1.0f)
 
 #define I2C_SDA             21
 #define I2C_SCL             22
 #define I2C_CLOCK_HZ        400000
-#define SUPPLY_V            12.0f
+#define SUPPLY_V            18.0f // owner-confirmed 5S Li-ion operating supply; estimate, not a voltage sensor
 #define M0601_KT            0.75f
 #define M0601_KV_RPM_PER_V   11.1f
 #define M0601_CPR           4096
 #define ENCODER_CPR         M0601_CPR
 #define MOTOR_CURRENT_MA    2700
 #define MOTOR_CURRENT_MAX_MA 4400
-#define HUB_DRIVE_MODE      2 // velocity balance; 1=current balance, 0=velocity bench
-#define HUB_VEL_ACCEL_BYTE  0
+#define HUB_DRIVE_MODE      1 // current/torque control only
 #define HUB_LINK_TIMEOUT_MS 60
 
 // Lower sampled velocity-loop gains reduce the current reversals observed
@@ -41,7 +38,7 @@
 #define HUB_KI              4.0f
 #define HUB_INT_LIM         0.5f
 #define HUB_KFF             1.0f
-#define HUB_MASS_KG         2.0f
+#define HUB_MASS_KG         2.6f
 #define HUB_VEL_SOURCE      1 // owner-confirmed fix: position-derived velocity
 #define HUB_YAW_KP          1.5f
 #define HUB_YAW_KI          2.0f
@@ -87,8 +84,8 @@
 // MAXSPD=0 is uncapped. The voltage/free-speed model is telemetry only.
 #define MAX_SPEED_STEPS     0.0f
 #define MOTOR_ACCEL_LIMIT   (6.0f * COUNTS_PER_M)
-#define MAX_DRIVE_VEL_MS     1.00f   // operator reference; not voltage/free-speed derated
-// Retained for old saved settings; no longer a drive-reference limiter.
+#define MAX_DRIVE_VEL_MS     1.00f   // operator reference; no voltage/free-speed derating
+// Legacy saved setting only; no longer used to clamp drive requests.
 #define SPEED_HEADROOM       0.70f
 #define DRIVE_DEADBAND      0.03f
 #define JOY_FWD_SCALE       (-0.2f)

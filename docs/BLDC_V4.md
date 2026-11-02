@@ -57,12 +57,11 @@ to measured motion and the existing current/gain budget, not to an absolute
 vehicle speed. The supply-derived estimate no longer clips full-stick input,
 activates speed-margin intervention or removes steering headroom.
 
-The compiled default is experimental velocity balancing (`DRVMODE=2`), with
-current balancing retained as `DRVMODE=1`; saved/live settings survive updates.
-`DRVMODE=0` remains a disarmed bench option. There is no speed-triggered mode switch. See
-[velocity balancing](VELOCITY_BALANCE.md) for selection, stop behaviour and the
-important difference in current limiting. The correction does not promise speed
-or torque beyond what the real supply, motor and traction can deliver.
+The firmware uses CURRENT mode only (`DRVMODE=1`). The velocity experiment and
+its bench path are removed. The current baseline targets the owner's 18 V / 5S
+Li-ion setup and 2.6 kg bot; see [current 5S profile](CURRENT_MODE_5S.md) for the
+settings migration. Fall, fault, current and link protections remain. Compilation
+does not establish physical balancing or climbing performance.
 
 ## Turning changes
 

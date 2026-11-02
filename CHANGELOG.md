@@ -5,11 +5,9 @@ For the main milestones and estimated dates for future work, see the
 
 ## 4.1.0 — One-pull deployment and status ring
 
-- Add explicit experimental velocity balancing (`DRVMODE=2`) with independent
-  velocity-command polarity, confirmed mode handshakes, RPM telemetry and
-  balance-first speed allocation. Make velocity balance the compiled default,
-  retain current mode as a fallback and keep velocity bench mode non-arming;
-  retain unrestricted DRIVEV except protocol/MAXSPD bounds.
+- Return to current-only control for the owner's 5S / 18 V, 2.6 kg bot. Remove
+  velocity balancing/bench command paths and migrate old velocity snapshots to
+  the targeted current baseline while retaining trim, calibration and bot tools.
 - Move GPIO15 ring transmission to I2S1 DMA, clear pixels before boot and skip
   busy frames to address colour corruption reported when arming under load.
   Preserve every animation branch from pre-BLDC stepper revision `a8427f0`.

@@ -93,6 +93,17 @@ class Controller:
         if not self.locked:raise RuntimeError("Arming lock was lost")
     def restore(self,snapshot):
         self.dump();wanted={p["key"]:p["value"] for p in snapshot["params"]}
+        current_only=self.derived.get("CURONLY")==1
+        migrate_current=current_only and (snapshot.get("derived",{}).get("CURPROFILE")!=1 or wanted.get("DRVMODE")!=1)
+        if current_only:
+            for key in ("VSIGN","HUBACC","VK1","VK2","VK3","VK4","VK5","VELERR","VELACC"):
+                wanted.pop(key,None)
+            wanted["DRVMODE"]=1
+            if migrate_current:
+                # Use the new MCU's current/5S baseline instead of replaying
+                # velocity-experiment gains, acceleration, supply and mass.
+                for key in ("K1","K2","K3","K4","K5","CURRENT","MAXACC","MAXSPD","FREERPM","SUPPLYV","HUBMASS"):
+                    wanted[key]=self.params[key]
         for key,value in wanted.items():
             if key not in self.params:raise RuntimeError("Firmware removed saved parameter "+key)
             if abs(self.params[key]-value)>max(1e-5,abs(value)*1e-5):
@@ -103,8 +114,8 @@ class Controller:
             raise RuntimeError("Live tuning restoration failed")
         debug=snapshot.get("debug",{})
         if self.derived.get("AUTOCLIMB")==1:
-            self.send("AC,1" if debug.get("acEnabled",1) else "AC,0")
-            policy=int(debug.get("acPolicy",0))
+            self.send("AC,1" if migrate_current or debug.get("acEnabled",1) else "AC,0")
+            policy=1 if migrate_current else int(debug.get("acPolicy",0))
             if policy in (1,2,3):self.send({1:"H,0",2:"H,2",3:"H,1"}[policy])
         self.send("X");self.pump()
         if self.balancing or not self.locked:raise RuntimeError("Controller must remain locked and idle")

@@ -434,7 +434,13 @@ class Bot:
             result = self.api("/api/params")
             if self.args.key:
                 key = self.args.key.upper()
-                show([p for p in result["params"] if p["key"] == key])
+                matches = [p for p in result["params"] if p["key"] == key]
+                if matches:
+                    show(matches)
+                elif key in result.get("derived", {}):
+                    show({"key": key, "value": result["derived"][key], "read_only": True})
+                else:
+                    raise ValueError("Unknown parameter/capability: " + key)
             else:
                 show(result)
         elif self.args.operation == "set":
