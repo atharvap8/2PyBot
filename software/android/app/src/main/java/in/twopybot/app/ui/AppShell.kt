@@ -53,7 +53,7 @@ fun RobotApp(vm:BotViewModel=viewModel()) {
     val current=destinations.first { it.id==selected }
     val online=connected && !tel.stale
     val linkColor=if(online) Green else TextDim
-    val status=if(!online) "OFFLINE" else if(tel.balancing) "BALANCING" else "CONNECTED"
+    val status=if(!online) "OFFLINE" else if(tel.selfRighting) "SELF-UPRIGHTING" else if(tel.balancing) "BALANCING" else "CONNECTED"
     LaunchedEffect(vm) { vm.snack.collectLatest { if(it!=null) { snackbar.showSnackbar(it);vm.clearToast() } } }
     BackHandler(selected!="drive" && !more) { selected="drive" }
     // Moving between adaptive layouts keeps the active native/WebView screen.

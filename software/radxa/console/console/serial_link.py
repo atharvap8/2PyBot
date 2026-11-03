@@ -81,6 +81,8 @@ class SerialLink:
         self.tel["v_ms"] = 0.0
         self._release_flash_lock = True
         self.derived.clear()
+        self.tel.pop("self_righting_status",None)
+        self.tel["self_righting"]=False
         self.hub.clear()
         self.tel["host_ready"] = False
         self.connected = True
@@ -348,6 +350,25 @@ class SerialLink:
                          "dsActive", "dsGoal", "acOverspeed"]
                 self.debug = {n: float(x) for n, x in zip(names, f) if x not in ("", None)}
                 self.tel["balancing"] = bool(self.debug.get("bal", 0))
+                self.tel["control_mode"] = "self_righting" if self.tel.get("self_righting") else (
+                    "balancing" if self.tel["balancing"] else "idle")
+                return
+
+            if line.startswith("SR,"):
+                fields=line.split(",")[1:]
+                if len(fields)!=14:return
+                values=[float(value) for value in fields]
+                if not all(math.isfinite(value) for value in values):return
+                names=("ms","phase","reason","attempt","elapsed_s","pitch_deg","rate_dps","command_a",
+                       "velocity_l","velocity_r","travel_l","travel_r","minimum_pitch","robot_state")
+                status=dict(zip(names,values))
+                status["received_monotonic"]=time.monotonic()
+                self.tel["self_righting_status"]=status
+                self.tel["self_righting"]=int(status["robot_state"])==2
+                self.tel["balancing"]=int(status["robot_state"])!=0 # motor-active interlock, even with D disabled
+                self.tel["control_mode"]="self_righting" if self.tel["self_righting"] else (
+                    "balancing" if self.tel.get("balancing") else "idle")
+                self._publish({"type":"self_righting","status":status})
                 return
 
             if line.startswith("HM,"):

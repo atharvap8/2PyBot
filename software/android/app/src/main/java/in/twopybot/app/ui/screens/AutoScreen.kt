@@ -85,7 +85,7 @@ fun AutoScreen(vm: BotViewModel) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { if (r.danger) confirm = r else vm.autoTune(r.cmd) },
-                        enabled = !busy && (!r.needsBalancing || tel.balancing),
+                        enabled = !busy && !tel.selfRighting && (!r.needsBalancing || tel.balancing),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (r.danger) Red else Cyan,
                             contentColor = if (r.danger) androidx.compose.ui.graphics.Color.White else Ink)

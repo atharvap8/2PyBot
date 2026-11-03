@@ -3,6 +3,16 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.3.0 — Experimental front-bumper self-uprighting
+
+- Branch from owner-selected stable BLDC `ed91341` (`stable-bldc`). Preserve the
+  separate lifted-wheel work in a stash; it is not part of this experiment.
+- Local gamepad START at stationary +60 +/-10 degrees fires one bounded
+  current-mode recovery. SELECT/E-STOP aborts; upright START still arms balance.
+- Use slew-limited attitude current PD, then seed the stable balancer from actual
+  wheel velocity near upright. Keep normal balancing fall limits separate.
+- Add SELFRIGHT tuning, SR phase/reason telemetry and explicit app mode labels.
+
 ## 4.2.0 — Fixed input values and verified saves
 
 - Enforce raw TRIM=-1.2603 degrees and MAXSTR=4000 encoder counts/s in firmware,

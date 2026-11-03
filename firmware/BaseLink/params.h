@@ -108,6 +108,16 @@
   X(radxaTmo,  "RADXATMO",RADXA_TIMEOUT_MS,   50.0f, 5000.0f,"SAFETY",  "Radxa link freshness (ms)")    \
   X(joyTmo,    "JOYTMO",  JOY_TIMEOUT_MS_CFG,  50.0f,5000.0f,"SAFETY",  "pad link freshness (ms)")      \
   X(bootWait,  "BOOTWAIT",HOST_BOOT_WAIT,      0.0f,   1.0f,"SAFETY",  "wait for Radxa ACK before startup/arming") \
+  /* ---------- EXPERIMENTAL FRONT-BUMPER SELF-UPRIGHTING ---------- */                       \
+  X(srEnable,  "SREN",    1.0f,               0.0f,   1.0f,"SELFRIGHT","local START recovery enabled") \
+  X(srRest,    "SRREST",  60.0f,             45.0f,  65.0f,"SELFRIGHT","front rest control pitch (deg; +/-10 window)") \
+  X(srCurrent, "SRMAXMA", 2700.0f,          300.0f,MOTOR_CURRENT_MAX_MA,"SELFRIGHT","recovery mA per wheel; also limited by CURRENT") \
+  X(srKp,      "SRKP",    .07f,               .01f,   .2f,"SELFRIGHT","attitude current P (A/deg)") \
+  X(srKd,      "SRKD",    .025f,              .005f,  .1f,"SELFRIGHT","attitude current damping (A per deg/s)") \
+  X(srSlew,    "SRSLEW",  30.0f,              5.0f, 120.0f,"SELFRIGHT","recovery current slew (A/s)") \
+  X(srTimeout, "SRTIME",  2.0f,                .5f,   3.0f,"SELFRIGHT","total attempt timeout including settle (s)") \
+  X(srTravel,  "SRDIST",  .45f,                .1f,    .8f,"SELFRIGHT","max per-wheel displacement during attempt (m)") \
+  X(srSpeed,   "SRSPD",   1.2f,                .2f,   1.5f,"SELFRIGHT","max wheel speed during recovery only (m/s)") \
   /* ---------- IMU / SIGNS ---------- */                                                     \
   X(imuCutoff, "IMUCUT",  IMU_FILTER_CUTOFF_HZ,2.0f, 100.0f, "IMU",     "pitch filter cutoff (Hz)")     \
   X(mahonyKp,  "MAHKP",   MAHONY_KP,           0.0f,  20.0f, "IMU",     "Mahony Kp")                    \

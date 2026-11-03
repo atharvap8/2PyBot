@@ -23,6 +23,8 @@ public:
     void transmit(float dt);
     void setSpeeds(float leftCps, float rightCps);
     void setBalanceCommand(float leftCps, float rightCps, float acceleration, bool recovering, bool turning = false);
+    void setTorqueCurrents(float leftAmps, float rightAmps);
+    void prepareBalance(float measuredCommonVelocity);
     void setSpeed(float cps) { setSpeeds(cps, cps); }
     void enable();
     void disable();
@@ -56,6 +58,8 @@ private:
     bool enabled = false, currentLimited = false;
     float balanceAcceleration = 0;
     bool balanceControl = false, recoveryControl = false, turningControl = false;
+    bool torqueControl = false, zeroCommandPending = true;
+    float torqueL = 0, torqueR = 0;
     uint32_t lastDriveUs = 0, lastQueryMs = 0;
     void reportFaults(HubWheel& wheel);
 };

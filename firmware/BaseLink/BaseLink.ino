@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.2.0, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.3.0, experimental front-bumper self-uprighting
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -43,6 +43,7 @@
 #include "navigation_lease.h"
 #include "imu_sensor.h"
 #include "hub_drive.h"
+#include "self_righting.h"
 #include "bt_gamepad.h"    // EVOFOX One S DIRECT Bluetooth (replaces espnow_comm.h)
 #include "led_ring.h"      // WS2812 16-LED expression ring on GPIO 15
 #include "payload.h"       // servos GPIO 26/0 + torch MOSFET GPIO 2
@@ -53,7 +54,7 @@ IMUSensor imu;
 // ============================================================
 //  STATE
 // ============================================================
-enum RobotState { STATE_IDLE, STATE_BALANCING };
+enum RobotState { STATE_IDLE, STATE_BALANCING, STATE_SELF_RIGHTING };
 RobotState state       = STATE_IDLE;
 bool motorsRequested   = false;
 bool DEBUG_STREAM      = true;
@@ -78,6 +79,7 @@ float uOut = 0.0f;          // last acceleration command (m/s^2)
 float steerSteps = 0.0f;    // current differential (steps/s)
 float diffTarget = 0.0f;    // heading-hold encoder diff target
 hub_control::Steering yawControl;
+SelfRighting selfRight;
 
 // ---- telemetry instrumentation (read-only, no control effect) ----
 uint8_t  satV = 0, satA = 0;     // clamp hit this cycle: velocity cap / accel limit
@@ -214,10 +216,41 @@ void startGesture(const GStep* seq, uint8_t len, const char* name) {
 }
 void stopGesture() { gestSeq = nullptr; }
 
-void requestEnable() {
+bool selfRightControlsNeutral() {
+    const bool hostFresh = radxaLastRx && millis() - radxaLastRx < P.radxaTmo;
+    return fabsf(joyForward*P.joyFwdSc)<.10f && fabsf(joySteering*P.joyStrSc)<.10f &&
+           (!hostFresh || (fabsf(radxaFwd)<.10f && fabsf(radxaSteer)<.10f));
+}
+
+void requestEnable(bool localStart) {
     if (!startupGate.mayArm(P.bootWait > 0.5f)) {
         btgamepad_syncArmed(false);
         Serial.println("[MAIN] Startup is not ready; press START after calibration completes");
+        return;
+    }
+    if (state == STATE_SELF_RIGHTING) { Serial.println("[SR] Attempt already active; SELECT aborts"); return; }
+    if (localStart && AT.mode != AT_IDLE) {
+        btgamepad_syncArmed(false);Serial.println("[SR] Stop auto-tune before START");return;
+    }
+    if (localStart && state == STATE_IDLE && P.srEnable > .5f && fabsf(pitchF) >= P.armAngle) {
+        const SelfRighting::Settings settings{P.srRest,fminf(P.srCurrent,P.motorMa)*.001f,
+            P.srKp,P.srKd,P.srSlew,P.srTimeout,P.srTravel,P.srSpeed};
+        const bool available = btgamepad_connected() && imu.sampleFresh() &&
+            hub.linkOk(HUB_LINK_TIMEOUT_MS) && hub.modeOk() && !hub.faultBits() &&
+            selfRightControlsNeutral() && P.pitchSign == PITCH_FWD_SIGN && P.rateSign == RATE_FWD_SIGN;
+        if (!available || !selfRight.start(settings,pitchF,rateF,hub.wheelVelL(),hub.wheelVelR(),
+                hub.getPositionL()/P.countsPerM,hub.getPositionR()/P.countsPerM,millis())) {
+            motorsRequested=false;btgamepad_syncArmed(false);
+            Serial.printf("[SR] START refused: need stationary front rest %.0f +/-10 deg, neutral sticks, fresh IMU/pad and healthy motors (pitch %.2f)\n",P.srRest,pitchF);
+            return;
+        }
+        resetController();autoClimb.select(AutoClimb::FORCE_NORMAL);stiffHold=false;
+        radxaLastRx=0;radxaFwd=radxaSteer=cmdFwd=cmdSteer=0;
+        motorsRequested=true;statusErrorLatched=false;statusStopped=false;
+        hub.enable();hub.setTorqueCurrents(0,0);state=STATE_SELF_RIGHTING;
+        updateStatusLed();
+        Serial.printf("[SR] START attempt %lu: front %.2f deg, max %.2f A per wheel, %.2f s; SELECT aborts\n",
+            (unsigned long)selfRight.attempt,pitchF,settings.currentAmps,settings.timeout);
         return;
     }
     motorsRequested = true;
@@ -228,6 +261,12 @@ void requestEnable() {
 }
 
 void requestDisable(const char* why) {
+    const bool wasSelfRighting = state == STATE_SELF_RIGHTING;
+    if (selfRight.active()) selfRight.abort(SelfRighting::OPERATOR);
+    if (wasSelfRighting)
+        Serial.printf("[SR] ABORT attempt %lu: %s; pitch %.2f rate %.1f travel %.3f/%.3f m\n",
+            (unsigned long)selfRight.attempt,SelfRighting::reasonName(selfRight.reason),
+            pitchF,rateF,selfRight.travelL,selfRight.travelR);
     if (!strcmp(why,"FELL") || !strcmp(why,"RATE SPIKE") ||
         !strncmp(why,"MOTOR LINK/MODE/FAULT",21) || !strncmp(why,"CONTROL LOOP OVERRUN",20))
         statusErrorLatched = true;
@@ -238,7 +277,7 @@ void requestDisable(const char* why) {
     // disable (FELL / RATE SPIKE) left the pad still believing it was armed,
     // so the next START press produced no edge and appeared to do nothing.
     btgamepad_syncArmed(false);
-    if (state == STATE_BALANCING || hub.isEnabled()) {
+    if (state != STATE_IDLE || hub.isEnabled()) {
         hub.disable();
         state = STATE_IDLE;
     }
@@ -276,6 +315,7 @@ void handleLine(char* line) {
     if (!strcmp(line, "BR,0")) {
         hostBootReady = false;
         startupGate.acknowledge(false);
+        if (selfRight.active()) selfRight.abort(SelfRighting::HOST_LOST);
         if (hardwareReady) requestDisable("Radxa boot wait");
         else motorsRequested = false;
         Serial.println("BR?,0");
@@ -289,6 +329,16 @@ void handleLine(char* line) {
         if (!strcmp(line, "X") || !strcmp(line, "x")) { motorsRequested = false; return; }
         Serial.println("[BOOT] Startup on hold/in progress; only BR and P? are accepted");
         return;
+    }
+
+    if (state == STATE_SELF_RIGHTING) {
+        // A recovery owns motor/current/controller settings until handoff or
+        // stop. Keep discovery, E-STOP, host heartbeat and camera usable.
+        const bool safe = !strcasecmp(line,"X") || !strcasecmp(line,"P?") ||
+            !strcasecmp(line,"S") || !strcasecmp(line,"L") || !strcasecmp(line,"N") ||
+            !strcasecmp(line,"F") || !strncmp(line,"V,",2) || !strncmp(line,"TG,",3) ||
+            !strncmp(line,"B=",2) || !strncmp(line,"P=",2) || !strncmp(line,"Z=",2);
+        if (!safe) { Serial.println("PE,self-uprighting active; SELECT or X aborts"); return; }
     }
 
     if(startupGate.maintenance && !strncmp(line,"AT,",3) && strcmp(line,"AT,stop") && strcmp(line,"AT,?")) {
@@ -403,7 +453,7 @@ void handleLine(char* line) {
     }
 
     switch (cmd) {
-        case 'E': requestEnable(); break;
+        case 'E': requestEnable(false); break;
         case 'X': requestDisable("e-stop"); break;
         case 'C':
             requestDisable("gyro cal");
@@ -656,7 +706,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.2.0 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.3.0 — experimental SELF-UPRIGHTING");
     Serial.println("==================================================");
 
     params_begin();
@@ -751,7 +801,8 @@ void loop() {
     btgamepad_update();   // fills joyForward/joySteering/joyEnable (same names as before)
 
     // Gamepad expression buttons -> existing gesture engine (edge-detected in bt_gamepad.h)
-    switch (btgamepad_takeGesture()) {
+    const uint8_t gestureRequest=btgamepad_takeGesture();
+    switch (state == STATE_SELF_RIGHTING ? 0 : gestureRequest) {
         case 1: startGesture(GEST_YES,   sizeof(GEST_YES)/sizeof(GStep),   "nod YES"); break;
         case 2: startGesture(GEST_NO,    sizeof(GEST_NO)/sizeof(GStep),    "nod NO");  break;
         case 3: startGesture(GEST_SPIN,  sizeof(GEST_SPIN)/sizeof(GStep),  "spin");    break;
@@ -797,7 +848,7 @@ void loop() {
     // joyEnable boots at 0, so the old "falling edge" test could never fire
     // before START had been pressed once -- SELECT was a no-op from boot.
     int8_t enEv = btgamepad_takeEnableEvent();
-    if (enEv > 0) requestEnable();
+    if (enEv > 0) requestEnable(true);
     if (enEv < 0) requestDisable("joystick e-stop");
 
     // Drive-authority arbitration: Radxa fresh > joystick fresh > zero
@@ -864,7 +915,38 @@ void loop() {
             leds_event(LED_EV_ARM);
             Serial.println("[MAIN] -> BALANCING");
         }
-    } else { // BALANCING
+    } else if (state == STATE_SELF_RIGHTING) {
+        SelfRighting::Reason failure=SelfRighting::NONE;
+        if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits()) failure=SelfRighting::MOTOR_FAULT;
+        else if (elapsed>20000) failure=SelfRighting::INVALID_SAMPLE;
+        else if (!btgamepad_connected() || !joyFresh) failure=SelfRighting::PAD_LOST;
+        else if (!imu.sampleFresh()) failure=SelfRighting::IMU_STALE;
+        else if (!selfRightControlsNeutral()) failure=SelfRighting::STICK_MOVED;
+        else if (fabsf(rateF)>P.maxRate) failure=SelfRighting::RATE_LIMIT;
+        else if (!startupGate.mayArm(P.bootWait>.5f)) failure=SelfRighting::HOST_LOST;
+        if (failure!=SelfRighting::NONE) selfRight.abort(failure);
+        const SelfRighting::Phase previous=selfRight.phase;
+        selfRight.update(pitchF,rateF,hub.wheelVelL(),hub.wheelVelR(),
+            hub.getPositionL()/P.countsPerM,hub.getPositionR()/P.countsPerM,dt,millis());
+        if (selfRight.phase==SelfRighting::ABORTED) {
+            statusErrorLatched=true;requestDisable("self-righting aborted");
+        } else if (selfRight.phase==SelfRighting::HANDED_OFF) {
+            // Seed virtual wheel velocity from feedback rather than demanding
+            // zero speed at the end of the rise. Re-latch position and heading.
+            const float commonVelocity=.5f*(hub.wheelVelL()+hub.wheelVelR());
+            resetController();vCmd=commonVelocity;xRef=posM+velF*P.brakeLook;
+            hub.prepareBalance(commonVelocity);state=STATE_BALANCING;
+            cmdFwd=cmdSteer=0;radxaLastRx=0;radxaFwd=radxaSteer=0;
+            runController(dt);leds_event(LED_EV_ARM);
+            Serial.printf("[SR] HANDOFF attempt %lu: pitch %.2f rate %.1f v %.3f\n",
+                (unsigned long)selfRight.attempt,pitchF,rateF,commonVelocity);
+        } else {
+            if (previous!=selfRight.phase) Serial.printf("[SR] phase %u pitch %.2f rate %.1f\n",
+                (unsigned)selfRight.phase,pitchF,rateF);
+            hub.setTorqueCurrents(selfRight.currentAmps,selfRight.currentAmps);
+            cmdFwd=cmdSteer=0;
+        }
+    } else { // BALANCING: original fall limit remains separate from recovery
         if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000) {
             static char reason[160];
             const auto& l = hub.left().fb(); const auto& r = hub.right().fb();
@@ -937,7 +1019,7 @@ void loop() {
                        (unsigned long)nowMs, pitchF, rateF, uOut, velF,posM-(autoClimb.blend>=.5f?climbXRef:xRef),
                        vCmd * P.stepsPerM, appliedSteerSteps, satV, satA,
                       (unsigned long)loopMaxUs, (unsigned)joySpeedHigh,
-                      (unsigned)(state == STATE_BALANCING), cmdFwd, cmdSteer,
+                       (unsigned)(state != STATE_IDLE), cmdFwd, cmdSteer,
                       TERR.accelMag, TERR.rough, TERR.soften,
                       (unsigned)TERR.state, (unsigned long)TERR.drops,
                        0.0f,0.0f,0u,
@@ -963,5 +1045,13 @@ void loop() {
             (unsigned long)nowMs,hub.currentCmdL(),hub.currentCmdR(),l.currentA,r.currentA,
             l.rpm,r.rpm,l.tempC,r.tempC,l.fault,r.fault,(unsigned)hub.saturated(),
             (unsigned)hub.linkOk(HUB_LINK_TIMEOUT_MS),(unsigned)hub.modeOk());
+    }
+    static uint32_t lastSelfRightMs=0;
+    if (nowMs-lastSelfRightMs>=50 && Serial.availableForWrite()>=224) {
+        lastSelfRightMs=nowMs;
+        Serial.printf("SR,%lu,%u,%u,%lu,%.3f,%.2f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%u\n",
+            (unsigned long)nowMs,(unsigned)selfRight.phase,(unsigned)selfRight.reason,
+            (unsigned long)selfRight.attempt,selfRight.elapsed,pitchF,rateF,selfRight.currentAmps,
+            hub.wheelVelL(),hub.wheelVelR(),selfRight.travelL,selfRight.travelR,selfRight.minimumPitch,(unsigned)state);
     }
 }

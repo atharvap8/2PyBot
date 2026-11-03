@@ -48,7 +48,7 @@ fun DrivingScreen(vm: BotViewModel) {
     val numbers: @Composable ColumnScope.() -> Unit = {
         Text("LIVE INSTRUMENTS",color=TextDim,fontSize=9.sp,letterSpacing=1.sp)
         Spacer(Modifier.height(8.dp))
-        Text(if(!connected || tel.stale) "NO LINK" else if(tel.balancing) "BALANCING" else "IDLE",
+        Text(if(!connected || tel.stale) "NO LINK" else if(tel.selfRighting) "SELF-UPRIGHTING" else if(tel.balancing) "BALANCING" else "IDLE",
             color=if(!connected || tel.stale) Amber else if(tel.balancing) Green else TextDim,fontSize=11.sp)
         Text("Control pitch %.1f°".format(controlPitch),color=TextHi,fontSize=12.sp)
         Text("Raw IMU %.2f°".format(tel.pitch),color=TextDim,fontSize=10.sp)
@@ -89,6 +89,7 @@ fun DrivingScreen(vm: BotViewModel) {
     val motion=when {
         !connected || tel.stale -> "OFFLINE"
         !tel.startupReady -> tel.startupState.replace('_',' ')
+        tel.selfRighting -> "SELF-UPRIGHTING"
         tel.v>.025f -> "FORWARD"
         tel.v<-.025f -> "REVERSE"
         tel.balancing -> "HOLDING"

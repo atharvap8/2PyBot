@@ -83,6 +83,7 @@ fun StatusStrip(tel: Telemetry, connected: Boolean, unsaved: Boolean) {
                  tel.startupState == "CALIBRATING" -> "IMU CALIBRATION"
                  tel.startupState == "ERROR" -> "STARTUP ERROR"
                  tel.stale  -> "NO ESP32"
+                tel.selfRighting -> "SELF-UPRIGHTING"
                 tel.balancing -> "BALANCING"
                 else -> "IDLE"
             },

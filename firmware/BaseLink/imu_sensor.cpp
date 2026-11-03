@@ -147,6 +147,7 @@ void IMUSensor::update(float dt) {
     // Abort if I2C fails; retain previous angle to avoid a control spike.
     if (_sensor.Get_X_Axes(&accelRaw) != ISM6HG256X_OK) return;
     if (_sensor.Get_G_Axes(&gyroRaw)  != ISM6HG256X_OK) return;
+    _lastSampleMs = millis();
 
     // Convert raw milligravity and milli-dps integers to SI-scaled floats.
     _ax = accelRaw.x / 1000.0f;

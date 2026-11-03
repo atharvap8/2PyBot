@@ -19,6 +19,7 @@ The current [Radxa console](../../software/radxa/console/README.md) uses 460800 
 | `O` | 50 Hz | Encoder odometry and IMU orientation; emitted in both states |
 | `D` | Nominal 50 Hz | Controller and terrain debug; enabled at boot, toggled by `L` |
 | `HM` | 10 Hz | Hub currents, raw RPM, idle temperatures, faults and link/mode state |
+| `SR` | Up to 20 Hz | Self-uprighting phase, abort reason and attempt diagnostics |
 | `[TAG] ...` | On events | Boot, state, gamepad, driver, and tuning logs |
 | `A,...` | During auto-tune | Progress, completion, abort, or status |
 
@@ -45,6 +46,31 @@ to robot forward. Temperatures are last idle-query values (-1 until known);
 there are no temperature queries during armed DRIVE polling. Faults are bit
 masks. Link/mode and saturation fields are booleans. The host stores these in
 `telemetry.hub`, separate from the append-compatible `D` record.
+
+### Self-uprighting experiment (4.3.0)
+
+```text
+SR,ms,phase,reason,attempt,elapsedS,pitchDeg,rateDps,recoveryAmps,vL,vR,travelL,travelR,minPitch,robotState
+```
+
+`PR,SELFRIGHT,1` announces support. Phases: 0 idle, 1 settle, 2 lift,
+3 capture, 4 handoff to balance, 5 aborted. Reasons and limits are documented in
+[self-uprighting](../../docs/SELF_UPRIGHTING.md). Results remain visible after the
+attempt; current/elapsed/travel are recovery values, HM remains actual motor data.
+`robotState` is live: 0 idle, 1 balancing, 2 self-uprighting. It updates host motion
+interlocks even when D debug has been disabled; the retained phase is not a live
+motor-active flag.
+
+On this branch the legacy D `bal` flag is **motor-active** (balance OR recovery),
+so existing host firmware/deployment/calibration interlocks also block recovery.
+The host additionally exposes `telemetry.self_righting`, `control_mode` and
+`self_righting_status`; the app labels the mode SELF-UPRIGHTING. This flag does
+not grant autonomy: native navigation remains available only in STATE_BALANCING.
+
+Only a fresh **local gamepad START** can initiate recovery. Serial E retains normal
+balance arming, and remote start is not exposed. During recovery, only stop,
+read-only diagnostics, host heartbeat/drive input and camera/payload commands are
+accepted; changing drive inputs aborts. SELECT/X aborts immediately.
 
 ### Debug
 
@@ -154,7 +180,8 @@ Split a parameter row at its first six commas; descriptions may contain commas. 
 | LED | 3 |
 | PAYLOAD | 17 |
 | TERRAIN | 8 |
-| **Total** | **120** |
+| SELFRIGHT (4.3.0 branch) | 9 |
+| **Total (4.3.0 branch)** | **129** |
 
 `params.h` is the complete key/bounds reference. The current Radxa console builds parameter rows from this metadata. It has tabs for nine parameter groups; TERRAIN parameters are exposed by the API but do not yet have a tab. The legacy desktop GUI does not implement this protocol.
 

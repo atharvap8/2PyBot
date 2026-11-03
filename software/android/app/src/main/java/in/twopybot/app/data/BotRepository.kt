@@ -33,6 +33,7 @@ data class Telemetry(
     @SerialName("v_ms") val v: Float = 0f,
     val heading: Float = 0f,
     val armed: Boolean = false, val balancing: Boolean = false,
+    @SerialName("self_righting") val selfRighting: Boolean = false,
     @SerialName("rx_hz") val rxHz: Float = 0f,
     val stale: Boolean = true,
     @SerialName("startup_state") val startupState: String = "",

@@ -93,7 +93,9 @@ Temperature QUERY frames are sent only while disabled. Armed polling uses
 DRIVE replies continuously; temperature readings therefore represent the last
 idle poll. Both motors must confirm current mode and valid position before
 normal balance arming. Mode loss, motor faults, link loss or a control interval
-over 20 ms disarms. There is no automatic self-righting/rearming path.
+over 20 ms disarms. The stable baseline has no automatic self-righting/rearming
+path. The separate [4.3.0 self-uprighting experiment](SELF_UPRIGHTING.md) adds a
+local-START-only recovery state from the front bumper; it never retries itself.
 
 `P?` output is incremental and TX-buffer-aware. It no longer holds the 200 Hz
 control loop while printing the complete metadata table. NVS writes, reloads,

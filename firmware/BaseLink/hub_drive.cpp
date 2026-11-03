@@ -62,6 +62,7 @@ bool HubDrive::linkOk(uint32_t ageMs) const {
            millis() - rightPort.fb().rxMs < ageMs;
 }
 void HubDrive::setSpeeds(float leftCps, float rightCps) {
+    torqueControl = false;
     leftWheel.target = leftCps / P.countsPerM; rightWheel.target = rightCps / P.countsPerM;
     balanceControl = recoveryControl = turningControl = false;
 }
@@ -71,6 +72,16 @@ void HubDrive::setBalanceCommand(float leftCps, float rightCps, float accelerati
     balanceControl = true;
     recoveryControl = recovering;
     turningControl = turning;
+}
+void HubDrive::setTorqueCurrents(float leftAmps, float rightAmps) {
+    torqueControl = true;
+    balanceControl = recoveryControl = turningControl = false;
+    torqueL = std::isfinite(leftAmps) ? leftAmps : 0;
+    torqueR = std::isfinite(rightAmps) ? rightAmps : 0;
+}
+void HubDrive::prepareBalance(float measuredCommonVelocity) {
+    torqueControl = false;
+    controller.reset(measuredCommonVelocity);
 }
 void HubDrive::enable() {
     if (!enabled) {
@@ -82,6 +93,7 @@ void HubDrive::disable() {
     enabled = false; currentLimited = false; controller.reset();
     leftWheel.target = rightWheel.target = leftWheel.current = rightWheel.current = 0;
     balanceControl = recoveryControl = turningControl = false; balanceAcceleration = 0;
+    torqueControl = false; torqueL = torqueR = 0; zeroCommandPending = true;
     lastDriveUs = 0;
 }
 
@@ -110,7 +122,7 @@ void HubDrive::transmit(float dt) {
         }
         return;
     }
-    if (!enabled && millis() - lastQueryMs >= 500) {
+    if (!enabled && !zeroCommandPending && millis() - lastQueryMs >= 500) {
         // Temperature only while disarmed: QUERY replies carry no pos16.
         leftPort.sendQuery(); rightPort.sendQuery(); lastQueryMs = millis(); return;
     }
@@ -118,7 +130,12 @@ void HubDrive::transmit(float dt) {
     if (lastDriveUs) dt = (now - lastDriveUs) * 1e-6f;
     lastDriveUs = now;
     hub_control::Currents currents;
-    if (enabled) {
+    if (enabled && torqueControl) {
+        const float limit = P.motorMa * .001f;
+        currents.left = hub_control::clip(torqueL,-limit,limit);
+        currents.right = hub_control::clip(torqueR,-limit,limit);
+        currents.limited = std::fabs(torqueL)>limit || std::fabs(torqueR)>limit;
+    } else if (enabled) {
         const hub_control::Settings settings{P.hubKp, P.hubKi, P.hubIntLim, P.hubKff, P.hubMass, P.wheelR, M0601_KT,
             P.hubYawKp, P.hubYawKi, P.hubYawLim, P.hubYawSlew, P.motorMa * .001f};
         currents = controller.update(leftWheel.target, rightWheel.target, wheelVelL(), wheelVelR(), dt, settings,
@@ -128,6 +145,7 @@ void HubDrive::transmit(float dt) {
     leftWheel.current = currents.left; rightWheel.current = currents.right;
     leftPort.sendDriveRaw(m0601::ampsToRaw(currents.left * leftWheel.direction * P.curSign));
     rightPort.sendDriveRaw(m0601::ampsToRaw(currents.right * rightWheel.direction * P.curSign));
+    zeroCommandPending = false;
 }
 
 void HubDrive::reportFaults(HubWheel& w) {

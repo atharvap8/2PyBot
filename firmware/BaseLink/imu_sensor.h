@@ -49,6 +49,9 @@ public:
     float getYaw()       const { return _yaw;        }  // Compass heading (degrees).
     float getPitchRate() const { return _pitchRate;  }  // Pitch angular velocity (°/s).
     float getAccelAngle()const { return _accelAngle; }  // Raw accelerometer tilt estimate.
+    bool sampleFresh(uint32_t maxAgeMs = 30) const {
+        return _lastSampleMs != 0 && millis() - _lastSampleMs <= maxAgeMs;
+    }
 
     // --- Raw scaled sensor accessors ---
     float getAx() const { return _ax; }  // Accelerometer X (g)
@@ -86,6 +89,7 @@ private:
     float _filtStage2;
     float _filtAlpha;
     bool  _filterSeeded;
+    uint32_t _lastSampleMs = 0;
 
     // Returns the float value of the requested axis from a raw sensor struct.
     static float axisValue(const ISM6HG256X_Axes_t& d, char axis);
