@@ -91,7 +91,13 @@ def managed_pull(args, index, config, real_git, run_dir, lock):
     thread.start()
     code=130
     try:
-        code = subprocess.call([real_git, *args[:index + 1], "--ff-only", *args[index + 1:]])
+        pull_args=list(args[index + 1:])
+        # A managed branch can be selected from an explicit fetched commit in
+        # a single-branch clone. Do not depend on upstream/fetch Git settings.
+        simple_flags={'--ff-only','--no-rebase','-q','--quiet','-v','--verbose'}
+        if config.get('branch') and all(arg in simple_flags for arg in pull_args):
+            pull_args += ['origin',config['branch']]
+        code = subprocess.call([real_git, *args[:index + 1], "--ff-only", *pull_args])
     except KeyboardInterrupt:
         code=130
     finally:

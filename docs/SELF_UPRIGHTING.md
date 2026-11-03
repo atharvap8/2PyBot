@@ -69,45 +69,24 @@ false. Normal MAXTILT=55 remains in force after the handoff.
 
 ## Deploy this branch on the bot
 
-Use the existing managed checkout with the bot stopped by SELECT and no update
-currently running. The deployment manager pins a branch in its configuration;
-switch both the checkout and that branch setting. Wait for the commit's **Bot
-deployment bundle** GitHub build to succeed before deploying.
+With the bot stopped by SELECT, run this **one line** from its repository:
 
 ```sh
-ssh radxa@10.42.0.1
-bot stop
-sudo systemctl stop 2pybot-deploy.timer 2pybot-deploy.path
-cd /home/radxa/projects/2PyBot
-git fetch origin
-git switch hardware/bldc-self-uprighting
-git merge --ff-only origin/hardware/bldc-self-uprighting
-sudo python3 - <<'PY'
-import json
-from pathlib import Path
-p = Path('/etc/2pybot-deploy.json')
-c = json.loads(p.read_text())
-c['branch'] = 'hardware/bldc-self-uprighting'
-t = p.with_name(p.name + '.branch-new')
-t.write_text(json.dumps(c, indent=2) + '\n')
-t.chmod(p.stat().st_mode & 0o777)
-t.replace(p)
-PY
-bot deploy
-sudo systemctl start 2pybot-deploy.path 2pybot-deploy.timer
-bot deploy-status --watch
-bot firmware-status
-bot params get SELFRIGHT
-bot params get SRREST
+git fetch origin hardware/bldc-self-uprighting && git show FETCH_HEAD:scripts/radxa/deploy_branch.py | sudo python3 -
 ```
 
-`git switch` creates the local tracking branch on first use and reuses it later;
-the fast-forward merge updates an existing local branch without discarding work.
-The configuration edit preserves the other deployment settings. Queuing with
-`bot deploy` before restarting the monitors avoids racing their operation lock.
-The timer resumes the queued deployment, including matching host and MCU flashing.
-After success, confirm **installed.version=4.3.0**, **SELFRIGHT=1**, **SRREST=60**.
-Later updates on this selected branch use `bot update` normally.
+This works even when the checkout fetches only the old branch. It fetches an
+explicit branch ref, selects/fast-forwards the local branch, updates only the
+managed deployment's branch setting, queues deployment and follows the matching
+commit through host installation and MCU flashing. Existing local edits or an
+active update cause a clear refusal without discarding work. The helper waits if
+the matching CI bundle is still being built, and prints the installed firmware
+version and SELFRIGHT readback at completion. Old unrelated "success" status is
+not accepted. No manual merges or JSON editing are needed.
+
+After success, expect **4.3.0**, **SELFRIGHT=1**, **SRREST=60**. Later updates use
+`bot update`; the managed Git wrapper explicitly fetches the configured branch
+without relying on a pre-existing upstream or broad fetch configuration.
 
 ## Readback and the first manual attempt
 
