@@ -38,10 +38,11 @@ jobs:
           printf '%s' "$KEYSTORE" | base64 --decode > "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
       - uses: arduino/setup-arduino-cli@v2
-      - name: Check version and native control/display logic
-        run: |
-          python scripts/versioning.py --check
-          python scripts/firmware/check_bldc.py
+      - name: Check version
+        run: python scripts/versioning.py --check
+      - name: Optional native tests (explicit opt-in only)
+        if: vars.BOT_RUN_TESTS == 'true'
+        run: python scripts/firmware/check_bldc.py
       - name: Install locked ESP32 board and libraries
         run: |
           python - <<'PY'

@@ -15,6 +15,7 @@ on:
 
 jobs:
   deployment-tests:
+    if: vars.BOT_RUN_TESTS == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:

@@ -51,6 +51,10 @@ fun TuneScreen(vm: BotViewModel) {
     val params by vm.repo.params.collectAsStateWithLifecycle()
     val derived by vm.repo.derived.collectAsStateWithLifecycle()
     val unsaved by vm.repo.unsaved.collectAsStateWithLifecycle()
+    val tel by vm.repo.telemetry.collectAsStateWithLifecycle()
+    val busy by vm.parameterActionBusy.collectAsStateWithLifecycle()
+    val pending by vm.pendingParamWrites.collectAsStateWithLifecycle()
+    val verifiedSave = derived["PARAMACK"]==2f
 
     val groups = remember(params) { params.map { it.group }.distinct() }
     var sel by remember(groups) { mutableStateOf(groups.firstOrNull() ?: "") }
@@ -59,6 +63,9 @@ fun TuneScreen(vm: BotViewModel) {
         (query.isBlank() || "${it.key} ${it.desc} ${it.group}".contains(query,ignoreCase=true)) }
 
     Column(Modifier.fillMaxSize()) {
+        if (!verifiedSave) Text("Controller firmware is old: deploy 4.2.0 on the bot. APK update alone does not change TRIM/MAXSTR or verify saves.",
+            color=Amber,fontSize=12.sp,modifier=Modifier.padding(12.dp))
+        else Text("4.2.0 fixed profile · TRIM −1.2603° · MAXSTR 4000 counts/s",color=Cyan,fontSize=11.sp,modifier=Modifier.padding(12.dp))
 
         if (params.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
@@ -131,14 +138,15 @@ fun TuneScreen(vm: BotViewModel) {
             Row(Modifier.fillMaxWidth().padding(10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { vm.paramAction("save") }, modifier = Modifier.weight(1.4f),
+                    enabled=verifiedSave && !tel.balancing && !tel.stale && !busy && pending==0,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (unsaved) Green else Line,
                         contentColor = if (unsaved) Ink else TextDim)) {
-                    Text(if (unsaved) "SAVE TO ROBOT" else "saved", fontSize = 13.sp)
+                    Text(if (busy) "WAIT FOR ESP…" else if(pending>0) "WRITING…" else "SAVE TO ROBOT", fontSize = 13.sp)
                 }
-                OutlinedButton(onClick = { vm.paramAction("load") }, modifier = Modifier.weight(1f),
+                OutlinedButton(onClick = { vm.paramAction("load") }, modifier = Modifier.weight(1f),enabled=!busy && pending==0 && !tel.balancing,
                     contentPadding = PaddingValues(4.dp)) { Text("Reload", fontSize = 12.sp) }
-                OutlinedButton(onClick = { vm.paramAction("defaults") }, modifier = Modifier.weight(1f),
+                OutlinedButton(onClick = { vm.paramAction("defaults") }, modifier = Modifier.weight(1f),enabled=!busy && pending==0 && !tel.balancing,
                     contentPadding = PaddingValues(4.dp)) { Text("Defaults", fontSize = 12.sp) }
             }
         }

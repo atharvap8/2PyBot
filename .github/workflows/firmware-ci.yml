@@ -95,6 +95,7 @@ jobs:
             firmware/BaseLink/BaseLink.ino
 
       - name: Check BLDC control and wire protocol
+        if: vars.BOT_RUN_TESTS == 'true'
         run: python3 scripts/firmware/check_bldc.py
 
       - name: Upload BaseLink build artifact

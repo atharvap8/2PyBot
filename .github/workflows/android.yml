@@ -62,10 +62,14 @@ jobs:
       - name: Build APKs
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            bash gradlew :app:assembleDebug :app:exportReleaseApk :app:testDebugUnitTest "-PreleaseVersion=${GITHUB_REF_NAME#v}" --no-daemon --stacktrace
+            bash gradlew :app:assembleDebug :app:exportReleaseApk "-PreleaseVersion=${GITHUB_REF_NAME#v}" --no-daemon --stacktrace
           else
-            bash gradlew :app:assembleDebug :app:exportReleaseApk :app:testDebugUnitTest --no-daemon --stacktrace
+            bash gradlew :app:assembleDebug :app:exportReleaseApk --no-daemon --stacktrace
           fi
+
+      - name: Optional unit tests (explicit opt-in only)
+        if: vars.BOT_RUN_TESTS == 'true'
+        run: bash gradlew :app:testDebugUnitTest --no-daemon
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

@@ -43,7 +43,7 @@
   X(k3,        "K3",      LQR_K3,           -120.0f,   0.0f, "BALANCE", "pitch gain (per rad)")         \
   X(k4,        "K4",      LQR_K4,            -20.0f,   0.0f, "BALANCE", "pitch-rate damping (per rad/s)")\
   X(k5,        "K5",      LQR_K5,            -30.0f,   0.0f, "BALANCE", "position integral (per m*s)")  \
-  X(pitchTrim, "TRIM",    PITCH_TRIM_DEG,     -8.0f,   8.0f, "BALANCE", "static pitch trim (deg)")      \
+  X(pitchTrim, "TRIM",    PITCH_TRIM_DEG, PITCH_TRIM_DEG,PITCH_TRIM_DEG,"BALANCE","fixed raw trim: -1.2603 deg") \
   X(zIntLim,   "ZLIM",    Z_INT_LIM,           0.05f, 10.0f, "BALANCE", "integral anti-windup (m*s)")   \
   X(exClamp,   "EXCLAMP", EX_CLAMP_M,          0.02f,  1.0f, "BALANCE", "max position error fed to LQR (m)") \
   X(vsatBleed, "VSATBLD", VSAT_BLEED,          0.0f,  20.0f, "BALANCE", "hold-point bleed when saturated (1/s)") \
@@ -91,7 +91,7 @@
   X(expoSteer, "EXPOSTR", EXPO_STEER,          0.0f,   1.0f, "DRIVE",   "steer expo (0 lin, 1 cubic)")  \
   X(expoDrive, "EXPODRV", EXPO_DRIVE,          0.0f,   1.0f, "DRIVE",   "drive expo")                   \
   /* ---------- YAW / STEERING ---------- */                                                  \
-  X(maxSteerSt,"MAXSTR",  MAX_STEER_STEPS,   200.0f, 9000.0f,"YAW",     "max differential (counts/s)")  \
+  X(maxSteerSt,"MAXSTR",  MAX_STEER_STEPS,MAX_STEER_STEPS,MAX_STEER_STEPS,"YAW","fixed differential authority: 4000 counts/s") \
   X(steerSlew, "STRSLEW", STEER_SLEW,          0.0f,40000.0f,"YAW",     "steer slew; 0 = direct (counts/s^2)")      \
   X(steerDb,   "STRDB",   STEER_DEADBAND,      0.0f,   0.3f, "YAW",     "steer deadband")               \
   X(yawKp,     "YAWKP",   YAW_HOLD_KP,         0.0f,  20.0f, "YAW",     "heading hold P (steps/s per count)")\

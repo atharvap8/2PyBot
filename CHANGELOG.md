@@ -3,6 +3,19 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.2.0 — Fixed input values and verified saves
+
+- Enforce raw TRIM=-1.2603 degrees and MAXSTR=4000 encoder counts/s in firmware,
+  including NVS loading, recomputation, legacy tuning and update snapshot replay.
+- Report NVS success only after successful writes and storage readback. The host
+  waits for MCU acknowledgements; disconnected/busy/rejected saves return errors.
+- Preserve unsaved state across parameter dumps and serialize writes before save.
+  The app waits for verified persistence and warns when controller firmware is old.
+- Remove stored yaw integral during turn braking/heading hold, and clear it on
+  commanded turn reversal, avoiding an old opposing torque on direction changes.
+- Retain two-second orientation hold, persistent video, current-only 18 V control,
+  direct steering and the owner's existing additions. Tests are opt-in only.
+
 ## 4.1.1 — Direct steering and persistent video
 
 - Set the confirmed raw neutral TRIM to -1.4 degrees with a targeted input-profile

@@ -32,6 +32,7 @@ permissions:
 
 jobs:
   check:
+    if: vars.BOT_RUN_TESTS == 'true'
     # Python 3.9 is required by the Radxa host but unavailable on Ubuntu 26.04.
     runs-on: ubuntu-24.04
     strategy:

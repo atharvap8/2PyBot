@@ -62,6 +62,9 @@ class SerialLink:
         self._pending = collections.deque()   # lines to send
         self._subs = set()                    # asyncio.Queue for websockets
         self._write_lock=threading.Lock()
+        self._parameter_lock=None
+        self._parameter_request=None
+        self._dirty_params=set()
 
     # ---------------- lifecycle ----------------
     def open(self):
@@ -109,6 +112,8 @@ class SerialLink:
         return False
 
     async def begin_firmware_maintenance(self):
+        if self._parameter_lock is not None and self._parameter_lock.locked():
+            raise ValueError("Wait for the current settings operation to finish")
         if not self.connected or self.tel.get("stale",True) or self.tel.get("balancing"):
             raise ValueError("Stop with local SELECT and wait for fresh IDLE telemetry")
         if self.derived.get("FLASHLOCK")!=1:
@@ -153,11 +158,86 @@ class SerialLink:
         self.send("P?")
 
     def set_param(self, key: str, value: float):
-        p = self.params.get(key.upper())
+        key=key.upper()
+        p = self.params.get(key)
+        if not p:return False,"Unknown parameter: "+key
+        if not math.isfinite(value):return False,"Parameter value must be finite"
         if p and not (p.lo <= value <= p.hi):
             return False, f"{key} out of range [{p.lo:g}, {p.hi:g}]"
-        self.send(f"P,{key},{value:.6g}")
+        if not self.send(f"P,{key},{value:.6g}"):return False,"Controller serial writer is unavailable"
         return True, "sent"
+
+    def _parameter_mutex(self):
+        if self._parameter_lock is None:self._parameter_lock=asyncio.Lock()
+        return self._parameter_lock
+
+    def _require_parameter_link(self,stopped=False):
+        if not self.connected or self.tel.get("stale",True) or self.maintenance or self._serial_paused:
+            raise ValueError("Fresh controller connection is required; firmware maintenance must be finished")
+        if stopped and self.tel.get("balancing"):
+            raise ValueError("Press local SELECT before saving/loading controller settings")
+
+    async def _complete_parameter_dump(self):
+        deadline=time.monotonic()+10;retry=0
+        while not self.dump_complete:
+            if not self.connected or self.maintenance or self._serial_paused:
+                raise ValueError("Controller disconnected during settings readback")
+            if time.monotonic()>deadline:raise ValueError("Complete controller settings readback timed out")
+            if time.monotonic()-retry>2:
+                if not self.send("P?"):raise ValueError("Controller serial writer is unavailable")
+                retry=time.monotonic()
+            await asyncio.sleep(.02)
+
+    def _parameter_reply(self,line):
+        request=self._parameter_request
+        if request is None or request["future"].done():return
+        future=request["future"]
+        if line.startswith("PE,"):
+            future.set_exception(ValueError(line[3:]));return
+        if request["kind"]=="set" and line.startswith("P!,"):
+            _,key,value=line.split(",",2)
+            if key==request["key"]:
+                actual=float(value)
+                if abs(actual-request["value"])>max(.0001,abs(request["value"])*.00001):
+                    future.set_exception(ValueError("Controller acknowledged a different value"))
+                else:future.set_result(actual)
+        elif request["kind"] in {"save","load","defaults"}:
+            prefix={"save":"PS!,saved","load":"PL!,","defaults":"PD!,"}[request["kind"]]
+            if line.startswith(prefix):future.set_result(line)
+
+    async def set_param_confirmed(self,key,value):
+        async with self._parameter_mutex():
+            self._require_parameter_link()
+            await self._complete_parameter_dump()
+            future=asyncio.get_running_loop().create_future()
+            self._parameter_request={"kind":"set","key":key.upper(),"value":value,"future":future}
+            try:
+                ok,message=self.set_param(key,value)
+                if not ok:raise ValueError(message)
+                try:return await asyncio.wait_for(future,5)
+                except asyncio.TimeoutError as error:raise ValueError("Controller did not acknowledge the parameter write") from error
+            finally:self._parameter_request=None
+
+    async def parameter_action(self,action):
+        commands={"save":"PS","load":"PL","defaults":"PD","refresh":"P?"}
+        if action not in commands:raise ValueError("action must be save|load|defaults|refresh")
+        async with self._parameter_mutex():
+            self._require_parameter_link(stopped=action!="refresh")
+            if action=="save" and self.derived.get("PARAMACK")!=2:
+                raise ValueError("Deploy firmware 4.2.0 first: this controller does not support verified NVS save")
+            await self._complete_parameter_dump()
+            if action=="refresh":
+                self.request_dump();await self._complete_parameter_dump()
+            else:
+                future=asyncio.get_running_loop().create_future()
+                self._parameter_request={"kind":action,"future":future}
+                try:
+                    if not self.send(commands[action]):raise ValueError("Controller serial writer is unavailable")
+                    try:await asyncio.wait_for(future,10)
+                    except asyncio.TimeoutError as error:raise ValueError("Controller did not confirm "+action+"; success is not assumed") from error
+                    await self._complete_parameter_dump()
+                finally:self._parameter_request=None
+            return {"ok":True,"sent":commands[action],"confirmed":True,"persisted":action=="save","complete":self.dump_complete}
 
     # ---------------- inbound ----------------
     def _log(self, text):
@@ -305,22 +385,32 @@ class SerialLink:
                 if len(parts) == 7:
                     _, key, val, lo, hi, grp, desc = parts
                     self.params[key] = Param(key, float(val), float(lo), float(hi), grp, desc)
+                    self.params[key].dirty=key in self._dirty_params
                 return
             if line.startswith("P!,"):
                 _, key, val = line.split(",", 2)
+                self._dirty_params.add(key)
                 if key in self.params:
                     self.params[key].value = float(val)
                     self.params[key].dirty = True
                 self._publish({"type": "param_ack", "key": key, "value": float(val)})
+                self._parameter_reply(line)
+                self.dump_complete=False
                 self.send("P?")               # re-dump so derived values refresh
                 return
             if line.startswith(("PE,", "PS!", "PL!", "PD!")):
+                self._parameter_reply(line)
                 self._log(line)
                 self._publish({"type": "param_msg", "text": line})
-                if line.startswith(("PS!", "PL!", "PD!")):
+                if line.startswith(("PS!", "PL!")):
+                    self._dirty_params.clear()
                     for p in self.params.values():
                         p.dirty = False
-                    self.send("P?")
+                    self.request_dump()
+                elif line.startswith("PD!"):
+                    self._dirty_params.update(self.params)
+                    for p in self.params.values():p.dirty=True
+                    self.request_dump()
                 return
         except (ValueError, IndexError):
             pass

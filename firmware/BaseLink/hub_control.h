@@ -40,13 +40,14 @@ public:
         feedForwardCurrent = velocityCorrection = 0;
         recoveryPriority = false;
         previousTarget = commonTarget;
+        previousYawTarget = 0;
     }
 
     void resetYaw() { yawIntegral = yawCurrent = 0; }
 
     Currents update(float leftTarget, float rightTarget, float leftVelocity,
                     float rightVelocity, float dt, const Settings& s,
-                    float balanceAcceleration = NAN, bool recovering = false) {
+                    float balanceAcceleration = NAN, bool recovering = false, bool integrateYaw = true) {
         Currents out;
         if (!(dt > 0 && dt <= .05f) || !std::isfinite(leftTarget + rightTarget + leftVelocity + rightVelocity)) {
             reset();
@@ -78,13 +79,19 @@ public:
         feedForwardCurrent = ff;
         velocityCorrection = correction;
         const float room = std::fmax(0.0f, s.currentLimit - std::fabs(common));
-        const float yawError = .5f * ((rightTarget - leftTarget) - (rightVelocity - leftVelocity));
+        const float yawTarget = .5f * (rightTarget - leftTarget);
+        // Heading hold already supplies position feedback. Integrating its
+        // braking error stores an opposing torque and makes release spring back.
+        // A reversed turn must likewise not first unwind the previous turn.
+        if (!integrateYaw || yawTarget * previousYawTarget < 0) yawIntegral = 0;
+        previousYawTarget = yawTarget;
+        const float yawError = yawTarget - .5f * (rightVelocity - leftVelocity);
         const float yawPre = s.yawKp * yawError + yawIntegral;
         const float wanted = clip(yawPre, -room, room);
         const float slewed = s.yawCurrentSlew > 0 ?
             yawCurrent + clip(wanted - yawCurrent, -s.yawCurrentSlew * dt, s.yawCurrentSlew * dt) : wanted;
         // Track both saturation and slew limiting: no stored turn kick after a shove.
-        if (!((yawPre > slewed && yawError > 0) || (yawPre < slewed && yawError < 0)))
+        if (integrateYaw && !((yawPre > slewed && yawError > 0) || (yawPre < slewed && yawError < 0)))
             yawIntegral = clip(yawIntegral + s.yawKi * yawError * dt, -s.yawIntegralLimit, s.yawIntegralLimit);
         yawCurrent = clip(slewed, -room, room);
         out.left = common - yawCurrent;
@@ -95,6 +102,7 @@ public:
 
 private:
     float previousTarget = 0;
+    float previousYawTarget = 0;
 };
 
 struct Steering {

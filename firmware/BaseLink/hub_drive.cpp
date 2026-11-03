@@ -63,13 +63,14 @@ bool HubDrive::linkOk(uint32_t ageMs) const {
 }
 void HubDrive::setSpeeds(float leftCps, float rightCps) {
     leftWheel.target = leftCps / P.countsPerM; rightWheel.target = rightCps / P.countsPerM;
-    balanceControl = recoveryControl = false;
+    balanceControl = recoveryControl = turningControl = false;
 }
-void HubDrive::setBalanceCommand(float leftCps, float rightCps, float acceleration, bool recovering) {
+void HubDrive::setBalanceCommand(float leftCps, float rightCps, float acceleration, bool recovering, bool turning) {
     setSpeeds(leftCps, rightCps);
     balanceAcceleration = acceleration;
     balanceControl = true;
     recoveryControl = recovering;
+    turningControl = turning;
 }
 void HubDrive::enable() {
     if (!enabled) {
@@ -80,7 +81,7 @@ void HubDrive::enable() {
 void HubDrive::disable() {
     enabled = false; currentLimited = false; controller.reset();
     leftWheel.target = rightWheel.target = leftWheel.current = rightWheel.current = 0;
-    balanceControl = recoveryControl = false; balanceAcceleration = 0;
+    balanceControl = recoveryControl = turningControl = false; balanceAcceleration = 0;
     lastDriveUs = 0;
 }
 
@@ -121,7 +122,7 @@ void HubDrive::transmit(float dt) {
         const hub_control::Settings settings{P.hubKp, P.hubKi, P.hubIntLim, P.hubKff, P.hubMass, P.wheelR, M0601_KT,
             P.hubYawKp, P.hubYawKi, P.hubYawLim, P.hubYawSlew, P.motorMa * .001f};
         currents = controller.update(leftWheel.target, rightWheel.target, wheelVelL(), wheelVelR(), dt, settings,
-            balanceControl ? balanceAcceleration : NAN, recoveryControl);
+            balanceControl ? balanceAcceleration : NAN, recoveryControl, turningControl);
     }
     currentLimited = currents.limited;
     leftWheel.current = currents.left; rightWheel.current = currents.right;

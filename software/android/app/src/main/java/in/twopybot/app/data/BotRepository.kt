@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -141,6 +142,8 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
         .build()
     private val firmwareHttp = http.newBuilder().readTimeout(10, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS).build()
+    private val parameterHttp = http.newBuilder().readTimeout(25, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS).build()
 
     private val _host = MutableStateFlow(initialHost)
     val host: StateFlow<String> = _host
@@ -198,9 +201,9 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
 
     private suspend fun get(path: String) = req(Request.Builder().url(base() + path).build())
 
-    private suspend fun post(path: String, body: String = "{}") = req(
+    private suspend fun post(path: String, body: String = "{}", client: OkHttpClient = http) = req(
         Request.Builder().url(base() + path)
-            .post(body.toRequestBody("application/json".toMediaType())).build()
+            .post(body.toRequestBody("application/json".toMediaType())).build(), client
     )
 
     suspend fun refreshFirmware() = withContext(Dispatchers.IO) {
@@ -222,8 +225,11 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
     suspend fun refreshParams() = withContext(Dispatchers.IO) {
         runCatching {
             val p = json.decodeFromString<ParamsPayload>(get("/api/params"))
-            params.value = p.params
-            derived.value = p.derived
+            if (p.complete) {
+                params.value = p.params
+                derived.value = p.derived
+                unsaved.value = p.params.any { it.dirty }
+            }
         }
     }
 
@@ -247,7 +253,10 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
 
     suspend fun setParam(key: String, value: Float) = withContext(Dispatchers.IO) {
         runCatching {
-            post("/api/params/set", """{"key":"$key","value":$value}""")
+            val answer=json.parseToJsonElement(post("/api/params/set", """{"key":"$key","value":$value}""",parameterHttp)) as JsonObject
+            require(answer["confirmed"]?.jsonPrimitive?.booleanOrNull==true) {
+                "Bot did not confirm this write. Update the bot host/firmware to 4.2.0."
+            }
             params.value = params.value.map { if (it.key == key) it.copy(value = value, dirty = true) else it }
             unsaved.value = true
         }
@@ -255,9 +264,14 @@ class BotRepository(initialHost: String, val recorder: SessionRecorder) {
 
     suspend fun paramAction(action: String) = withContext(Dispatchers.IO) {
         runCatching {
-            post("/api/params/$action")
+            val answer=json.parseToJsonElement(post("/api/params/$action",client=parameterHttp)) as JsonObject
+            require(answer["confirmed"]?.jsonPrimitive?.booleanOrNull==true) {
+                "The old bot API only reported command sent, not confirmed. Deploy bot version 4.2.0."
+            }
+            if (action=="save") require(answer["persisted"]?.jsonPrimitive?.booleanOrNull==true) {"ESP32 did not verify the NVS save"}
             if (action == "save") { unsaved.value = false }
-            delay(350); refreshParams()
+            if (action == "defaults") unsaved.value = true
+            refreshParams()
         }
     }
 

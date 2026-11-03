@@ -25,6 +25,8 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     val snack = MutableStateFlow<String?>(null)
     val trail = MutableStateFlow<List<Pair<Float, Float>>>(emptyList())
     val firmwareStarting = MutableStateFlow(false)
+    val parameterActionBusy = MutableStateFlow(false)
+    val pendingParamWrites = MutableStateFlow(0)
 
     init {
         repo.start()
@@ -74,14 +76,25 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
         } finally { firmwareStarting.value=false }
     }
 
-    fun setParam(key: String, v: Float) = viewModelScope.launch {
-        repo.setParam(key, v).onFailure { toast(it.message ?: "rejected by robot") }
+    fun setParam(key: String, v: Float) {
+        if (parameterActionBusy.value) {toast("Wait for the settings operation to finish");return}
+        pendingParamWrites.value++
+        viewModelScope.launch {
+            try {repo.setParam(key, v).onFailure { toast(it.message ?: "rejected by robot") }}
+            finally {pendingParamWrites.value--}
+        }
     }
 
-    fun paramAction(a: String) = viewModelScope.launch {
-        repo.paramAction(a).fold(
-            { toast(if (a == "save") "saved to robot — survives reboot" else "$a done") },
-            { toast(it.message ?: "failed") })
+    fun paramAction(a: String) {
+        if (parameterActionBusy.value || pendingParamWrites.value>0) {toast("Wait for parameter write confirmation first");return}
+        parameterActionBusy.value=true
+        viewModelScope.launch {
+            try {
+                repo.paramAction(a).fold(
+                    { toast(if (a == "save") "ESP32 confirmed and verified the NVS save" else "$a confirmed by ESP32") },
+                    { toast(it.message ?: "Settings operation was not confirmed") })
+            } finally {parameterActionBusy.value=false}
+        }
     }
 
     fun command(line: String) = viewModelScope.launch {

@@ -339,20 +339,18 @@ class SetParam(BaseModel):
 
 
 @app.post("/api/params/set")
-def set_param(body: SetParam):
-    ok, msg = link.set_param(body.key, body.value)
-    if not ok:
-        raise HTTPException(400, msg)
-    return {"ok": True, "key": body.key, "value": body.value}
+async def set_param(body: SetParam):
+    try:value=await link.set_param_confirmed(body.key,body.value)
+    except ValueError as error:raise HTTPException(400,str(error)) from error
+    return {"ok":True,"key":body.key,"value":value,"confirmed":True}
 
 
 @app.post("/api/params/{action}")
-def param_action(action: str):
-    cmd = {"save": "PS", "load": "PL", "defaults": "PD", "refresh": "P?"}.get(action)
-    if not cmd:
+async def param_action(action: str):
+    if action not in {"save","load","defaults","refresh"}:
         raise HTTPException(404, "action must be save|load|defaults|refresh")
-    link.send(cmd)
-    return {"ok": True, "sent": cmd}
+    try:return await link.parameter_action(action)
+    except ValueError as error:raise HTTPException(409,str(error)) from error
 
 
 class Cmd(BaseModel):
@@ -366,10 +364,21 @@ ALLOWED_PREFIX = ("G,", "H,", "A,", "AT,", "K1=", "K2=", "K3=", "K4=", "K5=", "T
 
 
 @app.post("/api/command")
-def command(body: Cmd):
+async def command(body: Cmd):
     line = body.line.strip()
     if line not in ALLOWED_CMDS and not line.startswith(ALLOWED_PREFIX):
         raise HTTPException(403, f"'{line}' is not permitted from a remote client")
+    action={"PS":"save","PL":"load","PD":"defaults","P?":"refresh"}.get(line)
+    if action:return await param_action(action)
+    if line.startswith("P,"):
+        try:
+            _,key,value=line.split(",",2)
+            return await set_param(SetParam(key=key,value=float(value)))
+        except ValueError as error:raise HTTPException(400,str(error)) from error
+    if "=" in line and line.split("=",1)[0] in {"K1","K2","K3","K4","K5","T","M"}:
+        key,value=line.split("=",1)
+        try:return await set_param(SetParam(key={"T":"TRIM","M":"CURRENT"}.get(key,key),value=float(value)))
+        except ValueError as error:raise HTTPException(400,str(error)) from error
     if line not in {"N","S","L","P?"}:
         autonomy.pause("operator controller command")
     link.send(line)

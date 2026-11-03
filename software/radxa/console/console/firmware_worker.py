@@ -95,7 +95,8 @@ class Controller:
         self.dump();wanted={p["key"]:p["value"] for p in snapshot["params"]}
         current_only=self.derived.get("CURONLY")==1
         migrate_current=current_only and (snapshot.get("derived",{}).get("CURPROFILE")!=1 or wanted.get("DRVMODE")!=1)
-        migrate_input=self.derived.get("INPUTPROFILE")==1 and snapshot.get("derived",{}).get("INPUTPROFILE")!=1
+        input_profile=self.derived.get("INPUTPROFILE",0)
+        migrate_input=input_profile>=1 and snapshot.get("derived",{}).get("INPUTPROFILE")!=input_profile
         if current_only:
             for key in ("VSIGN","HUBACC","VK1","VK2","VK3","VK4","VK5","VELERR","VELACC"):
                 wanted.pop(key,None)
@@ -106,9 +107,12 @@ class Controller:
                 for key in ("K1","K2","K3","K4","K5","CURRENT","MAXACC","MAXSPD","FREERPM","SUPPLYV","HUBMASS"):
                     wanted[key]=self.params[key]
         if migrate_input:
-            wanted["PANCURVE"]=wanted.get("EXPOSTR",self.params["PANCURVE"])
+            wanted["PANCURVE"]=wanted.get("PANCURVE",wanted.get("EXPOSTR",self.params["PANCURVE"]))
             for key in ("TRIM","MAXSTR","STRSLEW","HUBYAWSL","LOWSTR","EXPOSTR"):
                 wanted[key]=self.params[key]
+        if self.derived.get("FIXEDINPUT")==1:
+            for key in ("TRIM","MAXSTR"):
+                wanted[key]=self.params[key] # never replay retired values over firmware-fixed requirements
         for key,value in wanted.items():
             if key not in self.params:raise RuntimeError("Firmware removed saved parameter "+key)
             if abs(self.params[key]-value)>max(1e-5,abs(value)*1e-5):

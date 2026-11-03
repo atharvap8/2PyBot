@@ -29,6 +29,9 @@ static const char* NVS_NS = "2pybot-bldc4";
 //  Derived values — one place, always consistent
 // ============================================================
 void params_recompute() {
+    // These are fixed firmware requirements, not overridable NVS defaults.
+    P.pitchTrim=PITCH_TRIM_DEG;
+    P.maxSteerSt=MAX_STEER_STEPS;
     if (P.wheelR < 0.005f) P.wheelR = 0.005f;
     P.countsPerM = (float)ENCODER_CPR    / (2.0f * PI * P.wheelR);
     P.stepsPerM  = P.countsPerM;
@@ -84,22 +87,34 @@ void params_defaults() {
 // ============================================================
 void params_save() {
     if (params_motionActive()) { Serial.println("PE,stop motors before saving NVS"); return; }
-    _prefs.begin(NVS_NS, false);
-    for (size_t i = 0; i < PARAM_COUNT; i++)
-        _prefs.putFloat(PARAM_META[i].key, *params_ptr(i));
-    _prefs.putUChar("_ver", 1);
-    _prefs.putUChar("_cur5s", 1);
-    _prefs.putUChar("_input2", 1);
+    if (!_prefs.begin(NVS_NS, false)) { Serial.println("PE,NVS open for save failed"); return; }
+    bool written=true;
+    for (size_t i = 0; i < PARAM_COUNT; i++) {
+        if (_prefs.putFloat(PARAM_META[i].key,*params_ptr(i))!=sizeof(float)) { written=false;break; }
+    }
+    if (written) written=_prefs.putUChar("_ver",1)==1;
+    if (written) written=_prefs.putUChar("_cur5s",1)==1;
+    if (written) written=_prefs.putUChar("_input3",1)==1;
     _prefs.end();
+    if (!written) { Serial.println("PE,NVS write failed; save not confirmed"); return; }
+    if (!_prefs.begin(NVS_NS,true)) { Serial.println("PE,NVS reopen for verification failed"); return; }
+    bool verified=true;
+    for (size_t i=0;i<PARAM_COUNT;i++) {
+        if (_prefs.getFloat(PARAM_META[i].key,NAN)!=*params_ptr(i)) { verified=false;break; }
+    }
+    verified=verified && _prefs.getUChar("_ver",0)==1 && _prefs.getUChar("_cur5s",0)==1 && _prefs.getUChar("_input3",0)==1;
+    _prefs.end();
+    if (!verified) { Serial.println("PE,NVS readback failed; save not confirmed"); return; }
     Serial.println("PS!,saved");
 }
 
 void params_load() {
     if (params_motionActive()) { Serial.println("PE,stop motors before loading NVS"); return; }
-    _prefs.begin(NVS_NS, true);
-    bool have = _prefs.getUChar("_ver", 0) == 1;
-    const bool migrate = _prefs.getUChar("_cur5s", 0) != 1;
-    const bool migrateInput = _prefs.getUChar("_input2", 0) != 1;
+    const bool opened=_prefs.begin(NVS_NS, true);
+    bool have = opened && _prefs.getUChar("_ver", 0) == 1;
+    const bool migrate = !opened || _prefs.getUChar("_cur5s", 0) != 1;
+    const bool migrateInput = !opened || _prefs.getUChar("_input3", 0) != 1;
+    const bool oldInputProfile = opened && _prefs.getUChar("_input2",0)==1;
     for (size_t i = 0; i < PARAM_COUNT; i++) {
         float v = have ? _prefs.getFloat(PARAM_META[i].key, PARAM_META[i].def) : PARAM_META[i].def;
         const ParamMeta& m = PARAM_META[i];
@@ -108,7 +123,7 @@ void params_load() {
         *params_ptr(i) = (v >= m.lo && v <= m.hi && (!discreteSign || fabsf(v)==1) &&
                          (!discreteMode || v==0 || v==1)) ? v : m.def;
     }
-    _prefs.end();
+    if (opened) _prefs.end();
     if (migrate) {
         // One-time RAM baseline for the owner's current-mode / 18 V / 2.6 kg
         // setup. Preserve trim, wheel calibration, motor polarity and payload
@@ -120,11 +135,11 @@ void params_load() {
         Serial.println("[PARAM] Current-mode 18 V / 2.6 kg baseline loaded in RAM; PS saves it");
     }
     if (migrateInput) {
-        if (have) P.camExpo=P.expoSteer;
+        if (have && !oldInputProfile) P.camExpo=P.expoSteer;
         P.pitchTrim=PITCH_TRIM_DEG;
-        P.maxSteerSt=3.0f*P.trackW*M0601_CPR/(2.0f*PI*P.wheelR)*.5f;
+        P.maxSteerSt=MAX_STEER_STEPS;
         P.steerSlew=0;P.hubYawSlew=0;P.spdLoStr=1;P.expoSteer=0;
-        Serial.println("[PARAM] Direct steering and raw TRIM=-1.4 loaded in RAM; PS saves it");
+        Serial.println("[PARAM] Fixed TRIM=-1.2603 / MAXSTR=4000 active; PS confirms NVS persistence");
     }
     params_recompute();
     params_applyHardware(true);
@@ -145,8 +160,8 @@ void params_service() {
     if (dumpRow < 0) return;
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
-        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,1};
+        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW"};
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

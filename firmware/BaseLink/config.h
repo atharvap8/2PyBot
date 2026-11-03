@@ -1,4 +1,4 @@
-/* 2PyBot v4.1.1: ESP32-WROOM + two M0601 RS485 BLDC hubs.
+/* 2PyBot v4.2.0: ESP32-WROOM + two M0601 RS485 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */
@@ -52,7 +52,7 @@
 #define PITCH_FWD_SIGN      (-1.0f)
 #define ENC_FWD_SIGN        (+1.0f)
 #define RATE_FWD_SIGN       (+1.0f)
-#define PITCH_TRIM_DEG      -1.4f // owner-confirmed raw neutral IMU angle
+#define PITCH_TRIM_DEG      -1.2603f // fixed owner-requested raw neutral IMU angle
 
 // Keep the supplied LQI design; the actuator loop and speed windup are
 // corrected separately rather than guessing new body gains without a log.
@@ -90,7 +90,7 @@
 #define DRIVE_DEADBAND      0.03f
 #define JOY_FWD_SCALE       (-0.2f)
 #define JOY_STEER_SCALE     1.0f
-#define MAX_STEER_STEPS     (3.0f * TRACK_WIDTH_M * COUNTS_PER_M * 0.5f)
+#define MAX_STEER_STEPS     4000.0f // fixed owner-requested differential encoder counts/s
 #define STEER_SLEW          0.0f // no commanded-turn slew
 #define STEER_DEADBAND      0.05f
 #define YAW_HOLD_KP         1.5f

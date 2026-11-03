@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.1.1, M0601 BLDC hubs + LQR / LQI
+ *  BaseLink.ino — 2PyBot v4.2.0, M0601 BLDC hubs + LQR / LQI
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -393,7 +393,7 @@ void handleLine(char* line) {
         else if (cmd == 'K' && line[1] == '3') { k3 = val; Serial.printf("[TUNE] K3 = %.4f\n", val); }
         else if (cmd == 'K' && line[1] == '4') { k4 = val; Serial.printf("[TUNE] K4 = %.4f\n", val); }
         else if (cmd == 'K' && line[1] == '5') { k5 = val; Serial.printf("[TUNE] K5 = %.4f\n", val); }
-        else if (cmd == 'T') { pitchTrim = val; Serial.printf("[TUNE] Trim = %.3f deg\n", val); }
+        else if (cmd == 'T') { params_set("TRIM",val); }
         else if (cmd == 'M') { params_set("CURRENT", val); }
         else if (cmd == 'B') { payload_torchSetPct((int)val); }
         else if (cmd == 'P') { payload_setYaw(val);  Serial.printf("[PAY] Pan  -> %.0f deg\n", payload_yaw());  }
@@ -615,7 +615,7 @@ void runController(float dt) {
     wheelTargetL=baseSteps-appliedSteerSteps;
     wheelTargetR=baseSteps+appliedSteerSteps;
     const bool recoveryTorque = fabsf(pitchF)>=6.0f || fabsf(rateF)>=40.0f;
-    hub.setBalanceCommand(wheelTargetL,wheelTargetR,uOut,recoveryTorque);
+    hub.setBalanceCommand(wheelTargetL,wheelTargetR,uOut,recoveryTorque,turning);
 }
 
 // ============================================================
@@ -656,7 +656,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.1.1 — M0601 BLDC / LQI");
+    Serial.println("     2PyBot BaseLink v4.2.0 — M0601 BLDC / LQI");
     Serial.println("==================================================");
 
     params_begin();

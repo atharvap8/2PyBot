@@ -177,7 +177,8 @@ class Bot:
             if key not in current or not math.isfinite(value) or not current[key]["lo"] <= value <= current[key]["hi"]:
                 raise ValueError("Unknown parameter or out-of-range value: " + key)
         for key, value in values.items():
-            self.api("/api/params/set", {"key": key, "value": value})
+            answer=self.api("/api/params/set", {"key": key, "value": value},timeout=20)
+            if not answer.get("confirmed"):raise RuntimeError("Old bot API did not confirm the write; update the bot to 4.2.0")
         deadline = time.monotonic() + 10
         while True:
             snapshot = self.api("/api/params")
@@ -189,7 +190,8 @@ class Bot:
             time.sleep(.2)
         if save:
             self.idle()
-            self.api("/api/params/save", {})
+            answer=self.api("/api/params/save", {},timeout=25)
+            if not answer.get("confirmed") or not answer.get("persisted"):raise RuntimeError("NVS persistence was not confirmed")
         show({"applied": values, "save_requested": save})
 
     def calibration(self):
@@ -451,7 +453,9 @@ class Bot:
             show(self.api("/api/params/refresh", {}))
         else:
             self.idle()
-            show(self.api("/api/params/" + self.args.operation, {}))
+            answer=self.api("/api/params/" + self.args.operation, {},timeout=25)
+            if not answer.get("confirmed"):raise RuntimeError("Controller did not confirm settings operation; update the bot to 4.2.0")
+            show(answer)
 
     def toolchain(self):
         cli = self.config.get("arduino_cli", "arduino-cli")
