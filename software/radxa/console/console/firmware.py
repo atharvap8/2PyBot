@@ -106,6 +106,26 @@ def hardware_mismatch(manifest,derived):
     return ""
 
 
+def portable_tuning_snapshot(snapshot):
+    """Older stable workers restore params strictly; keep optional SR keys apart.
+
+    They ignore optional_params. New workers restore those keys only when the
+    selected MCU actually supports SELFRIGHT, including failed-update rollback.
+    """
+    result=dict(snapshot)
+    optional={"SREN","SRREST","SRMAXMA","SRKP","SRKD","SRSLEW","SRTIME","SRDIST","SRSPD"}
+    rows=result.get("params",[])
+    for row in rows:
+        if not re.fullmatch(r"[A-Z0-9_]{1,20}",row["key"]) or not math.isfinite(row["value"]):
+            raise ValueError("A complete finite tuning snapshot is required")
+    result["params"]=[row for row in rows if row["key"] not in optional]
+    extras=dict(result.get("optional_params",{}))
+    recovery=[row for row in rows if row["key"] in optional]
+    if recovery:extras["SELFRIGHT"]=recovery
+    result["optional_params"]=extras
+    return result
+
+
 class FirmwareManager:
     def __init__(self,link,snapshot,root=ROOT,heartbeat=HEARTBEAT,clock=time.time,host_ready=lambda:True):
         self.link=link;self.snapshot=snapshot;self.root=Path(root);self.heartbeat=Path(heartbeat);self.clock=clock
@@ -150,7 +170,7 @@ class FirmwareManager:
         elif not self.link.dump_complete or not self.link.tel.get("startup_ready"):problem="Wait for controller READY"
         elif self.link.derived.get("FLASHLOCK")!=1:problem="One-time FLASHLOCK firmware installation is required"
         elif self.link.tel.get("firmware_lock"):problem="Controller is reconnecting after maintenance"
-        return {"latest":latest,"installed":installed,"job":job or None,"busy":busy or self.link.maintenance,
+        return {"latest":latest,"installed":installed,"job":job or None,"busy":busy or self.link.maintenance,"snapshot_schema":2,
                 "worker_ready":worker_ready,"can_flash":not bool(problem),"blocked_reason":problem}
 
     async def start(self,build_id):
@@ -160,7 +180,7 @@ class FirmwareManager:
             if not status["can_flash"]:raise ValueError(status["blocked_reason"])
             if status["latest"]["build_id"]!=build_id:raise ValueError("Latest build changed; refresh before reflashing")
             manifest,image=await asyncio.to_thread(load_build,self.root,build_id,True)
-            snapshot=self.snapshot()
+            snapshot=portable_tuning_snapshot(self.snapshot())
             values={p["key"]:p["value"] for p in snapshot["params"]}
             if not values or any(not re.fullmatch(r"[A-Z0-9_]{1,20}",k) or not math.isfinite(v) for k,v in values.items()):
                 raise ValueError("A complete valid parameter snapshot is required")
@@ -174,6 +194,7 @@ class FirmwareManager:
                 await self.link.begin_firmware_maintenance()
                 snapshot["params"]=self.link.params_list() # any raw diagnostic was stopped by FU,1
                 snapshot["derived"]=dict(self.link.derived)
+                snapshot=portable_tuning_snapshot(snapshot)
                 atomic_json(folder/"request.json",{"id":identifier,"build":manifest,"snapshot":snapshot,"created_at":self.clock()})
                 job.update(status="queued",stage="queued",progress=3,message="Queued on bot; phone may disconnect",updated_at=self.clock())
                 atomic_json(self.root/"current.json",job)
@@ -204,7 +225,7 @@ class FirmwareManager:
             if self.job().get("status") in HOLD:raise ValueError("Firmware update/recovery is active")
             if not self.link.dump_complete or not self.link.tel.get("startup_ready"):
                 raise ValueError("Fresh READY/IDLE controller metadata is required")
-            snapshot=self.snapshot()
+            snapshot=portable_tuning_snapshot(self.snapshot())
             values={p["key"]:p["value"] for p in snapshot.get("params",[])}
             if not values or any(not re.fullmatch(r"[A-Z0-9_]{1,20}",key) or not math.isfinite(value) for key,value in values.items()):
                 raise ValueError("A complete finite tuning snapshot is required")
@@ -216,6 +237,7 @@ class FirmwareManager:
             try:
                 await self.link.begin_firmware_maintenance()
                 snapshot["params"]=self.link.params_list();snapshot["derived"]=dict(self.link.derived)
+                snapshot=portable_tuning_snapshot(snapshot)
                 hold={"token":token,"commit":commit,"locked":True,"created_at":self.clock(),"snapshot":snapshot}
                 atomic_json(self.deployment_hold_path,hold)
                 return hold

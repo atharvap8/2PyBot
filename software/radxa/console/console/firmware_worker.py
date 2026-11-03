@@ -93,6 +93,12 @@ class Controller:
         if not self.locked:raise RuntimeError("Arming lock was lost")
     def restore(self,snapshot):
         self.dump();wanted={p["key"]:p["value"] for p in snapshot["params"]}
+        if self.derived.get("SELFRIGHT")==1:
+            wanted.update({p["key"]:p["value"] for p in snapshot.get("optional_params",{}).get("SELFRIGHT",[])})
+        else:
+            # Also accept snapshots written by the first experiment build.
+            for key in ("SREN","SRREST","SRMAXMA","SRKP","SRKD","SRSLEW","SRTIME","SRDIST","SRSPD"):
+                wanted.pop(key,None)
         current_only=self.derived.get("CURONLY")==1
         migrate_current=current_only and (snapshot.get("derived",{}).get("CURPROFILE")!=1 or wanted.get("DRVMODE")!=1)
         input_profile=self.derived.get("INPUTPROFILE",0)

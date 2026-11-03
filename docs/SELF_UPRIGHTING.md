@@ -88,6 +88,27 @@ After success, expect **4.3.0**, **SELFRIGHT=1**, **SRREST=60**. Later updates u
 `bot update`; the managed Git wrapper explicitly fetches the configured branch
 without relying on a pre-existing upstream or broad fetch configuration.
 
+## Return to original stable BLDC
+
+After installing the experiment using the helper above, press SELECT and run:
+
+```sh
+git fetch origin hardware/bldc-self-uprighting && git show FETCH_HEAD:scripts/radxa/deploy_branch.py | sudo python3 - --stable
+```
+
+This reselects **hardware/bldc-v4.0.0** at the exact owner-selected stable commit
+**ed91341**, re-pins managed deployment, and reinstalls its matching host, firmware
+and served Android build. Expect installed firmware **4.2.0**, **SELFRIGHT=0**.
+It does not force-reset branches or overwrite local edits. Normal tuning and
+calibration transfer through the existing verified worker path; experimental SR
+keys are kept separately so the older stable worker does not reject them.
+This returns the software deployment to the selected stable baseline, not a
+factory/NVS erase or an undo of unrelated OS changes and later manual calibrations.
+
+The helper runs from fetched Git content, so the return command also works after
+the stable checkout removes the experimental helper file. Later normal updates
+follow the original branch again.
+
 ## Readback and the first manual attempt
 
 Before using START, read firmware version **4.3.0** and **SELFRIGHT=1**. Updating

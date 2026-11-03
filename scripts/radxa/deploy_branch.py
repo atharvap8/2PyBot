@@ -41,8 +41,11 @@ def atomic(path, value, uid, gid, mode=0o644):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("branch", nargs="?", default="hardware/bldc-self-uprighting")
+    parser.add_argument("--stable", action="store_true", help="Return to original stable BLDC ed91341 (4.2.0)")
     parser.add_argument("--config", type=Path, default=Path("/etc/2pybot-deploy.json"))
     args = parser.parse_args()
+    if args.stable:
+        args.branch = "hardware/bldc-v4.0.0"
     if os.geteuid() != 0:
         raise RuntimeError("Run the helper with sudo")
     config = json.loads(args.config.read_text())
@@ -89,11 +92,17 @@ def main():
             remote_ref = "refs/remotes/origin/" + args.branch
             git("fetch", "origin", "refs/heads/" + args.branch + ":" + remote_ref)
             target = git("rev-parse", "--verify", remote_ref + "^{commit}").stdout.strip()
+            if args.stable and target != "ed913418ca05759482a024b6c89794c2c5b10641":
+                raise RuntimeError("Original branch no longer points at stable ed91341; stopped without resetting any branch")
+            if args.stable and api("/api/params").get("derived", {}).get("SELFRIGHT") == 1 and firmware.get("snapshot_schema", 0) < 2:
+                raise RuntimeError("Update this experiment once with the normal helper command before returning to stable; its older host lacks portable tuning snapshots")
             if git("show-ref", "--verify", "--quiet", "refs/heads/" + args.branch, check=False).returncode == 0:
                 git("switch", args.branch)
                 git("merge", "--ff-only", target)
             else:
                 git("switch", "-c", args.branch, target)
+            if git("rev-parse", "HEAD").stdout.strip() != target:
+                raise RuntimeError("Local branch has extra commits; they were preserved, and deployment was not queued")
             original = args.config.stat()
             config["branch"] = args.branch
             atomic(args.config, config, original.st_uid, original.st_gid, original.st_mode & 0o777)
