@@ -19,6 +19,10 @@ For the main milestones and estimated dates for future work, see the
   other E-STOP routes; map export/save copy the grid under the lock and encode
   outside it so the ESP32 serial reader never waits on PNG/disk work; odometry
   and attitude histories are snapshotted before iteration.
+- Relocalization searches an even 0.25 m lattice of free cells (the old
+  sampling left ~1.5 m gaps) and re-searches automatically after ~2 s lost.
+  Candidate scoring runs in 2048-pose batches so memory no longer grows with
+  map area, and "Find me" and the automatic search are serialized.
 - Firmware: Bluetooth TX power raised to BR/EDR +6..+9 dBm and BLE +9 dBm
   (ESP32 maximum; defaults were 0..+3 / +3 dBm), logged as `[PAD] BT TX power`.
 

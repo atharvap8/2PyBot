@@ -93,8 +93,18 @@ class OccupancyGrid:
             self._field = 0.6 * _box_blur(occ, 1) + 0.4 * _box_blur(occ, 3)
         return self._field
 
+    SCORE_CHUNK = 2048                                  # poses per batch: bounds peak memory
+
     def score(self, pts_robot, poses):
-        """Score many candidate poses at once. poses: (K,3). Returns (K,)."""
+        """Score many candidate poses at once. poses: (K,3). Returns (K,).
+        Large K (whole-map relocalization) is scored in batches so memory stays
+        ~tens of MB on the A7A instead of growing with the map area."""
+        if poses.shape[0] > self.SCORE_CHUNK:
+            return np.concatenate([self._score(pts_robot, poses[i:i + self.SCORE_CHUNK])
+                                   for i in range(0, poses.shape[0], self.SCORE_CHUNK)])
+        return self._score(pts_robot, poses)
+
+    def _score(self, pts_robot, poses):
         f = self.field()
         cs, sn = np.cos(poses[:, 2])[:, None], np.sin(poses[:, 2])[:, None]
         px = poses[:, 0:1] + cs * pts_robot[None, :, 0] - sn * pts_robot[None, :, 1]

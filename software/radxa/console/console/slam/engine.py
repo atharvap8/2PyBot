@@ -65,6 +65,7 @@ class SlamEngine:
         self.tests = {}
         self._need_find = False
         self._last_find = 0.0
+        self._find_lock = threading.Lock()
         self._scan_q = collections.deque(maxlen=2)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._worker, name="slam", daemon=True)
@@ -257,8 +258,14 @@ class SlamEngine:
         self.message = "Stopped. Save the map if you like it."
 
     def relocalize(self, wide=True):
-        """Global search: try positions spread over the map's free space at 36
-        headings with a few scan points, then refine the best five."""
+        """Global search: try positions on a 0.25 m lattice over the map's free
+        space at 36 headings with a few scan points, then refine the best eight.
+        Serialized: "Find me" (HTTP) and the automatic re-search (worker) never
+        run at the same time."""
+        with self._find_lock:
+            return self._relocalize()
+
+    def _relocalize(self):
         g = self.grid
         if g.version == 0 or not len(self.scan_pts):
             return 0.0
