@@ -1,0 +1,378 @@
+"""SLAM engine: ties odometry, the C1 scans and the grid together.
+
+Listen-only: reads raw O/D lines from the console's serial link and scans
+from the lidar driver. It never sends anything to the robot.
+"""
+from __future__ import annotations
+
+import collections
+import json
+import math
+import os
+import re
+import threading
+import time
+
+import numpy as np
+
+from .grid import OccupancyGrid
+from .odom_core import Attitude, DSample, Odometry, OSample, axis_name, parse_line
+
+# Mount (robot frame: x forward, y left). Lidar centre is 31 mm right of the
+# centreline and on the axle line (assembly A1); 0 deg mark faces forward.
+DEFAULTS = {
+    "lidar_x": 0.0, "lidar_y": -0.031, "lidar_yaw_deg": 0.0,
+    "lidar_height": 0.26,            # scan plane above floor (approx, window not measured)
+    "self_radius": 0.12,             # guard fence + body
+    "min_quality": 5,
+    "max_range": 8.0,
+    "max_tilt_deg": 3.0, "max_tilt_rate": 40.0, "plane_tol_deg": 1.0,
+    "wheel_radius": 0.052, "track": 0.155, "cpr": 4096,
+    "yaw_axis": "auto", "encoder_yaw_sign": 1.0,
+    "match_points": 200,
+    "map_every_m": 0.10, "map_every_deg": 5.0,
+    "min_match_score": 0.12,         # mapping: below this, trust the wheels for this scan
+    "min_loc_score": 0.30,           # localizing: below this, say "not sure" instead of "localized"
+}
+SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+class SlamEngine:
+    def __init__(self, maps_dir: str, settings: dict | None = None):
+        self.cfg = dict(DEFAULTS, **(settings or {}))
+        self.maps_dir = maps_dir
+        self.lock = threading.Lock()
+        self.odom = Odometry(self.cfg["wheel_radius"], self.cfg["track"], self.cfg["cpr"],
+                             self.cfg["yaw_axis"], self.cfg["encoder_yaw_sign"])
+        self.att = Attitude()
+        self.odom_hist = collections.deque(maxlen=400)        # (t, x, y, th)
+        self.att_hist = collections.deque(maxlen=400)         # (t, dev, rate)
+        self.rates = {"O": 0, "D": 0, "scan": 0}
+        self._rate_t = time.monotonic()
+        self.rate_hz = {"O": 0.0, "D": 0.0, "scan": 0.0}
+        self.last_o = self.last_d = self.last_scan = 0.0
+        self.mode = "idle"                     # idle | mapping | localizing
+        self.map_name = ""
+        self.grid = OccupancyGrid()
+        self.pose = np.zeros(3)                # map frame
+        self._odom_ref = None                  # odom pose at the last processed scan
+        self._last_map_pose = None
+        self.path = collections.deque(maxlen=3000)
+        self.scan_pts = np.zeros((0, 2))
+        self.gate = {"passed": 0, "tilt": 0, "rate": 0, "no_robot": 0, "usable_range": 0.0}
+        self.match = {"score": 0.0, "ok": False, "lost": 0}
+        self.message = "Waiting for the lidar."
+        self.tests = {}
+        self._need_find = False
+        self._scan_q = collections.deque(maxlen=2)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._worker, name="slam", daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def shutdown(self):
+        self._stop.set()
+
+    # ------------------------------------------------------------- inputs
+    def on_line(self, line: str, t: float):
+        msg = parse_line(line)
+        if isinstance(msg, OSample):
+            self.rates["O"] += 1
+            self.last_o = t
+            with self.lock:
+                if self.odom.step(msg):
+                    self.odom_hist.append((t, self.odom.x, self.odom.y, self.odom.th))
+                if time.monotonic() - self.last_d > 0.5:
+                    self.att.update(msg.ms / 1000.0, msg.pitch)
+                    self.att_hist.append((t, self.att.dev, self.att.rate))
+        elif isinstance(msg, DSample):
+            self.rates["D"] += 1
+            self.last_d = t
+            with self.lock:
+                self.att.update(msg.ms / 1000.0, msg.pitch_f, msg.rate_f, msg.balancing)
+                self.att_hist.append((t, self.att.dev, self.att.rate))
+
+    def on_scan(self, scan: dict):
+        self.rates["scan"] += 1
+        self.last_scan = time.monotonic()
+        self._scan_q.append(scan)
+
+    # ------------------------------------------------------------- helpers
+    def _odom_at(self, t):
+        h = self.odom_hist
+        if not h:
+            return None
+        if t <= h[0][0]:
+            return np.array(h[0][1:])
+        for a, b in zip(reversed(list(h)[:-1]), reversed(h)):
+            if a[0] <= t <= b[0]:
+                f = (t - a[0]) / max(1e-6, b[0] - a[0])
+                th = a[3] + f * math.atan2(math.sin(b[3] - a[3]), math.cos(b[3] - a[3]))
+                return np.array([a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2]), th])
+        return np.array(h[-1][1:])
+
+    def _scan_points(self, scan):
+        c = self.cfg
+        a = np.radians(-np.asarray(scan["angle_deg"], float)) + math.radians(c["lidar_yaw_deg"])
+        r = np.asarray(scan["dist_mm"], float) / 1000.0
+        q = np.asarray(scan["quality"], float)
+        keep = (q >= c["min_quality"]) & (r >= c["self_radius"])
+        return a[keep], r[keep]
+
+    def _gate(self, t0, t1, robot_live):
+        c = self.cfg
+        if not robot_live:
+            return 0.0                                      # lidar-only bench mode: no tilt info
+        win = [x for x in self.att_hist if t0 - 0.05 <= x[0] <= t1 + 0.05]
+        if not win:
+            return None
+        dev = max(abs(x[1]) for x in win)
+        rate = max(abs(x[2]) for x in win)
+        if dev > c["max_tilt_deg"]:
+            self.gate["tilt"] += 1
+            return "tilt"
+        if rate > c["max_tilt_rate"]:
+            self.gate["rate"] += 1
+            return "rate"
+        return dev
+
+    # ------------------------------------------------------------- worker
+    def _worker(self):
+        while not self._stop.is_set():
+            self._update_rates()
+            if not self._scan_q:
+                time.sleep(0.01)
+                continue
+            scan = self._scan_q.popleft()
+            try:
+                self._process(scan)
+            except Exception as e:  # keep the loop alive, show the reason
+                self.message = f"Processing error: {e}"
+
+    def _update_rates(self):
+        now = time.monotonic()
+        dt = now - self._rate_t
+        if dt >= 1.0:
+            for k in self.rates:
+                self.rate_hz[k] = self.rates[k] / dt
+                self.rates[k] = 0
+            self._rate_t = now
+
+    def _process(self, scan):
+        c = self.cfg
+        a, r = self._scan_points(scan)
+        robot_live = time.monotonic() - self.last_o < 1.0
+        g = self._gate(scan["t0"], scan["t1"], robot_live)
+        sensor = np.array([c["lidar_x"], c["lidar_y"]])
+        pts_full = np.c_[c["lidar_x"] + r * np.cos(a), c["lidar_y"] + r * np.sin(a)]
+        with self.lock:
+            self.scan_pts = pts_full                         # radar view shows raw scan
+        if g in ("tilt", "rate"):
+            self.message = ("The robot is leaning, so I'm skipping this scan (the laser would hit the floor)."
+                            if g == "tilt" else "The robot is rocking fast, so I'm skipping this scan.")
+            return
+        if g is None:
+            self.gate["no_robot"] += 1
+            return
+        tilt = g
+        usable = min(c["max_range"], c["lidar_height"] / math.tan(math.radians(abs(tilt) + c["plane_tol_deg"])))
+        keep = r <= usable
+        pts = pts_full[keep]
+        self.gate["passed"] += 1
+        self.gate["usable_range"] = usable
+        if self.mode == "idle" or len(pts) < 30:
+            if self.mode == "idle":
+                self.message = "Lidar is working. Press Start mapping when you're ready."
+            else:
+                self.message = "Too few points in this scan; move away from open space."
+            return
+
+        tmid = 0.5 * (scan["t0"] + scan["t1"])
+        od = self._odom_at(tmid) if robot_live else None
+        with self.lock:
+            guess = self.pose.copy()
+            if od is not None and self._odom_ref is not None:
+                dx, dy = od[0] - self._odom_ref[0], od[1] - self._odom_ref[1]
+                dth = math.atan2(math.sin(od[2] - self._odom_ref[2]), math.cos(od[2] - self._odom_ref[2]))
+                ca, sa = math.cos(self.pose[2] - self._odom_ref[2]), math.sin(self.pose[2] - self._odom_ref[2])
+                guess = self.pose + np.array([ca * dx - sa * dy, sa * dx + ca * dy, dth])
+            self._odom_ref = od
+
+        if self.mode == "localizing" and self._need_find:
+            self._need_find = False
+            self.relocalize(wide=True)
+            guess = self.pose.copy()
+        sub = pts[np.linspace(0, len(pts) - 1, min(len(pts), c["match_points"])).astype(int)]
+        first = self.grid.version == 0
+        if first:
+            new_pose, score, ok = guess, 0.0, True
+        else:
+            new_pose, score = self.grid.match(sub, guess)
+            ok = score >= (c["min_loc_score"] if self.mode == "localizing" else c["min_match_score"])
+            if not ok:
+                new_pose = guess                             # trust wheels for this scan
+        new_pose[2] = math.atan2(math.sin(new_pose[2]), math.cos(new_pose[2]))
+        with self.lock:
+            self.pose = new_pose
+            self.match = {"score": score, "ok": ok, "lost": 0 if ok else self.match["lost"] + 1}
+            self.path.append((float(new_pose[0]), float(new_pose[1])))
+        if self.mode == "mapping":
+            lp = self._last_map_pose
+            moved = (lp is None or math.hypot(new_pose[0] - lp[0], new_pose[1] - lp[1]) >= c["map_every_m"]
+                     or abs(math.degrees(new_pose[2] - lp[2])) >= c["map_every_deg"])
+            if moved and (ok or first):
+                self.grid.integrate(new_pose, pts, sensor)
+                self._last_map_pose = new_pose.copy()
+            self.message = ("Mapping. Drive slowly and come back to where you started to tidy the map."
+                            if ok or first else "I'm not sure where I am. Slow down or drive back to a spot you've mapped.")
+        else:
+            self.message = ("Localized: I know where I am on this map." if ok else
+                            "I can't match this view to the map. Drive to a mapped area or press Find me.")
+
+    # ------------------------------------------------------------- commands
+    def start_mapping(self, fresh=True):
+        with self.lock:
+            if fresh:
+                self.grid = OccupancyGrid()
+                self.pose = np.zeros(3)
+                self.path.clear()
+                self.map_name = ""
+            self._odom_ref = None
+            self._last_map_pose = None
+            self.mode = "mapping"
+        self.message = "Mapping started."
+
+    def stop_mapping(self):
+        self.mode = "idle"
+        self.message = "Stopped. Save the map if you like it."
+
+    def relocalize(self, wide=True):
+        """Global search: try positions spread over the map's free space at 36
+        headings with a few scan points, then refine the best five."""
+        g = self.grid
+        if g.version == 0 or not len(self.scan_pts):
+            return 0.0
+        pts = self.scan_pts[np.hypot(self.scan_pts[:, 0], self.scan_pts[:, 1]) < self.cfg["max_range"]]
+        if len(pts) < 30:
+            return 0.0
+        few = pts[np.linspace(0, len(pts) - 1, 60).astype(int)]
+        rows, cols = np.nonzero(g.logodds < -1.0)                # confidently free cells
+        if not len(rows):
+            return 0.0
+        step = max(1, int(len(rows) / 400))
+        xs = g.origin + (cols[::step] + 0.5) * g.res
+        ys = g.origin + (rows[::step] + 0.5) * g.res
+        ths = np.radians(np.arange(0, 360, 10))
+        cand = np.stack([np.repeat(xs, len(ths)), np.repeat(ys, len(ths)), np.tile(ths, len(xs))], axis=1)
+        coarse = g.score(few, cand)
+        best, best_s = self.pose, -1.0
+        for k in np.argsort(coarse)[-5:]:
+            p, sc = g.match(pts[::2], cand[k], lin=0.25, ang=math.radians(6))
+            if sc > best_s:
+                best, best_s = p, sc
+        with self.lock:
+            self.pose = best
+            self._odom_ref = None
+        return best_s
+
+    # ------------------------------------------------------------- motion tests
+    def test_start(self, name):
+        with self.lock:
+            self.tests[name] = {"x": self.odom.x, "y": self.odom.y, "th": self.odom.th, "t": time.monotonic()}
+
+    def test_result(self, name):
+        t = self.tests.get(name)
+        if not t:
+            return None
+        d = math.hypot(self.odom.x - t["x"], self.odom.y - t["y"])
+        dth = math.degrees(math.atan2(math.sin(self.odom.th - t["th"]), math.cos(self.odom.th - t["th"])))
+        if name == "push":
+            return {"distance_m": d, "pass": 0.9 <= d <= 1.1, "hint": "Push the robot 1 m straight ahead."}
+        if name == "turn":
+            return {"turn_deg": dth, "pass": 70 <= dth <= 110,
+                    "hint": "Turn it LEFT by about 90 degrees. Negative means left/right is swapped."}
+        return None
+
+    # ------------------------------------------------------------- maps
+    def save(self, name):
+        if not SAFE_NAME.match(name or ""):
+            raise ValueError("Use letters, numbers, - or _ (max 40).")
+        os.makedirs(self.maps_dir, exist_ok=True)
+        base = os.path.join(self.maps_dir, name)
+        with self.lock:
+            np.savez_compressed(base + ".npz", logodds=self.grid.logodds, touched=self.grid.touched)
+            with open(base + ".png", "wb") as f:
+                f.write(self.grid.png(self.grid.known_bbox()))
+            meta = {"name": name, "resolution": self.grid.res, "origin": self.grid.origin,
+                    "size_cells": self.grid.n, "saved": time.time(), "start_pose": [0, 0, 0]}
+            with open(base + ".json", "w") as f:
+                json.dump(meta, f, indent=1)
+        self.map_name = name
+        return meta
+
+    def list_maps(self):
+        if not os.path.isdir(self.maps_dir):
+            return []
+        out = []
+        for fn in sorted(os.listdir(self.maps_dir)):
+            if fn.endswith(".json"):
+                try:
+                    with open(os.path.join(self.maps_dir, fn)) as f:
+                        out.append(json.load(f))
+                except (OSError, ValueError):
+                    continue
+        return out
+
+    def load(self, name):
+        if not SAFE_NAME.match(name or ""):
+            raise ValueError("bad map name")
+        data = np.load(os.path.join(self.maps_dir, name + ".npz"))
+        g = OccupancyGrid()
+        g.logodds[:] = data["logodds"]
+        g.touched[:] = data["touched"]
+        g.version = 1
+        with self.lock:
+            self.grid = g
+            self.pose = np.zeros(3)                 # assumes the robot starts where mapping started
+            self.path.clear()
+            self._odom_ref = None
+            self.map_name = name
+            self.mode = "localizing"
+            self._need_find = True               # search the whole map on the first scan
+        self.message = "Map loaded. Looking for where the robot is on it…"
+
+    # ------------------------------------------------------------- state for the UI
+    def state(self, lidar_status):
+        now = time.monotonic()
+        with self.lock:
+            pose = self.pose.tolist()
+            scan = self.scan_pts[:: max(1, len(self.scan_pts) // 360)].round(3).tolist()
+            path = list(self.path)[-1500:]
+            od = {"x": self.odom.x, "y": self.odom.y, "yaw_deg": math.degrees(self.odom.th),
+                  "source": self.odom.source, "jumps": self.odom.jumps,
+                  "axis": axis_name(self.odom.axis) if self.odom.axis else None,
+                  "axis_detect": ({"corr": self.odom.detected[1], "ratio": self.odom.detected[2],
+                                   "track_eff": self.odom.track / self.odom.detected[2]}
+                                  if self.odom.detected else None)}
+            att = {"dev": self.att.dev, "rate": self.att.rate, "balancing": self.att.balancing}
+        return {
+            "mode": self.mode, "map_name": self.map_name, "message": self.message,
+            "lidar": lidar_status, "rates": self.rate_hz,
+            "robot_live": now - self.last_o < 1.0, "odom": od, "attitude": att,
+            "pose": pose, "path": path, "scan": scan, "gate": dict(self.gate), "match": dict(self.match),
+            "map_version": self.grid.version,
+            "tests": {k: self.test_result(k) for k in self.tests},
+            "settings": self.cfg,
+        }
+
+    def map_png(self):
+        with self.lock:
+            bbox = self.grid.known_bbox()
+            if bbox is None:
+                return None, None
+            png = self.grid.png(bbox)
+            r0, r1, c0, c1 = bbox
+            meta = {"x0": self.grid.origin + c0 * self.grid.res, "y0": self.grid.origin + r0 * self.grid.res,
+                    "w": (c1 - c0) * self.grid.res, "h": (r1 - r0) * self.grid.res, "version": self.grid.version}
+        return png, meta

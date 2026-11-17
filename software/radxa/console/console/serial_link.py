@@ -2,7 +2,7 @@
 serial_link.py — the only thing in the system that touches /dev/ttyUSB0.
 
 Parses the v2 protocol (see firmware PROTOCOL.md):
-    O,<ms>,<encL>,<encR>,<pitch>,<yaw>      50 Hz odometry
+    O,<ms>,<encL>,<encR>,<pitch>,<yaw>[,gx,gy,gz]  50 Hz odometry
     D,...                                    debug stream (toggle with L)
     P#,<n> / P,... / PR,... / P.             parameter dump
     P!,<key>,<val> / PE,<reason>             set ack / error
@@ -65,6 +65,7 @@ class SerialLink:
         self._parameter_lock=None
         self._parameter_request=None
         self._dirty_params=set()
+        self._line_listeners=[]
 
     # ---------------- lifecycle ----------------
     def open(self):
@@ -294,9 +295,26 @@ class SerialLink:
         self._prev_enc = None
         self.path.clear()
 
+    def add_line_listener(self, fn):
+        """Call fn(line, monotonic_time) for every raw O/D line (50 Hz).
+
+        Runs on the serial thread: listeners must be quick and must not
+        raise. Used by the SLAM module; it can only read, never send."""
+        self._line_listeners.append(fn)
+
+    def _mirror(self,line:str):
+        if not self._line_listeners or line[:2] not in ("O,","D,"):
+            return
+        t=time.monotonic()
+        for fn in list(self._line_listeners):
+            try:
+                fn(line,t)
+            except Exception:
+                pass
     def _handle(self, line: str):
         if not line:
             return
+        self._mirror(line)
         try:
             if line.startswith("AN!,") or line.startswith("AN?,"):
                 self.nav.update(token=int(line[4:]),state=1 if line.startswith("AN!") else 9,last_rx=time.time(),received_monotonic=time.monotonic())

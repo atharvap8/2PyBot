@@ -3,6 +3,17 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## Unreleased — Standalone lidar mapping (no ROS)
+
+- RPLIDAR C1 driver on the 40-pin UART4 (`console/lidar_c1.py`).
+- Numpy 2D SLAM in the console: wheel + gyro odometry (auto-detected gyro axis),
+  pitch-aware scan gating, occupancy grid, scan matching, save/load, global
+  relocalization (`console/slam/`).
+- "2PyBot Maps" beginner page on port 6970 and `/slam/`, with a guided
+  five-step wizard, live map/radar, glossary and a no-hardware demo.
+- Firmware `O` record carries sensor-frame gyro X/Y/Z (append-compatible).
+- `SerialLink.add_line_listener()` gives read-only access to raw `O`/`D` lines.
+
 ## 4.3.0 — Experimental front-bumper self-uprighting
 
 - Branch from owner-selected stable BLDC `ed91341` (`stable-bldc`). Preserve the

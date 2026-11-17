@@ -1,0 +1,124 @@
+"""slam_app.py — "SLAM for beginners" page + API, mounted at /slam/ and on its
+own port (BOT_SLAM_PORT, default 6970).
+
+Listen-only: the engine reads raw O/D telemetry through the serial link's line
+listener and scans from the lidar driver. The only command it can send to the
+robot is the operator stop, through the console's normal E-STOP path.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import math
+import os
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+UI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui", "slam")
+
+
+class NameBody(BaseModel):
+    name: str
+
+
+def _safe(v):
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    if isinstance(v, dict):
+        return {k: _safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_safe(x) for x in v]
+    return v
+
+
+def create_app(engine, lidar, estop):
+    app = FastAPI(title="2PyBot SLAM")
+
+    def state():
+        return _safe(engine.state(dict(lidar.status)))
+
+    @app.get("/")
+    def index():
+        return FileResponse(os.path.join(UI_DIR, "index.html"))
+
+    if os.path.isdir(UI_DIR):
+        app.mount("/static", StaticFiles(directory=UI_DIR), name="slam-static")
+
+    @app.get("/api/state")
+    def api_state():
+        return JSONResponse(state())
+
+    @app.get("/api/map.png")
+    def api_map_png():
+        png, _ = engine.map_png()
+        return Response(png or b"", media_type="image/png")
+
+    @app.post("/api/mapping/start")
+    def mapping_start(fresh: bool = True):
+        engine.start_mapping(fresh)
+        return {"ok": True}
+
+    @app.post("/api/mapping/stop")
+    def mapping_stop():
+        engine.stop_mapping()
+        return {"ok": True}
+
+    @app.post("/api/test/{name}")
+    def test_start(name: str):
+        if name not in ("push", "turn"):
+            return JSONResponse({"ok": False, "error": "unknown test"}, status_code=404)
+        engine.test_start(name)
+        return {"ok": True}
+
+    @app.get("/api/maps")
+    def maps():
+        return engine.list_maps()
+
+    @app.post("/api/maps/save")
+    def save(body: NameBody):
+        try:
+            return {"ok": True, "map": engine.save(body.name.strip())}
+        except (ValueError, OSError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.post("/api/maps/load")
+    def load(body: NameBody):
+        try:
+            engine.load(body.name.strip())
+            return {"ok": True}
+        except (ValueError, OSError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.post("/api/relocalize")
+    def relocalize():
+        s = engine.relocalize(wide=True)
+        return {"ok": bool(s), "score": s or 0.0}
+
+    @app.post("/api/estop")
+    def api_estop():
+        estop()
+        return {"ok": True}
+
+    @app.websocket("/ws")
+    async def ws(sock: WebSocket):
+        await sock.accept()
+        last_map, last_map_t = -1, 0.0
+        try:
+            while True:
+                msg = {"type": "state", "state": state()}
+                now = asyncio.get_event_loop().time()
+                if engine.grid.version != last_map and now - last_map_t >= 1.0:   # map image at most 1 Hz
+                    last_map_t = now
+                    png, meta = engine.map_png()
+                    if png:
+                        msg["map"] = dict(meta, png=base64.b64encode(png).decode())
+                        last_map = engine.grid.version
+                await sock.send_json(msg)
+                await asyncio.sleep(0.2)
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    return app

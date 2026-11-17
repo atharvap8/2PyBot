@@ -106,7 +106,7 @@ def io_thread(ser):
                 line, buf = buf.split(b"\n", 1)
                 if line.startswith(b"O,"):
                     try:
-                        _, ms, eL, eR, _, _ = line.decode().split(",")
+                        _, ms, eL, eR = line.decode().split(",")[:4]   # O may carry appended fields
                         pos = ENC_GUARD_SIGN * (int(eL) + int(eR)) / 2.0 / COUNTS_PER_M
                         t = int(ms) / 1000.0
                         if pos_prev is not None and t > t_prev:

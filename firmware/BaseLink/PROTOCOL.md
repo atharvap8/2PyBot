@@ -26,13 +26,19 @@ The current [Radxa console](../../software/radxa/console/README.md) uses 460800 
 ### Odometry
 
 ```text
-O,ms,encL,encR,pitchDeg,yawDeg
+O,ms,encL,encR,pitchDeg,yawDeg,gxDps,gyDps,gzDps
 ```
 
 `encL` and `encR` are signed 64-bit counts from the unwrapped M0601 absolute
 position, converted to 4096 counts/revolution and per-wheel forward signs.
 `ENCSGN` is fixed at +1. Pitch is filtered `imu.getPitch()`, before balance
-trim/sign correction. Yaw is tilt-compensated compass heading in degrees.
+trim/sign correction. Yaw is tilt-compensated compass heading in degrees; it is
+not suitable for mapping next to the BLDC hubs.
+
+`gxDps`, `gyDps`, `gzDps` (added for lidar SLAM) are the ISM6HG256X sensor-frame
+angular rates in degrees/s after the boot zero-rate bias calibration. They are
+not remapped to robot axes; the host bridge detects which axis is vertical.
+They are appended, so parsers must accept six or more fields.
 
 ### Hub feedback (v4)
 

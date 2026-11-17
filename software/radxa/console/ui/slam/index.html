@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>2PyBot · Maps</title>
+<link rel="stylesheet" href="static/slam.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="5" fill="currentColor"/><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke="currentColor" stroke-width="2"/></svg>
+    <div><b>2PyBot Maps</b><span>Lidar mapping, step by step</span></div>
+  </div>
+  <div class="spacer"></div>
+  <span class="hstat"><i class="dot" id="d-lidar"></i>Lidar <b id="h-lidar">…</b></span>
+  <span class="hstat"><i class="dot" id="d-robot"></i>Robot <b id="h-robot">…</b></span>
+  <span class="hstat">Mode <b id="h-mode">…</b></span>
+  <button class="estop" id="estop" title="Stops the motors the same way as the console E-STOP">STOP</button>
+</header>
+
+<main class="layout">
+  <!-- ======================= steps ======================= -->
+  <aside class="steps" id="steps">
+    <section class="step" data-step="1">
+      <h2><span class="num">1</span>Check the lidar</h2>
+      <p>The lidar spins and measures distances all around. You should see the room's outline on the right.</p>
+      <ul class="checks">
+        <li id="c-lidar-conn">Lidar connected</li>
+        <li id="c-lidar-health">Lidar health is good</li>
+        <li id="c-lidar-rate">About 10 scans per second</li>
+      </ul>
+      <div class="hint" id="h-step1"></div>
+    </section>
+
+    <section class="step" data-step="2">
+      <h2><span class="num">2</span>Check the wheels</h2>
+      <p>SLAM uses the wheels and the gyro to guess how far the robot moved. Two quick tests prove they're right. The robot can be off: just push it by hand.</p>
+      <ul class="checks">
+        <li id="c-robot">Robot data is arriving</li>
+        <li id="c-axis">Gyro figured out ("spin the robot a few times")</li>
+      </ul>
+      <div class="test">
+        <button class="btn" data-test="push">Start push test</button>
+        <span id="t-push">Push it 1 m straight ahead.</span>
+      </div>
+      <div class="test">
+        <button class="btn" data-test="turn">Start turn test</button>
+        <span id="t-turn">Turn it left about 90°.</span>
+      </div>
+    </section>
+
+    <section class="step" data-step="3">
+      <h2><span class="num">3</span>Make a map</h2>
+      <p>Press start, then drive around slowly with the gamepad. The map grows as you go. Finish by driving back to where you started: that lets SLAM line everything up.</p>
+      <div class="row">
+        <button class="btn primary" id="b-start">Start mapping</button>
+        <button class="btn" id="b-stop">Stop</button>
+      </div>
+      <p class="tips">Tips: walk-speed or slower · avoid big empty spaces · don't lift the robot while mapping.</p>
+    </section>
+
+    <section class="step" data-step="4">
+      <h2><span class="num">4</span>Save it</h2>
+      <p>Give the map a short name like <i>living_room</i>.</p>
+      <div class="row">
+        <input id="map-name" placeholder="living_room" maxlength="40" autocomplete="off">
+        <button class="btn primary" id="b-save">Save map</button>
+      </div>
+      <div class="hint" id="h-save"></div>
+    </section>
+
+    <section class="step" data-step="5">
+      <h2><span class="num">5</span>Use a saved map</h2>
+      <p>Load a map, put the robot where you started mapping, and it will show where it is. Lost? Press <b>Find me</b>.</p>
+      <div class="row">
+        <select id="map-list"><option value="">No maps yet</option></select>
+        <button class="btn" id="b-load">Load</button>
+        <button class="btn" id="b-find">Find me</button>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ======================= view ======================= -->
+  <section class="view">
+    <div class="viewbar">
+      <div class="seg" role="tablist">
+        <button id="v-map" aria-selected="true">Map</button>
+        <button id="v-radar" aria-selected="false">Radar</button>
+      </div>
+      <span class="sub" id="view-note">Scroll or pinch to zoom · drag to move</span>
+      <div class="spacer"></div>
+      <button class="btn small" id="b-center">Center on robot</button>
+    </div>
+    <canvas id="cv"></canvas>
+    <div class="say" id="say">Connecting…</div>
+  </section>
+
+  <!-- ======================= status ======================= -->
+  <aside class="side">
+    <div class="card">
+      <h3>How it's going</h3>
+      <div class="meter"><span>Scan quality</span><div class="bar"><i id="m-scan"></i></div><b id="m-scan-v">–</b></div>
+      <div class="meter"><span>Map match</span><div class="bar"><i id="m-match"></i></div><b id="m-match-v">–</b></div>
+      <div class="meter"><span>Robot tilt</span><div class="bar"><i id="m-tilt"></i></div><b id="m-tilt-v">–</b></div>
+      <p class="sub">Scans taken while the robot leans more than 3° are skipped, because the laser would hit the floor.</p>
+    </div>
+    <div class="card kv">
+      <h3>Numbers</h3>
+      <div><span>Position</span><b id="n-pose">–</b></div>
+      <div><span>Distance driven (wheels)</span><b id="n-odom">–</b></div>
+      <div><span>Usable range now</span><b id="n-range">–</b></div>
+      <div><span>Scans used / skipped</span><b id="n-gate">–</b></div>
+      <div><span>Points per scan</span><b id="n-pts">–</b></div>
+      <div><span>Lidar model / firmware</span><b id="n-fw">–</b></div>
+    </div>
+    <details class="card">
+      <summary>What do these words mean?</summary>
+      <dl class="gloss">
+        <dt>Scan</dt><dd>One full spin of the lidar: hundreds of distance dots around the robot.</dd>
+        <dt>Odometry</dt><dd>The robot's own guess of how it moved, from wheel turns and the gyro. It slowly drifts.</dd>
+        <dt>Pose</dt><dd>Where the robot is (x, y) and which way it faces.</dd>
+        <dt>Occupancy grid</dt><dd>The map: a grid of 5 cm squares, each white (free), black (wall) or grey (unknown).</dd>
+        <dt>Scan matching</dt><dd>Sliding the new scan over the map until it fits. This corrects the drift.</dd>
+        <dt>Loop closure</dt><dd>Coming back to a place you've already mapped, so the map lines up again.</dd>
+        <dt>Localization</dt><dd>Using a saved map to find where the robot is, without changing the map.</dd>
+      </dl>
+    </details>
+    <details class="card">
+      <summary>Advanced</summary>
+      <div class="kv small" id="adv"></div>
+      <p class="sub">Change these with environment variables or <code>slam/engine.py</code> DEFAULTS.</p>
+    </details>
+  </aside>
+</main>
+<script src="static/slam.js"></script>
+</body>
+</html>

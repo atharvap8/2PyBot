@@ -156,6 +156,7 @@ The existing simplified STEP model remains in `models/2pybot_simplified.step`; i
 | [Firmware setup](firmware/BaseLink/README.md) | Build, wiring, pairing, controls |
 | [Serial protocol](firmware/BaseLink/PROTOCOL.md) | Commands, parameter records, telemetry fields |
 | [Radxa console](software/radxa/console/README.md) | Browser UI, Android API, camera pipeline, deployment |
+| [Lidar mapping](docs/LIDAR_SLAM.md) | RPLIDAR C1 wiring, standalone SLAM page, first use |
 | [Android app](software/android/README.md) | Build, host connection, screens, parameter and video transport |
 | [Vision roadmap](docs/VISION_ROADMAP.md) | Planned lens calibration, sensor geometry, depth fusion and ONNX perception |
 | [Camera calibration](docs/CAMERA_CALIBRATION.md) | Guided capture, lens fitting, reports, depth health and frame timing |

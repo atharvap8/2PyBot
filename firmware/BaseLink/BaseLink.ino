@@ -1000,12 +1000,17 @@ void loop() {
                       (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
                       (unsigned)btgamepad_connected(),0u);
     }
-    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=96) {
+    if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=128) {
         lastOdomMs = nowMs;
-        Serial.printf("O,%lu,%lld,%lld,%.2f,%.2f\n",
+        // Fields 7-9 (lidar SLAM): raw sensor-frame gyro X/Y/Z in deg/s after the
+        // boot bias calibration. Appended so existing six-field parsers keep
+        // working. The host picks the vertical axis (lidar SLAM yaw rate);
+        // compass yaw is unreliable next to the BLDC hubs.
+        Serial.printf("O,%lu,%lld,%lld,%.2f,%.2f,%.2f,%.2f,%.2f\n",
                       (unsigned long)nowMs,
                       (long long)encRawL, (long long)encRawR,
-                      imu.getPitch(), imu.getYaw());
+                      imu.getPitch(), imu.getYaw(),
+                      imu.getGx(), imu.getGy(), imu.getGz());
     }
 
     // ---- 5. optional controller debug, nominal 50 Hz ----

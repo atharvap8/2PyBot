@@ -585,6 +585,31 @@ app.mount("/sysmap", sysmap_app, name="sysmap")
 
 
 # ============================================================
+#  lidar SLAM — own port (SLAM_PORT, default 6970) and /slam/
+# ============================================================
+from . import slam_app
+from .lidar_c1 import LidarC1
+from .slam.engine import SlamEngine
+from .config import LIDAR_PORT, LIDAR_BAUD, MAPS_DIR, SLAM_PORT
+
+slam_engine = SlamEngine(MAPS_DIR)
+lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan)
+link.add_line_listener(slam_engine.on_line)      # read-only raw O/D lines
+slam_engine.start()
+if os.environ.get("BOT_LIDAR", "1") != "0":
+    lidar.start()
+slam_web = slam_app.create_app(slam_engine, lidar, estop)
+
+
+@app.get("/slam")
+def slam_redirect():
+    return RedirectResponse("/slam/")
+
+
+app.mount("/slam", slam_web, name="slam")
+
+
+# ============================================================
 #  UI
 # ============================================================
 if os.path.isdir(UI_DIR):
@@ -644,6 +669,9 @@ def main():
     servers = [_Server(uvicorn.Config(app, host="0.0.0.0", port=HTTP_PORT, log_level="warning"))]
     if SYSMAP_PORT > 0 and SYSMAP_PORT != HTTP_PORT:
         servers.append(_Server(uvicorn.Config(sysmap_app, host="0.0.0.0", port=SYSMAP_PORT,
+                                              log_level="warning", lifespan="off")))
+    if SLAM_PORT > 0 and SLAM_PORT not in (HTTP_PORT, SYSMAP_PORT):
+        servers.append(_Server(uvicorn.Config(slam_web, host="0.0.0.0", port=SLAM_PORT,
                                               log_level="warning", lifespan="off")))
 
     async def serve():
