@@ -1,0 +1,37 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * 2PyBot: clock all APB UARTs from PLL-PERI0-480M / 5 = 96 MHz instead of the
+ * 24 MHz crystal, so UART4 (RPLIDAR C1, pins 16/18) can run 460800 baud
+ * (96 MHz -> 461538 baud, +0.16 %). At 24 MHz the sunxi uart-ng driver only
+ * makes ~500000 (+8.5 %) and logs "uartclk 24000000 beyond rance[30000000,
+ * 120000000]". 115200 on UART0 (debug console) stays at +0.16 %.
+ *
+ * Attached to uart0, the first UART to probe: the kernel applies a device's
+ * assigned-clocks just before its driver probes, and sunxi-uart-ng caches the
+ * clock rate at probe, so uart0 and uart4 both see 96 MHz. On the ccu node it
+ * is ignored, because this BSP registers the ccu at early init.
+ *
+ * IDs from include/dt-bindings/clock/sun60iw2-ccu.h (kernel 5.15.147-18-a733):
+ *   CLK_APB_UART = 46, CLK_PLL_PERI0_480M = 5
+ * Install/remove: see docs/LIDAR_SLAM.md.
+ */
+/ {
+	metadata {
+		title = "2PyBot UART clock 96 MHz (PLL)";
+		compatible = "radxa,cubie-a7a";
+		category = "misc";
+		exclusive = "apb-uart";
+		description = "Clock APB UARTs from PLL-PERI0-480M/5 = 96 MHz for 460800 baud (RPLIDAR C1 on UART4).";
+	};
+
+	fragment@0 {
+		target = <&uart0>;
+		__overlay__ {
+			assigned-clocks = <&ccu 46>;
+			assigned-clock-parents = <&ccu 5>;
+			assigned-clock-rates = <96000000>;
+		};
+	};
+};

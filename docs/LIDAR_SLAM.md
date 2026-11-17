@@ -17,8 +17,27 @@ More screenshots (simulator): [lidar check](images/slam/1_radar_lidar_check.png)
 | TX | 18 | PJ25 / UART4-RX |
 | RX | 16 | PJ24 / UART4-TX |
 
-Avoid pins 3/5 (I2C bus 7, ToF) and 8/10 (debug console). Enable with
-`rsetup` → Overlay → Manage overlays → **Enable UART4**, reboot → `/dev/ttyAS4`.
+TX/RX cross over. Logic is 3.3 V on both sides; only the C1 supply is 5 V.
+Avoid pins 3/5 (I2C bus 7, ToF) and 8/10 (debug console).
+
+### Bot setup (once, both needed)
+1. **Enable UART4:** `sudo rsetup enable_overlays sun60iw2p1-uart4.dtbo`
+   (or `rsetup` → Overlay → Manage overlays → Enable UART4).
+2. **UART clock 96 MHz:** all A733 UARTs run from a 24 MHz crystal by default,
+   which cannot make 460800 (the C1's fixed rate; you get ~500000). The overlay
+   [`scripts/radxa/overlays/2pybot-uart-pll96m.dts`](../scripts/radxa/overlays/2pybot-uart-pll96m.dts)
+   moves them to PLL-PERI0-480M / 5 = 96 MHz (460800 → +0.16 %, 115200 unchanged):
+   ```bash
+   dtc -@ -q -I dts -O dtb -o /tmp/2pybot-uart-pll96m.dtbo scripts/radxa/overlays/2pybot-uart-pll96m.dts
+   sudo install -m 0644 /tmp/2pybot-uart-pll96m.dtbo /boot/dtbo/
+   sudo u-boot-update && sudo reboot
+   ```
+   Undo: `sudo rm /boot/dtbo/2pybot-uart-pll96m.dtbo && sudo u-boot-update && sudo reboot`.
+3. Check after reboot: `/dev/ttyAS4` exists and
+   `sudo cat /sys/kernel/debug/clk/apb-uart/clk_rate` prints `96000000`.
+
+Verified on the bot (2026-11-17): C1 model 65, firmware 1.02, hardware 18,
+health good, 10 Hz, ~400 points per rotation.
 
 ## How it works
 - `console/lidar_c1.py` — C1 driver (pyserial). Owns only the lidar UART.
@@ -45,9 +64,12 @@ leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py
 ## Try it without the robot
 `cd software/radxa/console && python -m console.slam_demo` → http://localhost:6970/
 
+## Hardware findings
+- 460800 on UART4 needs the 96 MHz clock overlay above (verified).
+- The C1 answers legacy `SCAN 0x20` with 5-byte nodes, but only after the HQ
+  motor-speed command (`0xA8`); the driver sends it automatically after the first
+  empty SCAN (verified, ~1.5 s delay at connect).
+
 ## Not verified on hardware yet
-1. The A7A UART clock at 460800 (`sudo grep -i uart /sys/kernel/debug/clk/clk_summary`).
-2. That the C1 answers legacy `SCAN 0x20` with 5-byte nodes (the driver falls
-   back to sending the motor-speed command and says so on the page).
-3. `lidar_height` (0.26 m) and `lidar_y` (−0.031 m) come from the CAD assembly;
+1. `lidar_height` (0.26 m) and `lidar_y` (−0.031 m) come from the CAD assembly;
    the optical window height on the C1 head is not measured.
