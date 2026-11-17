@@ -3,6 +3,12 @@
 Open **http://10.42.0.1:6970/** (or the console at `/slam/`). The page walks you
 through five steps: check the lidar, check the wheels, make a map, save it, use it.
 
+![Live mapping](images/slam/3_mapping_live.png)
+
+More screenshots (simulator): [lidar check](images/slam/1_radar_lidar_check.png) ·
+[wheel tests](images/slam/2_wheel_tests.png) · [saved + glossary](images/slam/4_saved_with_glossary.png) ·
+[localizing](images/slam/5_localizing_on_saved_map.png) · [phone](images/slam/6_phone_landscape.png)
+
 ## Wiring (40-pin header, UART4)
 | C1 | A7A pin | Signal |
 |---|---|---|

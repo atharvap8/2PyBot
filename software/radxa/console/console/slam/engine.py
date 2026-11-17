@@ -64,6 +64,7 @@ class SlamEngine:
         self.message = "Waiting for the lidar."
         self.tests = {}
         self._need_find = False
+        self._last_find = 0.0
         self._scan_q = collections.deque(maxlen=2)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._worker, name="slam", daemon=True)
@@ -231,6 +232,10 @@ class SlamEngine:
             self.message = ("Mapping. Drive slowly and come back to where you started to tidy the map."
                             if ok or first else "I'm not sure where I am. Slow down or drive back to a spot you've mapped.")
         else:
+            # lost for ~2 s: search the whole map again (at most every 3 s)
+            if self.match["lost"] >= 20 and time.monotonic() - self._last_find > 3.0:
+                self._last_find = time.monotonic()
+                self.relocalize(wide=True)
             self.message = ("Localized: I know where I am on this map." if ok else
                             "I can't match this view to the map. Drive to a mapped area or press Find me.")
 
@@ -260,19 +265,20 @@ class SlamEngine:
         pts = self.scan_pts[np.hypot(self.scan_pts[:, 0], self.scan_pts[:, 1]) < self.cfg["max_range"]]
         if len(pts) < 30:
             return 0.0
-        few = pts[np.linspace(0, len(pts) - 1, 60).astype(int)]
-        rows, cols = np.nonzero(g.logodds < -1.0)                # confidently free cells
+        few = pts[np.linspace(0, len(pts) - 1, 90).astype(int)]
+        stride = max(1, int(round(0.25 / g.res)))                 # even 0.25 m lattice
+        free = g.logodds[::stride, ::stride] < -1.0              # confidently free cells
+        rows, cols = np.nonzero(free)
         if not len(rows):
             return 0.0
-        step = max(1, int(len(rows) / 400))
-        xs = g.origin + (cols[::step] + 0.5) * g.res
-        ys = g.origin + (rows[::step] + 0.5) * g.res
+        xs = g.origin + (cols * stride + 0.5) * g.res
+        ys = g.origin + (rows * stride + 0.5) * g.res
         ths = np.radians(np.arange(0, 360, 10))
         cand = np.stack([np.repeat(xs, len(ths)), np.repeat(ys, len(ths)), np.tile(ths, len(xs))], axis=1)
         coarse = g.score(few, cand)
         best, best_s = self.pose, -1.0
-        for k in np.argsort(coarse)[-5:]:
-            p, sc = g.match(pts[::2], cand[k], lin=0.25, ang=math.radians(6))
+        for k in np.argsort(coarse)[-8:]:
+            p, sc = g.match(pts[::2], cand[k], lin=0.30, ang=math.radians(8))
             if sc > best_s:
                 best, best_s = p, sc
         with self.lock:
