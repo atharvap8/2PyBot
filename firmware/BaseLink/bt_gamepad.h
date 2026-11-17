@@ -42,12 +42,22 @@
 #define BT_GAMEPAD_H
 
 #include <Bluepad32.h>
+#include <esp_bt.h>
 #include "config.h"
 #include "params.h"
 
 // 1 = steer on LEFT stick X (right stick free for the camera).
 // 0 = legacy: steer on RIGHT stick X, and servo yaw goes dead.
 #define PAD_STEER_ON_LEFT_STICK 1
+
+// ---- Bluetooth radio TX power ----
+// ESP32 controller defaults: BR/EDR 0..+3 dBm, BLE +3 dBm. Raise both to the
+// controller ceiling for pad range through the shell. ESP_PWR_LVL_P9 (+9 dBm)
+// is the highest level the ESP32 BT API accepts; there is no higher setting.
+// BR/EDR power control may step between MIN and MAX; it never drops below MIN.
+#define PAD_BREDR_TX_MIN  ESP_PWR_LVL_P6   // +6 dBm floor
+#define PAD_BREDR_TX_MAX  ESP_PWR_LVL_P9   // +9 dBm ceiling
+#define PAD_BLE_TX        ESP_PWR_LVL_P9   // +9 dBm default/adv/scan
 
 // ---- same interface as espnow_comm.h ----
 volatile float         joyForward      = 0.0f;   // -5..+5 legacy units
@@ -113,9 +123,40 @@ static void _onPadDisconnect(ControllerPtr ctl) {
 
 inline bool btgamepad_connected() { return _pad && _pad->isConnected(); }
 
+// esp_power_level_t is 0..7 for -12..+9 dBm in 3 dB steps.
+static inline int _pwrDbm(esp_power_level_t l) { return -12 + 3 * (int)l; }
+
+// Applies the TX power once the BT controller is enabled. Bluepad32 enables
+// the controller from its own task, so this may not be ready during setup();
+// btgamepad_update() retries until it is. Logs once, success or failure.
+static bool _txPowerDone = false;
+static void _applyTxPower() {
+    if (_txPowerDone) return;
+    if (esp_bt_controller_get_status() != ESP_BT_CONTROLLER_STATUS_ENABLED) return;
+    _txPowerDone = true;
+
+    esp_err_t eBr  = esp_bredr_tx_power_set(PAD_BREDR_TX_MIN, PAD_BREDR_TX_MAX);
+    esp_err_t eDef = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, PAD_BLE_TX);
+    esp_err_t eAdv = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV,     PAD_BLE_TX);
+    esp_err_t eScn = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN,    PAD_BLE_TX);
+
+    esp_power_level_t brMin = ESP_PWR_LVL_N0, brMax = ESP_PWR_LVL_N0;
+    esp_err_t eGet = esp_bredr_tx_power_get(&brMin, &brMax);
+    esp_power_level_t ble = esp_ble_tx_power_get(ESP_BLE_PWR_TYPE_DEFAULT);
+
+    if (eBr == ESP_OK && eDef == ESP_OK && eAdv == ESP_OK && eScn == ESP_OK && eGet == ESP_OK) {
+        Serial.printf("[PAD] BT TX power: BR/EDR %+d..%+d dBm, BLE %+d dBm\n",
+                      _pwrDbm(brMin), _pwrDbm(brMax), _pwrDbm(ble));
+    } else {
+        Serial.printf("[PAD] BT TX power set FAILED: bredr=%d ble=%d/%d/%d get=%d\n",
+                      (int)eBr, (int)eDef, (int)eAdv, (int)eScn, (int)eGet);
+    }
+}
+
 inline void btgamepad_begin() {
     BP32.setup(&_onPadConnect, &_onPadDisconnect);
     // BP32.forgetBluetoothKeys();  // uncomment for ONE flash if pairing misbehaves
+    _applyTxPower();
     Serial.println("[PAD] Bluepad32 ready — put the EVOFOX One S in pairing mode (Home+B)");
 }
 
@@ -182,6 +223,7 @@ static void _shapeStick(float x, float y, bool snap, float* outY, float* outX, f
 // Call once per control loop. Cheap: drains the BT event queue and maps.
 inline void btgamepad_update() {
     BP32.update();
+    if (!_txPowerDone) _applyTxPower();
 
     if (!btgamepad_connected()) {
         joyForward = 0.0f;
