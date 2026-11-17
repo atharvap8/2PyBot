@@ -25,6 +25,10 @@
 #  BaseLink uses the "huge_app" partition scheme (3 MB flash)
 #  because the sketch plus the Bluepad32 stack, AHRS, and
 #  NeoPixelBus exceed the default 1.25 MB application partition.
+#  The bot's ESP32 carries the same Huge APP table (one app at
+#  0x10000, 0x300000 bytes); its flashers refuse any other live
+#  layout. check_partitions.py applies that rule to the compiled
+#  table and image so a mismatch fails CI, not the flash.
 #
 #  Compiled .bin artifacts are uploaded per run so they can
 #  be inspected or manually flashed without a local toolchain.
@@ -93,6 +97,9 @@ jobs:
             --warnings default \
             --output-dir build/BaseLink \
             firmware/BaseLink/BaseLink.ino
+
+      - name: Check BaseLink fits the bot's flash layout
+        run: python3 scripts/firmware/check_partitions.py build/BaseLink
 
       - name: Check BLDC control and wire protocol
         if: vars.BOT_RUN_TESTS == 'true'

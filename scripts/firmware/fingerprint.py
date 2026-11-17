@@ -4,7 +4,8 @@ from pathlib import Path
 import subprocess
 
 INPUTS = ("firmware/BaseLink", "scripts/firmware/build.py", "scripts/firmware/toolchain.json",
-          "scripts/firmware/fingerprint.py", "software/radxa/console/console/versioning.py", "VERSION")
+          "scripts/firmware/fingerprint.py", "scripts/firmware/check_partitions.py",
+          "software/radxa/console/console/versioning.py", "VERSION")   # keep in sync with deploy.py
 
 
 def digest(tree_listing):

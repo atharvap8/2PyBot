@@ -104,8 +104,13 @@ separate and must also be disabled for an independent ESP32-only setup.
 - Previous parameter values before the updated K/S/C gains were saved:
   `/home/radxa/archives/before-lqr-update-20261011-032038/params.json`.
 
-The ESP32 has 16 MB flash with two 1.25 MB OTA application partitions. Application
-updates preserved its original bootloader, partitions, OTA selection and NVS.
+The ESP32 has 16 MB flash. An earlier version of these notes (v3.1.0) described
+two 1.25 MB OTA application partitions; that is not the layout the current tooling
+accepts. The bot carries the Arduino **Huge APP** table: one 3 MB application partition (`app0`, 0x10000,
+0x300000), no second OTA slot. The firmware worker and `bot restore` read the live
+table and refuse any other layout, and builds are checked against the same rule
+(`scripts/firmware/check_partitions.py`). Application updates write only 0x10000
+and preserve the bootloader, partition table, OTA data and NVS.
 The working flasher setup was esptool 4.8.1 at 230400 baud; 460800 flash access
 was unreliable and bulk live-application reads were unusually slow. Firmware
 recovery notes distinguish preserved build artifacts from raw flash dumps.

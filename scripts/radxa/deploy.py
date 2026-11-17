@@ -375,7 +375,8 @@ class Deployment:
 
     def fingerprint(self):
         inputs=("firmware/BaseLink","scripts/firmware/build.py","scripts/firmware/toolchain.json",
-                "scripts/firmware/fingerprint.py","software/radxa/console/console/versioning.py","VERSION")
+                "scripts/firmware/fingerprint.py","scripts/firmware/check_partitions.py",
+                "software/radxa/console/console/versioning.py","VERSION")   # same as fingerprint.INPUTS
         return hashlib.sha256(self.git("ls-tree","-r",self.commit,"--",*inputs).stdout.encode()).hexdigest()
 
     def hotspot_command(self,*arguments):

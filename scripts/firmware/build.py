@@ -15,6 +15,8 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/"software/radxa/console"))
 from console.firmware import inspect_image
 from console.versioning import validate_version
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from check_partitions import APP_BYTES,APP_OFFSET,check as check_partitions
 
 
 def toolchain_versions(cli,lock):
@@ -48,7 +50,7 @@ def manifest(directory,source_commit=None,source_fingerprint=None,toolchain=None
     payload=dict(details,build_id=details["sha256"],schema=1,version=version,
                  built_at=datetime.now(timezone.utc).isoformat(),source_commit=commit,source_dirty=dirty,
                  hardware="m0601-rs485",parameter_schema="bldc-v4",
-                 fqbn=toolchain['fqbn'] if toolchain else "esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app",app_offset=0x10000,partition_bytes=0x300000)
+                 fqbn=toolchain['fqbn'] if toolchain else "esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app",app_offset=APP_OFFSET,partition_bytes=APP_BYTES)
     if source_fingerprint:
         if not re.fullmatch(r"[a-f0-9]{64}",source_fingerprint):raise ValueError("Invalid source fingerprint")
         payload["source_fingerprint"]=source_fingerprint
@@ -72,6 +74,10 @@ if __name__=="__main__":
     args.output_dir.mkdir(parents=True,exist_ok=True)
     subprocess.run([args.arduino_cli,"compile","--jobs","2","--fqbn",locked['fqbn'] if locked else "esp32-bluepad32:esp32:esp32:PartitionScheme=huge_app",
                     "--warnings","default","--output-dir",str(args.output_dir),str(ROOT/"firmware/BaseLink")],check=True)
+    # Same rule the bot's flashers enforce on the live table; fail here, not on the bot.
+    try:fit=check_partitions(args.output_dir)
+    except ValueError as error:sys.exit("Firmware does not fit the bot: "+str(error))
+    print("Application %d/%d bytes (%.1f%%) at 0x%X"%(fit['size_bytes'],fit['slot_bytes'],100*fit['used'],APP_OFFSET))
     built=manifest(args.output_dir,args.source_commit,args.source_fingerprint,locked);print(json.dumps(built,indent=2))
     if args.publish:
         from publish import publish
