@@ -38,6 +38,15 @@ class OccupancyGrid:
         self._field = None
         self.version = 0
 
+    def copy(self):
+        """Independent snapshot (arrays copied) for export off the hot locks."""
+        g = OccupancyGrid.__new__(OccupancyGrid)
+        g.res, g.n, g.origin, g.version = self.res, self.n, self.origin, self.version
+        g.logodds = self.logodds.copy()
+        g.touched = self.touched.copy()
+        g._field = None
+        return g
+
     # --------------------------------------------------------- coordinates
     def to_cell(self, x, y):
         return (np.floor((y - self.origin) / self.res).astype(np.int32),

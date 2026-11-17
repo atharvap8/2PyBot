@@ -3,7 +3,7 @@
 No rclpy imports: everything here can be replayed offline from a recorded
 console tap, which keeps the maths reviewable apart from ROS plumbing.
 
-Input is the console's read-only UDP mirror of firmware lines:
+Input is raw firmware lines from SerialLink.add_line_listener() (read-only):
     O,ms,encL,encR,pitchDeg,yawDeg[,gxDps,gyDps,gzDps]   50 Hz
     D,ms,pitchF,rateF,...,balancing(13th field),...       ~50 Hz
 

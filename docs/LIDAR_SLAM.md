@@ -27,7 +27,9 @@ Avoid pins 3/5 (I2C bus 7, ToF) and 8/10 (debug console). Enable with
 
 It is **listen-only**: it reads raw `O`/`D` lines through
 `SerialLink.add_line_listener()` and never sends drive commands. The STOP button
-uses the console's normal E-STOP.
+uses the console's normal E-STOP (allowed during firmware maintenance, like the
+console and system-map STOP routes). The lidar and SLAM threads start with the
+console service and the C1 is sent STOP when the service shuts down.
 
 ## Settings (environment)
 `BOT_SLAM_PORT` (6970, 0 = only `/slam/`), `BOT_LIDAR_PORT` (`/dev/ttyAS4`),

@@ -112,7 +112,8 @@ def create_app(engine, lidar, estop):
                 now = asyncio.get_event_loop().time()
                 if engine.grid.version != last_map and now - last_map_t >= 1.0:   # map image at most 1 Hz
                     last_map_t = now
-                    png, meta = engine.map_png()
+                    # PNG encode off the shared console event loop
+                    png, meta = await asyncio.get_event_loop().run_in_executor(None, engine.map_png)
                     if png:
                         msg["map"] = dict(meta, png=base64.b64encode(png).decode())
                         last_map = engine.grid.version

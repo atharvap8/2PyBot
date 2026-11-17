@@ -220,7 +220,7 @@ async def autonomy_stop():autonomy.stop();return autonomy.status()
 @app.middleware("http")
 async def firmware_mutation_gate(request,call_next):
     internal=request.url.path.startswith("/api/internal/deployment/")
-    if request.method not in ("GET","HEAD","OPTIONS") and not internal and request.url.path not in ("/api/firmware/reflash","/api/estop","/sysmap/api/estop") and firmware.blocked():
+    if request.method not in ("GET","HEAD","OPTIONS") and not internal and request.url.path not in ("/api/firmware/reflash","/api/estop","/sysmap/api/estop","/slam/api/estop") and firmware.blocked():
         return JSONResponse({"detail":"Controller firmware maintenance is in progress"},status_code=409)
     return await call_next(request)
 
@@ -291,6 +291,9 @@ async def _startup():
                                    asyncio.create_task(autonomy.run()),
                                   asyncio.create_task(publish_ready(link, host_ready))]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
+    slam_engine.start()                      # listen-only SLAM (defined below)
+    if os.environ.get("BOT_LIDAR", "1") != "0":
+        lidar.start()
 
 
 @app.on_event("shutdown")
@@ -299,6 +302,8 @@ async def _shutdown():
         task.cancel()
     await asyncio.gather(*app.state.background_tasks, return_exceptions=True)
     stream.streamer.stop()
+    lidar.stop()                             # sends STOP so the C1 motor spins down
+    slam_engine.shutdown()
     link.close()
 
 
@@ -595,9 +600,8 @@ from .config import LIDAR_PORT, LIDAR_BAUD, MAPS_DIR, SLAM_PORT
 slam_engine = SlamEngine(MAPS_DIR)
 lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan)
 link.add_line_listener(slam_engine.on_line)      # read-only raw O/D lines
-slam_engine.start()
-if os.environ.get("BOT_LIDAR", "1") != "0":
-    lidar.start()
+# Threads start in _startup(), not at import: the deployer's import check
+# must not open /dev/ttyAS4 next to the running console.
 slam_web = slam_app.create_app(slam_engine, lidar, estop)
 
 

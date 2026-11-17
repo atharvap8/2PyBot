@@ -100,12 +100,13 @@ class SlamEngine:
 
     # ------------------------------------------------------------- helpers
     def _odom_at(self, t):
-        h = self.odom_hist
+        with self.lock:                     # the serial thread appends concurrently
+            h = list(self.odom_hist)
         if not h:
             return None
         if t <= h[0][0]:
             return np.array(h[0][1:])
-        for a, b in zip(reversed(list(h)[:-1]), reversed(h)):
+        for a, b in zip(reversed(h[:-1]), reversed(h)):
             if a[0] <= t <= b[0]:
                 f = (t - a[0]) / max(1e-6, b[0] - a[0])
                 th = a[3] + f * math.atan2(math.sin(b[3] - a[3]), math.cos(b[3] - a[3]))
@@ -124,7 +125,9 @@ class SlamEngine:
         c = self.cfg
         if not robot_live:
             return 0.0                                      # lidar-only bench mode: no tilt info
-        win = [x for x in self.att_hist if t0 - 0.05 <= x[0] <= t1 + 0.05]
+        with self.lock:                     # the serial thread appends concurrently
+            hist = list(self.att_hist)
+        win = [x for x in hist if t0 - 0.05 <= x[0] <= t1 + 0.05]
         if not win:
             return None
         dev = max(abs(x[1]) for x in win)
@@ -191,6 +194,7 @@ class SlamEngine:
         tmid = 0.5 * (scan["t0"] + scan["t1"])
         od = self._odom_at(tmid) if robot_live else None
         with self.lock:
+            grid = self.grid                                 # load/start may swap it from HTTP threads
             guess = self.pose.copy()
             if od is not None and self._odom_ref is not None:
                 dx, dy = od[0] - self._odom_ref[0], od[1] - self._odom_ref[1]
@@ -204,11 +208,11 @@ class SlamEngine:
             self.relocalize(wide=True)
             guess = self.pose.copy()
         sub = pts[np.linspace(0, len(pts) - 1, min(len(pts), c["match_points"])).astype(int)]
-        first = self.grid.version == 0
+        first = grid.version == 0
         if first:
             new_pose, score, ok = guess, 0.0, True
         else:
-            new_pose, score = self.grid.match(sub, guess)
+            new_pose, score = grid.match(sub, guess)
             ok = score >= (c["min_loc_score"] if self.mode == "localizing" else c["min_match_score"])
             if not ok:
                 new_pose = guess                             # trust wheels for this scan
@@ -222,7 +226,7 @@ class SlamEngine:
             moved = (lp is None or math.hypot(new_pose[0] - lp[0], new_pose[1] - lp[1]) >= c["map_every_m"]
                      or abs(math.degrees(new_pose[2] - lp[2])) >= c["map_every_deg"])
             if moved and (ok or first):
-                self.grid.integrate(new_pose, pts, sensor)
+                grid.integrate(new_pose, pts, sensor)
                 self._last_map_pose = new_pose.copy()
             self.message = ("Mapping. Drive slowly and come back to where you started to tidy the map."
                             if ok or first else "I'm not sure where I am. Slow down or drive back to a spot you've mapped.")
@@ -300,14 +304,17 @@ class SlamEngine:
             raise ValueError("Use letters, numbers, - or _ (max 40).")
         os.makedirs(self.maps_dir, exist_ok=True)
         base = os.path.join(self.maps_dir, name)
+        # Copy under the lock, compress/write outside it: on_line() takes this
+        # lock on the ESP32 serial reader thread, which must never stall on disk I/O.
         with self.lock:
-            np.savez_compressed(base + ".npz", logodds=self.grid.logodds, touched=self.grid.touched)
-            with open(base + ".png", "wb") as f:
-                f.write(self.grid.png(self.grid.known_bbox()))
-            meta = {"name": name, "resolution": self.grid.res, "origin": self.grid.origin,
-                    "size_cells": self.grid.n, "saved": time.time(), "start_pose": [0, 0, 0]}
-            with open(base + ".json", "w") as f:
-                json.dump(meta, f, indent=1)
+            g = self.grid.copy()
+        np.savez_compressed(base + ".npz", logodds=g.logodds, touched=g.touched)
+        with open(base + ".png", "wb") as f:
+            f.write(g.png(g.known_bbox()))
+        meta = {"name": name, "resolution": g.res, "origin": g.origin,
+                "size_cells": g.n, "saved": time.time(), "start_pose": [0, 0, 0]}
+        with open(base + ".json", "w") as f:
+            json.dump(meta, f, indent=1)
         self.map_name = name
         return meta
 
@@ -367,12 +374,13 @@ class SlamEngine:
         }
 
     def map_png(self):
-        with self.lock:
-            bbox = self.grid.known_bbox()
-            if bbox is None:
-                return None, None
-            png = self.grid.png(bbox)
-            r0, r1, c0, c1 = bbox
-            meta = {"x0": self.grid.origin + c0 * self.grid.res, "y0": self.grid.origin + r0 * self.grid.res,
-                    "w": (c1 - c0) * self.grid.res, "h": (r1 - r0) * self.grid.res, "version": self.grid.version}
+        with self.lock:                          # copy only; encode off the lock (see save())
+            g = self.grid.copy()
+        bbox = g.known_bbox()
+        if bbox is None:
+            return None, None
+        png = g.png(bbox)
+        r0, r1, c0, c1 = bbox
+        meta = {"x0": g.origin + c0 * g.res, "y0": g.origin + r0 * g.res,
+                "w": (c1 - c0) * g.res, "h": (r1 - r0) * g.res, "version": g.version}
         return png, meta

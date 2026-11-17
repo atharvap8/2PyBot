@@ -13,6 +13,14 @@ For the main milestones and estimated dates for future work, see the
   five-step wizard, live map/radar, glossary and a no-hardware demo.
 - Firmware `O` record carries sensor-frame gyro X/Y/Z (append-compatible).
 - `SerialLink.add_line_listener()` gives read-only access to raw `O`/`D` lines.
+- Integration fixes: lidar/SLAM threads start in the console startup hook (the
+  deployer's import check no longer opens `/dev/ttyAS4`) and stop the C1 on
+  shutdown; `/slam/api/estop` passes the firmware-maintenance gate like the
+  other E-STOP routes; map export/save copy the grid under the lock and encode
+  outside it so the ESP32 serial reader never waits on PNG/disk work; odometry
+  and attitude histories are snapshotted before iteration.
+- Firmware: Bluetooth TX power raised to BR/EDR +6..+9 dBm and BLE +9 dBm
+  (ESP32 maximum; defaults were 0..+3 / +3 dBm), logged as `[PAD] BT TX power`.
 
 ## 4.3.0 — Experimental front-bumper self-uprighting
 

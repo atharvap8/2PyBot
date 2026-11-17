@@ -117,7 +117,10 @@ class LidarC1:
         if serial is None:
             raise RuntimeError("pyserial not installed")
         self.ser = serial.Serial(self.port, self.baud, timeout=0.05)
-        self.ser.dtr = False                    # USB adapters use DTR for motor; harmless on UART
+        try:
+            self.ser.dtr = False                # USB adapters use DTR for motor; UARTs may lack modem lines
+        except (OSError, serial.SerialException):
+            pass
         self._send(CMD_STOP)
         time.sleep(0.05)
         self.ser.reset_input_buffer()
