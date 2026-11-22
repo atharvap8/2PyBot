@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 // An instrument panel, not a Material demo: near-black ground, one cyan accent
@@ -25,7 +26,7 @@ val Amber     = Color(0xFFFBBF24)
 val Red       = Color(0xFFF43F5E)
 
 private val Scheme = darkColorScheme(
-    primary = Cyan, onPrimary = Ink,
+    primary = Cyan, onPrimary = Color(0xFF1B1210), primaryContainer = AccentBg, onPrimaryContainer = Cyan,
     secondary = Violet, onSecondary = Ink,
     tertiary = Green, onTertiary = Ink,
     background = Ink, onBackground = TextHi,
@@ -39,6 +40,14 @@ private val Scheme = darkColorScheme(
 // digits don't jitter sideways every time a value changes.
 val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
 
+private val Shapes = androidx.compose.material3.Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+)
+
 private val Typo = Typography(
     titleLarge  = Typography().titleLarge.copy(fontSize=23.sp,fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
     titleMedium = Typography().titleMedium.copy(fontSize=16.sp,fontWeight = FontWeight.SemiBold),
@@ -49,5 +58,5 @@ private val Typo = Typography(
 
 @Composable
 fun TwoPyBotTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, typography = Typo, content = content)
+    MaterialTheme(colorScheme = Scheme, typography = Typo, shapes = Shapes, content = content)
 }

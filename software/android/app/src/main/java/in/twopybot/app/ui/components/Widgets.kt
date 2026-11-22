@@ -151,8 +151,8 @@ fun StickMirror(pad: PadMirror, modifier: Modifier = Modifier) {
         val snap = Math.toRadians(10.0)
         for (s in listOf(-1, 1)) {
             val dx = (sin(snap) * r * s).toFloat()
-            drawLine(Color(0x3335E0D8), Offset(c.x, c.y), Offset(c.x + dx, c.y - r), strokeWidth = 1f)
-            drawLine(Color(0x3335E0D8), Offset(c.x, c.y), Offset(c.x + dx, c.y + r), strokeWidth = 1f)
+            drawLine(Color(0x33F08A4B), Offset(c.x, c.y), Offset(c.x + dx, c.y - r), strokeWidth = 1f)
+            drawLine(Color(0x33F08A4B), Offset(c.x, c.y), Offset(c.x + dx, c.y + r), strokeWidth = 1f)
         }
 
         val p = Offset(c.x + pad.steer.coerceIn(-1f, 1f) * r,

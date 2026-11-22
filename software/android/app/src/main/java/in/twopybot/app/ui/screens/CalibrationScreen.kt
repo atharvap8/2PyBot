@@ -70,7 +70,7 @@ fun CalibrationScreen(vm: BotViewModel, page: String = "/ui/calibration.html", b
         AndroidView(modifier=Modifier.fillMaxSize(),factory={ c ->
             WebView(c).apply {
                 layoutParams=ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
-                setBackgroundColor(0xff090c10.toInt())
+                setBackgroundColor(0xff141210.toInt())
                 settings.javaScriptEnabled=true
                 settings.domStorageEnabled=true
                 settings.allowFileAccess=false
