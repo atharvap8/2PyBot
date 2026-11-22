@@ -1,6 +1,6 @@
 # Lidar mapping (RPLIDAR C1) — standalone, no ROS
 
-Open **http://10.42.0.1:6970/** (or the console at `/slam/`). The page walks you
+Open **http://10.42.0.1:8080/slam/** (single console port). The page walks you
 through five steps: check the lidar, check the wheels, make a map, save it, use it.
 
 ![Live mapping](images/slam/3_mapping_live.png)
@@ -57,7 +57,7 @@ console and system-map STOP routes). The lidar and SLAM threads start with the
 console service and the C1 is sent STOP when the service shuts down.
 
 ## Settings (environment)
-`BOT_SLAM_PORT` (6970, 0 = only `/slam/`), `BOT_LIDAR_PORT` (`/dev/ttyAS4`),
+`BOT_SLAM_PORT` (0 = only `/slam/`; set a port to re-enable a separate server), `BOT_LIDAR_PORT` (`/dev/ttyAS4`),
 `BOT_LIDAR_BAUD` (460800), `BOT_LIDAR_RPM` (1200 = 20 Hz on the C1M1R2; 600 = 10 Hz),
 `BOT_MAPS_DIR` (`~/.2pybot/maps`), `BOT_LIDAR=0` to
 leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py`.

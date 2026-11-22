@@ -5,9 +5,11 @@ import os
 SERIAL_PORT   = os.environ.get("BOT_SERIAL", "/dev/ttyUSB0")
 SERIAL_BAUD   = int(os.environ.get("BOT_BAUD", "460800"))
 HTTP_PORT     = int(os.environ.get("BOT_PORT", "8080"))
-SYSMAP_PORT   = int(os.environ.get("BOT_SYSMAP_PORT", "6969"))   # 0 disables the map port
+# Single web port: the system map (/sysmap/) and lidar maps (/slam/) are pages
+# on HTTP_PORT. Set these to a port number only to re-enable a separate server.
+SYSMAP_PORT   = int(os.environ.get("BOT_SYSMAP_PORT", "0"))
 # Standalone lidar SLAM (RPLIDAR C1 on the 40-pin UART4).
-SLAM_PORT     = int(os.environ.get("BOT_SLAM_PORT", "6970"))     # 0 disables the own port
+SLAM_PORT     = int(os.environ.get("BOT_SLAM_PORT", "0"))
 LIDAR_PORT    = os.environ.get("BOT_LIDAR_PORT", "/dev/ttyAS4")
 LIDAR_BAUD    = int(os.environ.get("BOT_LIDAR_BAUD", "460800"))
 LIDAR_RPM     = int(os.environ.get("BOT_LIDAR_RPM", "1200"))   # 20 Hz scans

@@ -36,7 +36,7 @@ export const NODES = {
   clients: {
     kind: "leaf", x: 40, y: 418, w: 290, h: 104, icon: "phone",
     title: "Phones, browsers", sub: "Hotspot 10.42.0.1, 2.4 GHz",
-    path: "Android app / browser → Wi-Fi hotspot → console :8080, video :8889, map :6969",
+    path: "Android app / browser → Wi-Fi hotspot → console :8080 (/, /sysmap/, /slam/), video :8889",
     checks: ["Hotspot down: check nmcli connection show --active.",
       "The app cannot drive; the gamepad stays on the ESP32."],
     log: /hotspot|wifi|nmcli/i,
@@ -171,6 +171,6 @@ export const PINS = {
     ["CSI", "MIPI camera port", "IMX708 → /dev/2pybot-imx708"], ["I2C-7", "Address 0x29", "VL53L5CX ToF"],
     ["USB", "/dev/ttyUSB0, 460 800", "ESP32"], ["Wi-Fi", "Hotspot 10.42.0.1, channel 6", "Phones and browsers"],
     [":8080", "Console HTTP / WS", "Cockpit, tuning"], [":8889", "MediaMTX WHEP", "Live video"],
-    [":6969", "This map", "Also at :8080/sysmap/"],
+    [":8080/sysmap/", "This map", "Same port as the console"],
   ],
 };

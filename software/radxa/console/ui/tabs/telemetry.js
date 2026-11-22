@@ -27,7 +27,7 @@ export default function register(registerTab) {
     }
     // trail
     if (path.length > 1) {
-      g.strokeStyle = 'rgba(53,224,216,.85)'; g.lineWidth = 2 * devicePixelRatio;
+      g.strokeStyle = 'rgba(240,138,75,.9)'; g.lineWidth = 2 * devicePixelRatio;
       g.beginPath(); path.forEach((p, i) => i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1])));
       g.stroke();
     }

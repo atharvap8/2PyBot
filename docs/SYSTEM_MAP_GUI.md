@@ -9,7 +9,7 @@ and how to build the same kind of interface for any system.
 
 ![Left wheel overheat fault on the system map](images/system-map-wheel.png)
 
-- On the robot: **`http://10.42.0.1:6969`**, or **`http://10.42.0.1:8080/sysmap/`**
+- On the robot: **`http://10.42.0.1:8080/sysmap/`** (single console port; `BOT_SYSMAP_PORT` re-enables a separate one)
 - Without a robot: `python -m console.sysmap_demo --scenario cycle`, then `http://localhost:6969`
 
 ---

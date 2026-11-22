@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>2PyBot Automatic Climb</title><link rel="stylesheet" href="/ui/style.css">
-<style>main{max-width:1050px;margin:auto;padding:16px}.controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}button{padding:12px}.card{margin-bottom:16px}a{color:#35e0d8}#events{max-height:230px;overflow:auto;white-space:pre-wrap}.hint{line-height:1.6}</style></head><body>
+<style>main{max-width:1050px;margin:auto;padding:16px}.controls{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}button{padding:12px}.card{margin-bottom:16px}a{color:var(--cy)}#events{max-height:230px;overflow:auto;white-space:pre-wrap}.hint{line-height:1.6}</style></head><body>
 <header><b>2PyBot · Slope assist 3.20.0</b><span id="state" class="chip">Connecting</span></header>
 <main><div class="card"><h3>Mode selection</h3><p class="hint">These controls select the controller policy. Arming still requires local gamepad START. D-pad DOWN selects manual climb or manual normal; press Enable auto here to return to automatic detection. Manual policy persists across stop/rearm; reboot returns to auto enabled.</p>
 <div class="controls"><button data-command="AC,1">Enable auto</button><button data-command="AC,0">Disable auto</button><button data-command="H,2">Manual climb</button><button data-command="H,0">Manual normal</button></div><p id="message" role="status"></p></div>
