@@ -67,11 +67,15 @@ static float    _zoomDeg   = SERVO_ZOOM_HOME_DEG;
 static bool     _torchOn   = false;
 static uint8_t  _torchPct  = TORCH_BOOT_PCT;
 static uint32_t _lastServoMs = 0;
-static uint32_t _lastMoveMs  = 0;
-static bool     _yawLive     = false;
-static uint32_t _lastZoomCommandMs = 0;
-static bool     _zoomLive = false;
-static const uint32_t ZOOM_RELEASE_MS = 2000;
+// Both servos detach (LEDC released, pin driven LOW) a fixed time after their
+// own last command: SVIDLE ms, or 2 s when SVIDLE is 0.
+static const uint32_t SERVO_RELEASE_DEFAULT_MS = 2000;
+struct _ServoOut { uint8_t pin, ch; float* deg; bool live; uint32_t lastCmdMs; };
+static _ServoOut _yawOut  = {SERVO_YAW_PIN,  SERVO_YAW_CH,  &_yawDeg,  false, 0};
+static _ServoOut _zoomOut = {SERVO_ZOOM_PIN, SERVO_ZOOM_CH, &_zoomDeg, false, 0};
+static inline uint32_t _servoReleaseMs() {
+    return P.svIdleMs > 0 ? (uint32_t)P.svIdleMs : SERVO_RELEASE_DEFAULT_MS;
+}
 
 // ------------------------------------------------------------
 //  Hardware writes
@@ -86,30 +90,32 @@ static void _servoWriteDeg(uint8_t pin, uint8_t ch, float deg) {
     _pwmWrite(pin, ch, (uint32_t)(us * countsPerUs + 0.5f));
 }
 
-static void _zoomCommand() {
-    if (!_zoomLive) {
+// Attach on demand and (re)start this servo's own release deadline.
+static void _servoCommand(_ServoOut& s) {
+    if (!s.live) {
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-        _pwmAttach(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, SERVO_PWM_HZ, SERVO_PWM_BITS);
+        _pwmAttach(s.pin, s.ch, SERVO_PWM_HZ, SERVO_PWM_BITS);
 #else
-        // Channel is already configured: do not reset the timer shared with yaw.
-        ledcAttachPin(SERVO_ZOOM_PIN, SERVO_ZOOM_CH);
+        // Channel is already configured: do not reset the shared servo timer.
+        ledcAttachPin(s.pin, s.ch);
 #endif
-        _zoomLive = true;
+        s.live = true;
     }
-    _lastZoomCommandMs = millis();
-    _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
+    s.lastCmdMs = millis();
+    _servoWriteDeg(s.pin, s.ch, *s.deg);
 }
 
-static void _zoomRelease() {
-    _pwmWrite(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, 0);
+static void _servoRelease(_ServoOut& s) {
+    if (!s.live) return;
+    _pwmWrite(s.pin, s.ch, 0);
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-    ledcDetach(SERVO_ZOOM_PIN);
+    ledcDetach(s.pin);
 #else
-    ledcDetachPin(SERVO_ZOOM_PIN);
+    ledcDetachPin(s.pin);
 #endif
-    pinMode(SERVO_ZOOM_PIN, OUTPUT);
-    digitalWrite(SERVO_ZOOM_PIN, LOW);
-    _zoomLive = false;
+    pinMode(s.pin, OUTPUT);
+    digitalWrite(s.pin, LOW);
+    s.live = false;
 }
 
 // Every torch change in the whole firmware funnels through here.
@@ -151,10 +157,8 @@ inline void payload_begin() {
     _pwmAttach(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, SERVO_PWM_HZ, SERVO_PWM_BITS);
     _yawDeg  = P.svYawHome;
     _zoomDeg = P.svZoomHome;
-    _servoWriteDeg(SERVO_YAW_PIN,  SERVO_YAW_CH,  _yawDeg);
-    _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
-    _yawLive  = true;
-    _lastMoveMs = millis();
+    _yawOut.live = true;
+    _servoCommand(_yawOut);              // home, then release after the deadline
 
     Serial.printf("[PAY] Servos yaw GPIO%d / zoom GPIO%d homed to %.0f / %.0f deg\n",
                   SERVO_YAW_PIN, SERVO_ZOOM_PIN,
@@ -172,9 +176,8 @@ inline void payload_begin() {
                   z ? "  <-- fit a 10k resistor from this pin to GND" : "  (correct)");
     _claimPin(SERVO_ZOOM_PIN);
     _pwmAttach(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, SERVO_PWM_HZ, SERVO_PWM_BITS);
-    _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
-    _zoomLive = true;
-    _lastZoomCommandMs = millis();
+    _zoomOut.live = true;
+    _servoCommand(_zoomOut);
 }
 
 inline void payload_torchToggle() {
@@ -211,11 +214,13 @@ inline void payload_torchSetPct(int pct) {
     Serial.printf("[PAY] Torch %d%% (%s)\n", _torchPct, _torchOn ? "on" : "off");
 }
 
-inline void payload_setYaw(float deg)  { _yawDeg  = constrain(deg, (float)P.svYawMin,  (float)P.svYawMax);  _lastMoveMs = millis(); }
+inline void payload_setYaw(float deg) {
+    _yawDeg = constrain(deg, (float)P.svYawMin, (float)P.svYawMax);
+    _servoCommand(_yawOut);
+}
 inline void payload_setZoom(float deg) {
     _zoomDeg = constrain(deg, (float)P.svZoomMin, (float)P.svZoomMax);
-    _lastMoveMs = millis();
-    _zoomCommand();
+    _servoCommand(_zoomOut);
 }
 
 inline void payload_center() {
@@ -236,36 +241,24 @@ inline float payload_zoom()      { return _zoomDeg;  }
 // middle every time you let go, which is useless for a lens.
 inline void payload_update(float dt, float yawStick, float zoomStick) {
 
-    bool moving = (yawStick != 0.0f) || (zoomStick != 0.0f);
-
-    if (moving) {
-        _yawDeg  += yawStick  * P.servoYawR  * dt;
-        _zoomDeg += zoomStick * P.servoZoomR * dt;
-        _yawDeg  = constrain(_yawDeg,  (float)P.svYawMin,  (float)P.svYawMax);
-        _zoomDeg = constrain(_zoomDeg, (float)P.svZoomMin, (float)P.svZoomMax);
-        _lastMoveMs = millis();
-        if (zoomStick != 0.0f) _zoomCommand();
+    // Each axis renews only its own deadline while its stick is held.
+    if (yawStick != 0.0f) {
+        _yawDeg = constrain(_yawDeg + yawStick * P.servoYawR * dt, (float)P.svYawMin, (float)P.svYawMax);
+        _servoCommand(_yawOut);
+    }
+    if (zoomStick != 0.0f) {
+        _zoomDeg = constrain(_zoomDeg + zoomStick * P.servoZoomR * dt, (float)P.svZoomMin, (float)P.svZoomMax);
+        _servoCommand(_zoomOut);
     }
 
-    uint32_t now = millis();
-    // Zoom has its own command deadline: yaw movement and periodic refreshes
-    // must not keep it attached. Held zoom input renews the deadline each loop.
-    if (_zoomLive && now - _lastZoomCommandMs >= ZOOM_RELEASE_MS) _zoomRelease();
+    const uint32_t now = millis(), release = _servoReleaseMs();
+    if (_yawOut.live  && now - _yawOut.lastCmdMs  >= release) _servoRelease(_yawOut);
+    if (_zoomOut.live && now - _zoomOut.lastCmdMs >= release) _servoRelease(_zoomOut);
     if (now - _lastServoMs < (uint32_t)(1000.0f / (P.svRate < 1 ? 1 : P.svRate))) return;   // one servo frame
     _lastServoMs = now;
-
-    // Yaw retains its existing SVIDLE setting. Zoom always detaches after its
-    // independent two-second deadline, including when SVIDLE is zero.
-    if (P.svIdleMs > 0 && !moving && (now - _lastMoveMs) > (uint32_t)P.svIdleMs) {
-        if (_yawLive) {
-            _pwmWrite(SERVO_YAW_PIN,  SERVO_YAW_CH,  0);
-            _yawLive = false;
-        }
-    } else {
-        _yawLive = true;
-        _servoWriteDeg(SERVO_YAW_PIN, SERVO_YAW_CH, _yawDeg);
-    }
-    if (_zoomLive) _servoWriteDeg(SERVO_ZOOM_PIN, SERVO_ZOOM_CH, _zoomDeg);
+    // Refresh only attached servos; a released servo stays unpowered.
+    if (_yawOut.live)  _servoWriteDeg(_yawOut.pin,  _yawOut.ch,  _yawDeg);
+    if (_zoomOut.live) _servoWriteDeg(_zoomOut.pin, _zoomOut.ch, _zoomDeg);
 }
 
 #endif // PAYLOAD_H

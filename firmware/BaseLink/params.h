@@ -171,7 +171,7 @@
   X(svYawHome, "SVYAWHOME",SERVO_YAW_HOME_DEG, 0.0f, 270.0f, "PAYLOAD", "pan home (deg)")               \
   X(svZoomHome,"SVZHOME", SERVO_ZOOM_HOME_DEG, 0.0f, 270.0f, "PAYLOAD", "zoom home (deg)")              \
   X(svRate,    "SVRATE",  SERVO_UPDATE_HZ,    10.0f, 200.0f, "PAYLOAD", "servo refresh (Hz)")           \
-  X(svIdleMs,  "SVIDLE",  SERVO_IDLE_RELEASE_MS,0.0f,10000.0f,"PAYLOAD","stop pulsing after idle (ms)") \
+  X(svIdleMs,  "SVIDLE",  SERVO_IDLE_RELEASE_MS,0.0f,10000.0f,"PAYLOAD","both servos detach after last command (ms; 0 = 2000)") \
   X(torchBoot, "TRCHBOOT",TORCH_BOOT_PCT,      1.0f,  90.0f, "PAYLOAD", "torch preset at boot (%)")     \
   X(torchMin,  "TRCHMIN", TORCH_MIN_PCT,       1.0f,  50.0f, "PAYLOAD", "torch minimum (%)")            \
   /* ---------- ring ---------- */                                           \

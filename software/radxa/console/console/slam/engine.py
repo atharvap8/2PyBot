@@ -22,11 +22,14 @@ from .odom_core import Attitude, DSample, Odometry, OSample, axis_name, parse_li
 # centreline and on the axle line (assembly A1); 0 deg mark faces forward.
 DEFAULTS = {
     "lidar_x": 0.0, "lidar_y": -0.031, "lidar_yaw_deg": 0.0,
-    "lidar_height": 0.26,            # scan plane above floor (approx, window not measured)
+    "lidar_height": 0.265,           # measured scan-plane height above floor (owner, upright)
     "self_radius": 0.12,             # guard fence + body
     "min_quality": 5,
     "max_range": 8.0,
-    "max_tilt_deg": 3.0, "max_tilt_rate": 40.0, "plane_tol_deg": 1.0,
+    # Per-beam floor clipping handles normal balancing lean; whole scans are
+    # dropped only for a large lean (resting/falling) or fast rocking.
+    "max_tilt_deg": 12.0, "max_tilt_rate": 60.0, "plane_tol_deg": 0.75,
+    "deskew": True,
     "wheel_radius": 0.052, "track": 0.155, "cpr": 4096,
     "yaw_axis": "auto", "encoder_yaw_sign": 1.0,
     "match_points": 200,
@@ -59,7 +62,7 @@ class SlamEngine:
         self._last_map_pose = None
         self.path = collections.deque(maxlen=3000)
         self.scan_pts = np.zeros((0, 2))
-        self.gate = {"passed": 0, "tilt": 0, "rate": 0, "no_robot": 0, "usable_range": 0.0}
+        self.gate = {"passed": 0, "tilt": 0, "rate": 0, "no_robot": 0, "usable_range": 0.0, "floor_clipped": 0}
         self.match = {"score": 0.0, "ok": False, "lost": 0}
         self.message = "Waiting for the lidar."
         self.tests = {}
@@ -120,8 +123,45 @@ class SlamEngine:
         a = np.radians(-np.asarray(scan["angle_deg"], float)) + math.radians(c["lidar_yaw_deg"])
         r = np.asarray(scan["dist_mm"], float) / 1000.0
         q = np.asarray(scan["quality"], float)
+        # Points arrive in rotation order; their fraction of the sweep gives
+        # each one's capture time between scan t0 and t1 (used for de-skew).
+        frac = np.linspace(0.0, 1.0, len(r)) if len(r) > 1 else np.zeros(len(r))
         keep = (q >= c["min_quality"]) & (r >= c["self_radius"])
-        return a[keep], r[keep]
+        return a[keep], r[keep], frac[keep]
+
+    def _floor_limit(self, a, tilt_deg, spread_deg):
+        """Per-beam range before the tilted scan plane reaches the floor.
+
+        Forward pitch lowers forward beams by atan(tan(tilt)*cos(azimuth)); side
+        beams stay level and rearward beams rise, so they keep full range.
+        """
+        c = self.cfg
+        dip = np.degrees(np.arctan(math.tan(math.radians(tilt_deg)) * np.cos(a)))
+        down = dip + spread_deg + c["plane_tol_deg"]
+        limit = np.full(len(a), float(c["max_range"]))
+        hit = down > 1e-3
+        limit[hit] = np.minimum(limit[hit], c["lidar_height"] / np.tan(np.radians(down[hit])))
+        return limit
+
+    def _deskew(self, pts, frac, t0, t1):
+        """Express every point in the robot frame at mid-scan using odometry."""
+        knots = np.linspace(t0, t1, 5)
+        poses = [self._odom_at(t) for t in knots]
+        if any(p is None for p in poses):
+            return pts
+        poses = np.array(poses)
+        mid = self._odom_at(0.5 * (t0 + t1))
+        tq = frac * 4.0
+        x = np.interp(tq, np.arange(5), poses[:, 0])
+        y = np.interp(tq, np.arange(5), poses[:, 1])
+        th = np.interp(tq, np.arange(5), np.unwrap(poses[:, 2]))
+        # pose_i relative to mid, in the mid robot frame
+        cm, sm = math.cos(mid[2]), math.sin(mid[2])
+        dx, dy = x - mid[0], y - mid[1]
+        rx, ry = cm * dx + sm * dy, -sm * dx + cm * dy
+        dth = th - mid[2]
+        cd, sd = np.cos(dth), np.sin(dth)
+        return np.c_[rx + cd * pts[:, 0] - sd * pts[:, 1], ry + sd * pts[:, 0] + cd * pts[:, 1]]
 
     def _gate(self, t0, t1, robot_live):
         c = self.cfg
@@ -132,15 +172,17 @@ class SlamEngine:
         win = [x for x in hist if t0 - 0.05 <= x[0] <= t1 + 0.05]
         if not win:
             return None
-        dev = max(abs(x[1]) for x in win)
+        devs = [x[1] for x in win]
         rate = max(abs(x[2]) for x in win)
-        if dev > c["max_tilt_deg"]:
+        if max(abs(d) for d in devs) > c["max_tilt_deg"]:
             self.gate["tilt"] += 1
             return "tilt"
         if rate > c["max_tilt_rate"]:
             self.gate["rate"] += 1
             return "rate"
-        return dev
+        # Signed mean lean during the sweep plus its spread as extra margin.
+        mean = sum(devs) / len(devs)
+        return mean, max(abs(d - mean) for d in devs)
 
     # ------------------------------------------------------------- worker
     def _worker(self):
@@ -166,7 +208,7 @@ class SlamEngine:
 
     def _process(self, scan):
         c = self.cfg
-        a, r = self._scan_points(scan)
+        a, r, frac = self._scan_points(scan)
         robot_live = time.monotonic() - self.last_o < 1.0
         g = self._gate(scan["t0"], scan["t1"], robot_live)
         sensor = np.array([c["lidar_x"], c["lidar_y"]])
@@ -174,18 +216,21 @@ class SlamEngine:
         with self.lock:
             self.scan_pts = pts_full                         # radar view shows raw scan
         if g in ("tilt", "rate"):
-            self.message = ("The robot is leaning, so I'm skipping this scan (the laser would hit the floor)."
+            self.message = ("The robot is leaning a lot, so I'm skipping this scan."
                             if g == "tilt" else "The robot is rocking fast, so I'm skipping this scan.")
             return
         if g is None:
             self.gate["no_robot"] += 1
             return
-        tilt = g
-        usable = min(c["max_range"], c["lidar_height"] / math.tan(math.radians(abs(tilt) + c["plane_tol_deg"])))
-        keep = r <= usable
+        tilt, spread = g if isinstance(g, tuple) else (g, 0.0)
+        limit = self._floor_limit(a, tilt, spread)
+        keep = r <= limit
         pts = pts_full[keep]
+        if c["deskew"] and robot_live and len(pts):
+            pts = self._deskew(pts, frac[keep], scan["t0"], scan["t1"])
         self.gate["passed"] += 1
-        self.gate["usable_range"] = usable
+        self.gate["usable_range"] = float(limit.min()) if len(limit) else c["max_range"]
+        self.gate["floor_clipped"] = int((~keep).sum())
         if self.mode == "idle" or len(pts) < 30:
             if self.mode == "idle":
                 self.message = "Lidar is working. Press Start mapping when you're ready."

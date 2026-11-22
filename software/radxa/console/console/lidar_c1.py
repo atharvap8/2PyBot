@@ -28,19 +28,21 @@ CMD_STOP, CMD_RESET, CMD_SCAN = 0x25, 0x40, 0x20
 CMD_INFO, CMD_HEALTH, CMD_HQ_MOTOR = 0x50, 0x52, 0xA8
 TYPE_INFO, TYPE_HEALTH, TYPE_MEAS = 0x04, 0x06, 0x81
 HEALTH_TEXT = {0: "good", 1: "warning", 2: "error"}
-DEFAULT_RPM = 600
+DEFAULT_RPM = 1200            # 20 Hz on the C1M1R2 (owner-confirmed); 600 = 10 Hz
 
 
 class LidarC1:
-    def __init__(self, port: str, baud: int = 460800, on_scan=None):
+    def __init__(self, port: str, baud: int = 460800, on_scan=None, rpm: int = DEFAULT_RPM):
         self.port, self.baud = port, baud
+        self.rpm = max(300, min(1500, int(rpm)))
         self.on_scan = on_scan                 # fn(scan_dict) per full rotation
         self.ser = None
         self._stop = threading.Event()
         self._thread = None
         self.status = {"state": "stopped", "port": port, "baud": baud, "error": "", "note": "",
                        "model": None, "firmware": None, "hardware": None, "serial": None,
-                       "health": None, "scan_hz": 0.0, "points": 0, "bad_nodes": 0, "scans": 0}
+                       "health": None, "scan_hz": 0.0, "points": 0, "bad_nodes": 0, "scans": 0,
+                       "rpm": self.rpm}
 
     # ------------------------------------------------------------ lifecycle
     def start(self):
@@ -202,13 +204,17 @@ class LidarC1:
             self.status.update(state="connecting", error="")
             try:
                 self._open_and_identify()
+                # Set the motor speed first: legacy SCAN only streams after the
+                # HQ motor command, and it selects the scan rate (rpm / 60 Hz).
+                self._send(CMD_HQ_MOTOR, struct.pack("<H", self.rpm))
+                time.sleep(1.2)
                 ok = self._start_scan()
                 if ok:
                     self.status["state"] = "scanning"
                 why = self._scan_loop() if ok else "no scan descriptor"
                 if why in ("no samples", "no scan descriptor") and not self._stop.is_set():
                     self.status["note"] = "SCAN gave no samples; sending motor-speed command and retrying"
-                    self._send(CMD_HQ_MOTOR, struct.pack("<H", DEFAULT_RPM))
+                    self._send(CMD_HQ_MOTOR, struct.pack("<H", self.rpm))
                     time.sleep(0.8)
                     if self._start_scan():
                         self.status["state"] = "scanning"

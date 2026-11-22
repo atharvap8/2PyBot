@@ -108,7 +108,17 @@ def main():
     started = False
     try:
         alive = C.c_uint8()
-        call("is_alive", C.byref(alive))
+        # The first transfer after the TWI controller resumes from runtime
+        # suspend can fail once; retry the ID check briefly before giving up.
+        for attempt in range(4):
+            try:
+                call("is_alive", C.byref(alive))
+                break
+            except RuntimeError:
+                if attempt == 3:
+                    raise
+                fault.clear()
+                time.sleep(0.02 * (attempt + 1))
         if not alive.value:
             raise RuntimeError(f"No VL53L5CX at /dev/i2c-{bus_number} {address:#x}")
         emit(state="initializing", message="ID verified; uploading sensor firmware")

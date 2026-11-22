@@ -595,10 +595,10 @@ app.mount("/sysmap", sysmap_app, name="sysmap")
 from . import slam_app
 from .lidar_c1 import LidarC1
 from .slam.engine import SlamEngine
-from .config import LIDAR_PORT, LIDAR_BAUD, MAPS_DIR, SLAM_PORT
+from .config import LIDAR_PORT, LIDAR_BAUD, LIDAR_RPM, MAPS_DIR, SLAM_PORT
 
 slam_engine = SlamEngine(MAPS_DIR)
-lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan)
+lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan, rpm=LIDAR_RPM)
 link.add_line_listener(slam_engine.on_line)      # read-only raw O/D lines
 # Threads start in _startup(), not at import: the deployer's import check
 # must not open /dev/ttyAS4 next to the running console.

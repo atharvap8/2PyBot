@@ -10,6 +10,7 @@ SYSMAP_PORT   = int(os.environ.get("BOT_SYSMAP_PORT", "6969"))   # 0 disables th
 SLAM_PORT     = int(os.environ.get("BOT_SLAM_PORT", "6970"))     # 0 disables the own port
 LIDAR_PORT    = os.environ.get("BOT_LIDAR_PORT", "/dev/ttyAS4")
 LIDAR_BAUD    = int(os.environ.get("BOT_LIDAR_BAUD", "460800"))
+LIDAR_RPM     = int(os.environ.get("BOT_LIDAR_RPM", "1200"))   # 20 Hz scans
 MAPS_DIR      = os.path.expanduser(os.environ.get("BOT_MAPS_DIR", "~/.2pybot/maps"))
 
 ENCODER_CPR   = 4096          # MT6816 with 4x quadrature decode

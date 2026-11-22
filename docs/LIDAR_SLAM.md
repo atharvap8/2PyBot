@@ -58,7 +58,8 @@ console service and the C1 is sent STOP when the service shuts down.
 
 ## Settings (environment)
 `BOT_SLAM_PORT` (6970, 0 = only `/slam/`), `BOT_LIDAR_PORT` (`/dev/ttyAS4`),
-`BOT_LIDAR_BAUD` (460800), `BOT_MAPS_DIR` (`~/.2pybot/maps`), `BOT_LIDAR=0` to
+`BOT_LIDAR_BAUD` (460800), `BOT_LIDAR_RPM` (1200 = 20 Hz on the C1M1R2; 600 = 10 Hz),
+`BOT_MAPS_DIR` (`~/.2pybot/maps`), `BOT_LIDAR=0` to
 leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py`.
 
 ## Try it without the robot
@@ -70,6 +71,12 @@ leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py
   motor-speed command (`0xA8`); the driver sends it automatically after the first
   empty SCAN (verified, ~1.5 s delay at connect).
 
+## Floor clipping and de-skew
+The scan plane is 0.265 m above the floor (measured, upright). Pitch lowers only
+the forward/backward beams: a beam at azimuth φ dips `atan(tan θ·cos φ)`, so each
+beam is clipped at `0.265 / tan(dip + spread + 0.75°)`; side and rising beams keep
+full range. Whole scans are skipped only above 12° lean or 60°/s rocking. Every
+point is moved to the mid-scan robot pose using odometry (de-skew).
+
 ## Not verified on hardware yet
-1. `lidar_height` (0.26 m) and `lidar_y` (−0.031 m) come from the CAD assembly;
-   the optical window height on the C1 head is not measured.
+1. `lidar_y` (−0.031 m) comes from the CAD assembly.
