@@ -34,7 +34,7 @@ DEFAULTS = {
     "deskew": True,
     "tof_height": 0.21,              # VL53L5CX above the floor (owner, wheel contact to sensor)
     "tof_x": 0.0,                    # forward offset from the axle (not measured)
-    "tof_y": 0.0,                    # LEFT of centreline (+); owner: ToF is left-offset, value pending
+    "tof_y": 0.04,                   # 4 cm LEFT of the centreline (owner-measured)
     "wheel_radius": 0.052, "track": 0.155, "cpr": 4096,
     "yaw_axis": "auto", "encoder_yaw_sign": 1.0,
     "match_points": 200,
