@@ -18,7 +18,8 @@ const ICONS = {
   pad: '<rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 11v3M5.5 12.5h3"/><circle cx="16" cy="11.5" r="1"/><circle cx="18" cy="13.5" r="1"/>',
   ring: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="4" r="1.3"/><circle cx="20" cy="12" r="1.3"/><circle cx="12" cy="20" r="1.3"/><circle cx="4" cy="12" r="1.3"/>',
 };
-const ICON_BUS = { camera: "csi", grid: "i2c", phone: "wifi", axis: "i2c", compass: "i2c", pad: "bt", ring: "pwm" };
+ICONS.lidar = '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 12l7-5"/>';
+const ICON_BUS = { camera: "csi", grid: "i2c", phone: "wifi", axis: "i2c", compass: "i2c", pad: "bt", ring: "pwm", lidar: "uart" };
 
 let snap = null, selected = null, userPicked = false, lastMsg = 0;
 const els = {}, wireEls = {};

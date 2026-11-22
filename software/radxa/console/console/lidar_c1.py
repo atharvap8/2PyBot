@@ -152,6 +152,7 @@ class LidarC1:
         t_start = time.monotonic()
         last_scan_t = None
         first = True
+        speed_set = False
         buf = bytearray()
         got_any_until = time.monotonic() + 1.5
         while not self._stop.is_set():
@@ -170,6 +171,11 @@ class LidarC1:
                     i += 1
                     continue
                 got_any_until = time.monotonic() + 1.5
+                if not speed_set:
+                    # Same order as the bench tool that reached 20 Hz: motor
+                    # speed (rpm) is sent after scanning has started.
+                    self._send(CMD_HQ_MOTOR, struct.pack("<H", self.rpm))
+                    speed_set = True
                 angle = (struct.unpack_from("<H", buf, i + 1)[0] >> 1) / 64.0
                 dist = struct.unpack_from("<H", buf, i + 3)[0] / 4.0
                 q = b0 >> 2
@@ -204,10 +210,10 @@ class LidarC1:
             self.status.update(state="connecting", error="")
             try:
                 self._open_and_identify()
-                # Set the motor speed first: legacy SCAN only streams after the
-                # HQ motor command, and it selects the scan rate (rpm / 60 Hz).
+                # Kick the motor so legacy SCAN streams; the final rpm is applied
+                # again once samples flow (the C1 only honours it while scanning).
                 self._send(CMD_HQ_MOTOR, struct.pack("<H", self.rpm))
-                time.sleep(1.2)
+                time.sleep(0.8)
                 ok = self._start_scan()
                 if ok:
                     self.status["state"] = "scanning"

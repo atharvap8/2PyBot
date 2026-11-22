@@ -77,7 +77,7 @@ def _nearest_mm(tof):
 
 
 # ------------------------------------------------------------ app factory
-def create_app(link, tof, streamer, host_ready, estop):
+def create_app(link, tof, streamer, host_ready, estop, lidar_status=lambda: {}):
     """`link`, `tof` and `streamer` are the console's live objects.
     `host_ready()` and `estop()` are the console's own functions."""
     app = FastAPI(title="2PyBot system map", version="1.0")
@@ -128,6 +128,7 @@ def create_app(link, tof, streamer, host_ready, estop):
                        "frame": metrics.get("frame"),
                        "capture_to_publish_ms": metrics.get("capture_to_publish_ms")},
             "host": host_ready(),
+            "lidar": dict(lidar_status() or {}),
             "system": system_stats(),
             "clients": {"console": len(getattr(link, "_subs", ())), "sysmap": len(viewers)},
             "events": events,

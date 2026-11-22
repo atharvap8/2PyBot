@@ -578,7 +578,8 @@ async def ws(sock: WebSocket):
 # Imported here because create_app needs estop() and host_ready() from above.
 from . import sysmap
 
-sysmap_app = sysmap.create_app(link, tof, stream.streamer, host_ready, estop)
+sysmap_app = sysmap.create_app(link, tof, stream.streamer, host_ready, estop,
+                               lidar_status=lambda: dict(lidar.status, slam_hz=slam_engine.rate_hz.get("scan", 0.0)))
 
 
 @app.get("/sysmap")

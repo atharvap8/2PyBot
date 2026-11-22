@@ -1,10 +1,13 @@
 <!doctype html><html lang=en><head>
 <meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>2PyBot Console</title><link rel=stylesheet href=/ui/style.css><link rel=stylesheet href=/ui/calibration.css>
-</head><body>
-<div class=toolbar>
-<header>
-  <div class=brand><span class=dot id=dot></span><b>2PyBot</b><small id=sub>console</small></div>
+<meta name=theme-color content="#141210">
+<title>2PyBot Console</title><link rel=stylesheet href=/ui/style.css?v=44><link rel=stylesheet href=/ui/calibration.css?v=44>
+</head><body class=shell>
+<header class=top>
+  <a class=brand href=/>
+    <svg viewBox="0 0 32 32" aria-hidden=true><circle cx=16 cy=16 r=13 fill=none stroke=currentColor stroke-width=2.5 /><circle cx=16 cy=16 r=5 fill=currentColor /><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke=currentColor stroke-width=2.5 stroke-linecap=round /></svg>
+    <div><b>2PyBot <i class=dot id=dot></i></b><span id=sub>console</span></div>
+  </a>
   <div class=chips>
     <span class=chip id=cState>—</span>
     <span class=chip id=cPitch>pitch —</span>
@@ -12,14 +15,15 @@
     <span class=chip id=cRx>— Hz</span>
   </div>
   <nav class=pages aria-label=Pages>
-    <a class=sel href=/>Console</a><a href=/sysmap/>System map</a><a href=/slam/>Maps</a>
-    <a href=/ui/autonomy.html>Autopilot</a><a href=/ui/deployment.html>Deployment</a><a href=/ui/android.apk>App</a>
+    <a class=sel href=/>Console</a><a href=/sysmap/>System</a><a href=/slam/>Maps</a>
+    <a href=/ui/autonomy.html>Autopilot</a><a href=/ui/deployment.html>Deploy</a><a href=/ui/android.apk>App</a>
   </nav>
-  <button class=estop onclick="window.API.estop()">■ E-STOP</button>
+  <button class=estop onclick="window.API.estop()">STOP</button>
 </header>
-<nav id=tabs></nav>
+<div class=body>
+  <nav id=tabs class=rail aria-label=Sections></nav>
+  <main id=view></main>
 </div>
-<main id=view></main>
 <footer><span id=msg>starting…</span><span id=dirty></span></footer>
 <script src=/ui/app.js type=module></script>
 </body></html>

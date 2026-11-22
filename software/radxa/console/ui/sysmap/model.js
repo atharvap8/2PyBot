@@ -33,6 +33,14 @@ export const NODES = {
       "Run i2cdetect -y 7 on the Radxa; the sensor answers at 0x29."],
     log: /tof|vl53|depth/i,
   },
+  lidar: {
+    kind: "leaf", x: 40, y: 592, w: 290, h: 104, icon: "lidar",
+    title: "RPLIDAR C1M1R2", sub: "360° scan, 20 Hz, right of centre",
+    path: "C1 → UART4 /dev/ttyAS4 460 800 (96 MHz clock overlay) → lidar driver → SLAM",
+    checks: ["Low scan rate: open /slam/ and compare the rate with the requested 20 Hz.",
+      "No answer: TX/RX crossed, 5 V on pin 2/4, UART4 and the 96 MHz overlay enabled."],
+    log: /lidar|slam|ttyAS4/i,
+  },
   clients: {
     kind: "leaf", x: 40, y: 418, w: 290, h: 104, icon: "phone",
     title: "Phones, browsers", sub: "Hotspot 10.42.0.1, 2.4 GHz",
@@ -128,6 +136,8 @@ export const WIRES = [
     d: "M330 120 C400 120 380 250 440 250", tag: [385, 184, "MIPI CSI"] },
   { id: "tof", node: "tof", bus: "i2c", flow: "fwd", speed: 0.8,
     d: "M330 296 H440", tag: [385, 296, "I2C-7, 0x29"] },
+  { id: "lidar", node: "lidar", bus: "uart", flow: "fwd", speed: 1.6,
+    d: "M330 644 C440 644 520 560 520 448", tag: [430, 600, "UART4 460 800"] },
   { id: "clients", node: "clients", bus: "wifi", flow: "rev", speed: 0.9, dashed: true,
     d: "M330 470 C400 470 380 340 440 340", tag: [385, 406, "Wi-Fi, WebRTC"] },
   { id: "imu", node: "imu", bus: "i2c", flow: "rev", speed: 1.4,
