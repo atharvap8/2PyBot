@@ -56,6 +56,10 @@ def create_app(engine, lidar, estop):
         png, _ = engine.map_png()
         return Response(png or b"", media_type="image/png")
 
+    @app.get("/api/scene3d")
+    def api_scene3d():
+        return JSONResponse(_safe(engine.scene3d()))
+
     @app.post("/api/mapping/start")
     def mapping_start(fresh: bool = True):
         engine.start_mapping(fresh)

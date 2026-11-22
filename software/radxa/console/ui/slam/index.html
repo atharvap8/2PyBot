@@ -29,7 +29,7 @@
       <ul class="checks">
         <li id="c-lidar-conn">Lidar connected</li>
         <li id="c-lidar-health">Lidar health is good</li>
-        <li id="c-lidar-rate">About 10 scans per second</li>
+        <li id="c-lidar-rate">About 20 scans per second</li>
       </ul>
       <div class="hint" id="h-step1"></div>
     </section>
@@ -88,12 +88,15 @@
       <div class="seg" role="tablist">
         <button id="v-map" aria-selected="true">Map</button>
         <button id="v-radar" aria-selected="false">Radar</button>
+        <button id="v-3d" aria-selected="false">3D</button>
       </div>
       <span class="sub" id="view-note">Scroll or pinch to zoom · drag to move</span>
       <div class="spacer"></div>
       <button class="btn small" id="b-center">Center on robot</button>
     </div>
     <canvas id="cv"></canvas>
+    <canvas id="cv3" hidden></canvas>
+    <div class="legend3d" id="legend3d" hidden><span><i style="background:#aba196"></i>Lidar walls (26.5 cm slice)</span><span><i style="background:#f08a4b"></i>ToF objects (low → high)</span><span><i style="background:#ff4d6d"></i>Drop-offs</span><span><i style="background:#3a322b"></i>Floor seen</span><b id="stat3d"></b></div>
     <div class="say" id="say">Connecting…</div>
   </section>
 
@@ -104,7 +107,7 @@
       <div class="meter"><span>Scan quality</span><div class="bar"><i id="m-scan"></i></div><b id="m-scan-v">–</b></div>
       <div class="meter"><span>Map match</span><div class="bar"><i id="m-match"></i></div><b id="m-match-v">–</b></div>
       <div class="meter"><span>Robot tilt</span><div class="bar"><i id="m-tilt"></i></div><b id="m-tilt-v">–</b></div>
-      <p class="sub">Scans taken while the robot leans more than 3° are skipped, because the laser would hit the floor.</p>
+      <p class="sub">Beams that would hit the floor at the current lean are cut one by one; whole scans are skipped only above 12° or when rocking fast.</p>
     </div>
     <div class="card kv">
       <h3>Numbers</h3>
@@ -134,6 +137,7 @@
     </details>
   </aside>
 </main>
+<script src="static/slam3d.js"></script>
 <script src="static/slam.js"></script>
 </body>
 </html>

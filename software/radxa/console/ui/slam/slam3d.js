@@ -1,0 +1,139 @@
+// 3D map view: lidar walls (extruded to the scan-plane height) + ToF voxels.
+// Self-contained WebGL1 + ANGLE_instanced_arrays; renders only when something
+// changes, so an idle page costs no GPU time. Exposes window.Slam3D.
+(function () {
+  "use strict";
+  const VS = `attribute vec3 aPos; attribute vec3 aNrm; attribute vec4 aInst; attribute vec3 aCol;
+uniform mat4 uMVP; uniform float uSize; varying vec3 vCol;
+void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst.z + aPos.z*aInst.w);
+  float l = 0.55 + 0.45*max(dot(aNrm, normalize(vec3(0.4,0.3,0.85))), 0.0);
+  vCol = aCol * l; gl_Position = uMVP * vec4(p, 1.0); }`;
+  const FS = `precision mediump float; varying vec3 vCol; void main(){ gl_FragColor = vec4(vCol, 1.0); }`;
+  const LVS = `attribute vec3 aPos; uniform mat4 uMVP; void main(){ gl_Position = uMVP * vec4(aPos, 1.0); }`;
+  const LFS = `precision mediump float; uniform vec4 uCol; void main(){ gl_FragColor = uCol; }`;
+
+  function cubeGeometry() {
+    // unit cube [0,1]^3 with per-face normals, 36 vertices
+    const f = [
+      [[0,0,1],[1,0,1],[1,1,1],[0,1,1],[0,0,1]], [[0,0,0],[0,1,0],[1,1,0],[1,0,0],[0,0,-1]],
+      [[0,0,0],[1,0,0],[1,0,1],[0,0,1],[0,-1,0]], [[0,1,0],[0,1,1],[1,1,1],[1,1,0],[0,1,0]],
+      [[0,0,0],[0,0,1],[0,1,1],[0,1,0],[-1,0,0]], [[1,0,0],[1,1,0],[1,1,1],[1,0,1],[1,0,0]]];
+    const out = [];
+    for (const [a, b, c, d, n] of f) for (const v of [a, b, c, a, c, d]) out.push(...v, ...n);
+    return new Float32Array(out);
+  }
+  const mul = (a, b) => { const o = new Float32Array(16);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+      let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k]; o[i * 4 + j] = s; } return o; };
+  function persp(fov, asp, n, f) { const t = 1 / Math.tan(fov / 2), o = new Float32Array(16);
+    o[0] = t / asp; o[5] = t; o[10] = (f + n) / (n - f); o[11] = -1; o[14] = 2 * f * n / (n - f); return o; }
+  function lookAt(e, c, u) {
+    const z = norm(sub(e, c)), x = norm(cross(u, z)), y = cross(z, x);
+    return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+      -dot(x, e), -dot(y, e), -dot(z, e), 1]); }
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const hex = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+  const C_WALL = hex("#aba196"), C_FLOOR = hex("#3a322b"), C_DROP = hex("#ff4d6d"),
+        C_LOW = hex("#f08a4b"), C_HIGH = hex("#f0d24b"), C_BOT = hex("#f08a4b");
+
+  function create(canvas) {
+    const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
+    if (!gl) return null;
+    const inst = gl.getExtension("ANGLE_instanced_arrays");
+    if (!inst) return null;
+    const prog = (vs, fs) => { const p = gl.createProgram();
+      for (const [t, s] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+        const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); gl.attachShader(p, sh); }
+      gl.linkProgram(p); return p; };
+    const P = prog(VS, FS), L = prog(LVS, LFS);
+    const a = { pos: gl.getAttribLocation(P, "aPos"), nrm: gl.getAttribLocation(P, "aNrm"),
+      inst: gl.getAttribLocation(P, "aInst"), col: gl.getAttribLocation(P, "aCol"), lpos: gl.getAttribLocation(L, "aPos") };
+    const u = { mvp: gl.getUniformLocation(P, "uMVP"), size: gl.getUniformLocation(P, "uSize"),
+      lmvp: gl.getUniformLocation(L, "uMVP"), lcol: gl.getUniformLocation(L, "uCol") };
+    const cube = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, cube); gl.bufferData(gl.ARRAY_BUFFER, cubeGeometry(), gl.STATIC_DRAW);
+    const sets = { walls: { buf: gl.createBuffer(), n: 0, size: 0.05 }, vox: { buf: gl.createBuffer(), n: 0, size: 0.05 },
+      bot: { buf: gl.createBuffer(), n: 0, size: 0.16 } };
+    const lines = { grid: { buf: gl.createBuffer(), n: 0 }, path: { buf: gl.createBuffer(), n: 0 } };
+    const cam = { yaw: -0.9, pitch: 0.75, dist: 6, tx: 0, ty: 0, follow: true };
+    let pose = [0, 0, 0], dirty = true, raf = 0, visible = false;
+
+    function upload(set, data) { gl.bindBuffer(gl.ARRAY_BUFFER, set.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); set.n = data.length / 7; }
+    function uploadLine(l, data) { gl.bindBuffer(gl.ARRAY_BUFFER, l.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); l.n = data.length / 3; }
+
+    function setScene(sc) {
+      const r = sc.grid_res, o = sc.grid_origin, h = sc.wall_height, w = new Float32Array(sc.walls.length * 7);
+      sc.walls.forEach((c, i) => w.set([o + c[0] * r, o + c[1] * r, 0, h, ...C_WALL], i * 7));
+      sets.walls.size = r; upload(sets.walls, w);
+      const vr = sc.voxel_res, v = new Float32Array(sc.voxels.length * 7);
+      sc.voxels.forEach((q, i) => {
+        const z = q[2] * vr, col = z < -0.06 ? C_DROP : Math.abs(z + vr / 2) <= 0.04 ? C_FLOOR
+          : C_LOW.map((x, k) => x + (C_HIGH[k] - x) * Math.min(1, Math.max(0, z / 0.6)));
+        v.set([q[0] * vr, q[1] * vr, z, vr, ...col], i * 7); });
+      sets.vox.size = vr; upload(sets.vox, v);
+      uploadLine(lines.path, new Float32Array(sc.path.flatMap((p) => [p[0], p[1], 0.01])));
+      if (!lines.grid.n) { const g = []; for (let i = -20; i <= 20; i++) g.push(i, -20, 0, i, 20, 0, -20, i, 0, 20, i, 0);
+        uploadLine(lines.grid, new Float32Array(g)); }
+      setPose(sc.pose);
+    }
+    function setPose(p) {
+      if (!p) return; pose = p;
+      const s = sets.bot.size, c = Math.cos(p[2]), sn = Math.sin(p[2]);
+      upload(sets.bot, new Float32Array([p[0] - s / 2, p[1] - s / 2, 0, 0.35, ...C_BOT,
+        p[0] + c * 0.12 - 0.03, p[1] + sn * 0.12 - 0.03, 0.2, 0.06, 0.94, 0.94, 0.92]));
+      if (cam.follow) { cam.tx = p[0]; cam.ty = p[1]; }
+      request();
+    }
+    function resize() { const r = canvas.getBoundingClientRect(), d = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.max(1, r.width * d); canvas.height = Math.max(1, r.height * d); request(); }
+    function request() { dirty = true; if (visible && !raf) raf = requestAnimationFrame(render); }
+    function render() {
+      raf = 0; if (!dirty || !visible) return; dirty = false;
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0.059, 0.051, 0.047, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); gl.enable(gl.DEPTH_TEST);
+      const eye = [cam.tx + cam.dist * Math.cos(cam.pitch) * Math.cos(cam.yaw), cam.ty + cam.dist * Math.cos(cam.pitch) * Math.sin(cam.yaw),
+        cam.dist * Math.sin(cam.pitch)];
+      const mvp = mul(persp(0.9, canvas.width / canvas.height, 0.05, 200), lookAt(eye, [cam.tx, cam.ty, 0.1], [0, 0, 1]));
+      gl.useProgram(L); gl.uniformMatrix4fv(u.lmvp, false, mvp); gl.enableVertexAttribArray(a.lpos);
+      for (const [l, col] of [[lines.grid, [0.16, 0.14, 0.12, 1]], [lines.path, [0.94, 0.54, 0.29, 1]]]) {
+        if (!l.n) continue; gl.uniform4fv(u.lcol, col); gl.bindBuffer(gl.ARRAY_BUFFER, l.buf);
+        gl.vertexAttribPointer(a.lpos, 3, gl.FLOAT, false, 0, 0); gl.drawArrays(l === lines.grid ? gl.LINES : gl.LINE_STRIP, 0, l.n); }
+      gl.useProgram(P); gl.uniformMatrix4fv(u.mvp, false, mvp);
+      gl.bindBuffer(gl.ARRAY_BUFFER, cube);
+      gl.enableVertexAttribArray(a.pos); gl.vertexAttribPointer(a.pos, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(a.nrm); gl.vertexAttribPointer(a.nrm, 3, gl.FLOAT, false, 24, 12);
+      for (const set of [sets.walls, sets.vox, sets.bot]) {
+        if (!set.n) continue; gl.uniform1f(u.size, set.size); gl.bindBuffer(gl.ARRAY_BUFFER, set.buf);
+        gl.enableVertexAttribArray(a.inst); gl.vertexAttribPointer(a.inst, 4, gl.FLOAT, false, 28, 0); inst.vertexAttribDivisorANGLE(a.inst, 1);
+        gl.enableVertexAttribArray(a.col); gl.vertexAttribPointer(a.col, 3, gl.FLOAT, false, 28, 16); inst.vertexAttribDivisorANGLE(a.col, 1);
+        inst.drawArraysInstancedANGLE(gl.TRIANGLES, 0, 36, set.n); }
+      inst.vertexAttribDivisorANGLE(a.inst, 0); inst.vertexAttribDivisorANGLE(a.col, 0);
+      gl.disableVertexAttribArray(a.inst); gl.disableVertexAttribArray(a.col);
+    }
+    // orbit (1 finger / left drag), pan (2 fingers / right drag), zoom (pinch / wheel)
+    const pts = new Map(); let last = null;
+    canvas.addEventListener("pointerdown", (e) => { pts.set(e.pointerId, [e.clientX, e.clientY]); canvas.setPointerCapture(e.pointerId); last = null; });
+    canvas.addEventListener("pointerup", (e) => { pts.delete(e.pointerId); last = null; });
+    canvas.addEventListener("pointercancel", (e) => { pts.delete(e.pointerId); last = null; });
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    canvas.addEventListener("pointermove", (e) => {
+      if (!pts.has(e.pointerId)) return; const prev = pts.get(e.pointerId); pts.set(e.pointerId, [e.clientX, e.clientY]);
+      const dx = e.clientX - prev[0], dy = e.clientY - prev[1];
+      if (pts.size === 1 && !(e.buttons & 2)) { cam.yaw -= dx * 0.008; cam.pitch = Math.min(1.5, Math.max(0.08, cam.pitch + dy * 0.008)); }
+      else if (pts.size === 1) pan(dx, dy);
+      else { const [p, q] = [...pts.values()], d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (last) { cam.dist = Math.min(60, Math.max(0.6, cam.dist * last / d)); pan(dx / 2, dy / 2); } last = d; }
+      request(); });
+    function pan(dx, dy) { cam.follow = false; const k = cam.dist * 0.0018, c = Math.cos(cam.yaw), s = Math.sin(cam.yaw);
+      cam.tx += (dx * s - dy * c) * k; cam.ty += (-dx * c - dy * s) * k; }
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); cam.dist = Math.min(60, Math.max(0.6, cam.dist * (e.deltaY > 0 ? 1.12 : 1 / 1.12))); request(); }, { passive: false });
+    window.addEventListener("resize", () => visible && resize());
+    return { setScene, setPose, resize,
+      show(v) { visible = v; if (v) resize(); },
+      center() { cam.follow = true; setPose(pose); },
+      stats: () => ({ walls: sets.walls.n, voxels: sets.vox.n }) };
+  }
+  window.Slam3D = { create };
+})();

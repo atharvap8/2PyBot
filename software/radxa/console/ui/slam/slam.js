@@ -15,7 +15,7 @@ function connect() {
       img.onload = () => { mapImg = img; mapMeta = m.map; };
       img.src = "data:image/png;base64," + m.map.png;
     }
-    if (m.state) { S = m.state; render(); }
+    if (m.state) { S = m.state; render(); update3d(); }
   };
   ws.onclose = () => { setSay("Lost connection to the robot. Reconnecting…", "err"); setTimeout(connect, 1500); };
 }
@@ -206,15 +206,39 @@ cv.addEventListener("touchmove", (e) => {
 }, { passive: true });
 cv.addEventListener("touchend", () => { pinch = null; });
 
+// ---------------------------------------------------------------- 3D view
+const cv3 = $("cv3"), s3d = window.Slam3D ? window.Slam3D.create(cv3) : null;
+let scene3dKey = "", scene3dAt = 0, scene3dBusy = false;
+async function update3d(force) {
+  if (view !== "3d" || !s3d || !S) return;
+  s3d.setPose(S.pose);
+  const key = `${S.map_version}/${(S.tof || {}).voxel_version}`;
+  const now = Date.now();
+  if (scene3dBusy || (!force && (key === scene3dKey || now - scene3dAt < 2500))) return;
+  scene3dBusy = true; scene3dAt = now;
+  try {
+    const sc = await (await fetch(base + "api/scene3d")).json();
+    s3d.setScene(sc); scene3dKey = key;
+    const st = s3d.stats();
+    $("stat3d").textContent = `${st.walls} wall cells · ${st.voxels} ToF voxels`;
+  } catch (e) { /* the next state message retries */ }
+  scene3dBusy = false;
+}
 function setView(v) {
+  if (v === "3d" && !s3d) { setSay("3D needs WebGL, which this browser does not provide.", "warn"); v = "map"; }
   view = v;
-  $("v-map").setAttribute("aria-selected", v === "map"); $("v-radar").setAttribute("aria-selected", v === "radar");
-  $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move" : "Live scan around the robot (top = front)";
-  draw();
+  for (const k of ["map", "radar", "3d"]) $("v-" + k).setAttribute("aria-selected", v === k);
+  cv.hidden = v === "3d"; cv3.hidden = v !== "3d"; $("legend3d").hidden = v !== "3d";
+  if (s3d) s3d.show(v === "3d");
+  $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
+    : v === "radar" ? "Live scan around the robot (top = front)"
+    : "Drag to orbit · two fingers or right-drag to pan · pinch or scroll to zoom";
+  if (v === "3d") update3d(true); else resize();
 }
 $("v-map").onclick = () => setView("map");
 $("v-radar").onclick = () => setView("radar");
-$("b-center").onclick = () => { cam.follow = true; draw(); };
+$("v-3d").onclick = () => setView("3d");
+$("b-center").onclick = () => { cam.follow = true; if (view === "3d" && s3d) s3d.center(); draw(); };
 $("estop").onclick = () => post("api/estop");
 $("b-start").onclick = () => post("api/mapping/start?fresh=true");
 $("b-stop").onclick = () => post("api/mapping/stop");
@@ -233,4 +257,4 @@ $("b-find").onclick = async () => {
 };
 window.addEventListener("resize", resize);
 resize(); connect(); refreshMaps();
-setView(new URLSearchParams(location.search).get("view") === "radar" ? "radar" : "map");
+setView({ radar: "radar", "3d": "3d" }[new URLSearchParams(location.search).get("view")] || "map");

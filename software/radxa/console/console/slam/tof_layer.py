@@ -12,6 +12,7 @@ floor returns in the bottom rows while the robot balances steadily.
 from __future__ import annotations
 
 import math
+import threading
 
 import numpy as np
 
@@ -38,6 +39,13 @@ class ToFLayer:
         self.points = np.zeros((0, 3))     # latest frame, map frame, for display
         self.cliffs = np.zeros((0, 2))
         self.counts = {"frames": 0, "obstacles": 0, "cliffs": 0, "floor": 0}
+        # Persistent 3D voxels (5 cm) from every valid return, for the 3D view.
+        # key (ix, iy, iz) -> hit count; bounded so memory stays small.
+        self.vres = 0.05
+        self.voxels = {}
+        self.max_voxels = 60000
+        self.voxel_version = 0
+        self.vlock = threading.Lock()
 
     # ------------------------------------------------------------------ geometry
     def _robot_points(self, d, tau_deg):
@@ -66,7 +74,7 @@ class ToFLayer:
         self.tilt_samples += 1
 
     # ------------------------------------------------------------------ update
-    def update(self, frame, pose, pitch_dev, steady, t):
+    def update(self, frame, pose, pitch_dev, steady, t, accumulate=False):
         seq = frame.get("sequence")
         if seq is None or seq == self.last_seq or frame.get("state") != "ranging":
             return False
@@ -90,6 +98,17 @@ class ToFLayer:
             col = np.floor((world[obstacle, 0] - self.origin) / self.res).astype(int)
             ok = (r >= 0) & (r < self.n) & (col >= 0) & (col < self.n)
             np.add.at(self.obstacle, (r[ok], col[ok]), 1.0)
+        if accumulate:
+            keep = (world[:, 2] > -0.4) & (world[:, 2] < 1.2)
+            keys = np.floor(world[keep] / self.vres).astype(int)
+            with self.vlock:
+             for k in map(tuple, keys):
+                if k in self.voxels:
+                    self.voxels[k] = min(255, self.voxels[k] + 1)
+                elif len(self.voxels) < self.max_voxels:
+                    self.voxels[k] = 1
+            if len(keys):
+                self.voxel_version += 1
         self.points = world[obstacle]
         self.cliffs = world[cliff, :2]
         self.counts["frames"] += 1
@@ -98,8 +117,27 @@ class ToFLayer:
         self.counts["floor"] = int(floor.sum())
         return True
 
+    def clear_voxels(self):
+        with self.vlock:
+            self.voxels = {}
+        self.voxel_version += 1
+
+    def voxel_array(self, min_hits=2):
+        """(N,4) int array: ix, iy, iz, hits — confirmed voxels only."""
+        with self.vlock:
+            items = [(*k, n) for k, n in self.voxels.items() if n >= min_hits]
+        if not items:
+            return np.zeros((0, 4), np.int32)
+        return np.array(items, np.int32).reshape(-1, 4)
+
+    def load_voxels(self, arr):
+        with self.vlock:
+            self.voxels = {(int(a), int(b), int(c)): int(n) for a, b, c, n in arr}
+        self.voxel_version += 1
+
     def state(self):
         return {"height_m": self.h, "tilt_deg": round(self.tilt_deg, 2),
                 "tilt_confident": self.tilt_samples >= 20, **self.counts,
+                "voxel_version": self.voxel_version, "voxels_total": len(self.voxels),
                 "obstacles": self.points[:, :3].round(3).tolist()[:64],
                 "cliffs": self.cliffs.round(3).tolist()[:64]}

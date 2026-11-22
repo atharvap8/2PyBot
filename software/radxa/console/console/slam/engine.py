@@ -222,7 +222,10 @@ class SlamEngine:
         near = min(att, key=lambda a: abs(a[0] - t)) if att else (t, 0.0, 0.0)
         steady = balancing and abs(near[1]) < 2.0 and abs(near[2]) < 20.0
         try:
-            self.tof_layer.update(frame, pose, near[1], steady, t)
+            # 3D voxels build up only while mapping (map frame), so a saved map
+            # carries a matching 3D layer.
+            self.tof_layer.update(frame, pose, near[1], steady, t,
+                                  accumulate=self.mode == "mapping" and self.match.get("ok", False))
         except (KeyError, ValueError, TypeError):
             pass                                  # malformed frame: skip, keep the loop alive
 
@@ -328,6 +331,7 @@ class SlamEngine:
                 self.pose = np.zeros(3)
                 self.path.clear()
                 self.map_name = ""
+                self.tof_layer.clear_voxels()
             self.filter.reset(self.pose, sigma_xy=0.01, sigma_th=math.radians(0.5))
             self._odom_ref = None
             self._last_map_pose = None
@@ -403,7 +407,8 @@ class SlamEngine:
         # lock on the ESP32 serial reader thread, which must never stall on disk I/O.
         with self.lock:
             g = self.grid.copy()
-        np.savez_compressed(base + ".npz", logodds=g.logodds, touched=g.touched)
+        np.savez_compressed(base + ".npz", logodds=g.logodds, touched=g.touched,
+                            voxels=self.tof_layer.voxel_array(min_hits=1))
         with open(base + ".png", "wb") as f:
             f.write(g.png(g.known_bbox()))
         meta = {"name": name, "resolution": g.res, "origin": g.origin,
@@ -430,6 +435,7 @@ class SlamEngine:
         if not SAFE_NAME.match(name or ""):
             raise ValueError("bad map name")
         data = np.load(os.path.join(self.maps_dir, name + ".npz"))
+        self.tof_layer.load_voxels(data["voxels"] if "voxels" in data.files else np.zeros((0, 4), np.int32))
         g = OccupancyGrid()
         g.logodds[:] = data["logodds"]
         g.touched[:] = data["touched"]
@@ -470,6 +476,25 @@ class SlamEngine:
             "tests": {k: self.test_result(k) for k in self.tests},
             "settings": self.cfg,
         }
+
+    def scene3d(self, max_walls=20000):
+        """Compact 3D scene: lidar wall cells (extruded in the viewer), ToF voxels,
+        robot pose and path. Integer cell indices keep the payload small."""
+        with self.lock:
+            g = self.grid
+            occ = np.argwhere(g.logodds > 0.6)               # (row=y, col=x)
+            pose = self.pose.tolist()
+            path = list(self.path)[-1500:]
+        if len(occ) > max_walls:
+            occ = occ[np.linspace(0, len(occ) - 1, max_walls).astype(int)]
+        vox = self.tof_layer.voxel_array(min_hits=2)
+        if len(vox) > 30000:
+            vox = vox[np.argsort(-vox[:, 3])[:30000]]       # keep the best-confirmed voxels
+        return {"grid_res": g.res, "grid_origin": g.origin, "walls": occ[:, ::-1].tolist(),
+                "wall_height": self.cfg["lidar_height"], "voxel_res": self.tof_layer.vres,
+                "voxels": vox.tolist(), "pose": pose, "path": path,
+                "version": [g.version, self.tof_layer.voxel_version],
+                "tof_height": self.cfg["tof_height"], "lidar_height": self.cfg["lidar_height"]}
 
     def map_png(self):
         with self.lock:                          # copy only; encode off the lock (see save())
