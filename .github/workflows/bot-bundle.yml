@@ -2,7 +2,7 @@ name: Bot deployment bundle
 
 on:
   push:
-    branches: [main, 'hardware/**', 'bot/**']
+    branches: [main, 'hardware/**', 'bot/**', 'feature/**']
   workflow_dispatch:
 
 permissions:
