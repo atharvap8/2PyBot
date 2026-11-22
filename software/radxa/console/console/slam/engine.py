@@ -34,6 +34,7 @@ DEFAULTS = {
     "deskew": True,
     "tof_height": 0.21,              # VL53L5CX above the floor (owner, wheel contact to sensor)
     "tof_x": 0.0,                    # forward offset from the axle (not measured)
+    "tof_y": 0.0,                    # LEFT of centreline (+); owner: ToF is left-offset, value pending
     "wheel_radius": 0.052, "track": 0.155, "cpr": 4096,
     "yaw_axis": "auto", "encoder_yaw_sign": 1.0,
     "match_points": 200,
@@ -63,7 +64,7 @@ class SlamEngine:
         self.grid = OccupancyGrid()
         self.pose = np.zeros(3)                # map frame (published copy of filter.mu)
         self.filter = PoseFilter()
-        self.tof_layer = ToFLayer(height=self.cfg["tof_height"], x_offset=self.cfg["tof_x"])
+        self.tof_layer = ToFLayer(height=self.cfg["tof_height"], x_offset=self.cfg["tof_x"], y_offset=self.cfg["tof_y"])
         self.tof_source = None                 # console ToF supervisor (history deque), set by server
         self._odom_ref = None                  # odom pose at the last processed scan
         self._last_map_pose = None

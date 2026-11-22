@@ -24,9 +24,9 @@ BOTTOM = np.arange(64) // 8 >= 5           # rows that normally see the floor
 
 
 class ToFLayer:
-    def __init__(self, height=0.21, x_offset=0.0, floor_band=0.04, cliff_drop=0.06,
+    def __init__(self, height=0.21, x_offset=0.0, y_offset=0.0, floor_band=0.04, cliff_drop=0.06,
                  max_obstacle_z=0.50, size_m=40.0, res=0.05, decay_s=3.0):
-        self.h, self.x_off = height, x_offset
+        self.h, self.x_off, self.y_off = height, x_offset, y_offset   # y: left of centreline
         self.floor_band, self.cliff_drop, self.max_z = floor_band, cliff_drop, max_obstacle_z
         self.res, self.n, self.origin = res, int(round(size_m / res)), -size_m / 2
         self.obstacle = np.zeros((self.n, self.n), np.float32)   # decaying hit evidence
@@ -46,7 +46,7 @@ class ToFLayer:
         c, s = math.cos(math.radians(tau_deg)), math.sin(math.radians(tau_deg))
         fx = f * c + up * s
         uz = up * c - f * s
-        return np.c_[self.x_off + fx, left, self.h + uz]
+        return np.c_[self.x_off + fx, self.y_off + left, self.h + uz]
 
     def _estimate_tilt(self, d, valid, pitch_dev):
         sel = valid & BOTTOM
