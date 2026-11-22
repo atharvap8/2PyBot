@@ -114,10 +114,13 @@ class OccupancyGrid:
         vals = np.where(ok, f[np.clip(r, 0, self.n - 1), np.clip(c, 0, self.n - 1)], 0.0)
         return vals.sum(axis=1) / max(1, pts_robot.shape[0])
 
-    def match(self, pts_robot, guess, lin=0.20, ang=MATCH_ANG):
-        """Coarse-to-fine correlative search around `guess`. Returns (pose, score)."""
+    def match(self, pts_robot, guess, lin=0.20, ang=MATCH_ANG, with_cov=False):
+        """Coarse-to-fine correlative search around `guess`. Returns (pose, score)
+        or (pose, score, cov) where cov comes from the middle-level score surface."""
         best = np.array(guess, float)
-        for lin_w, ang_w, n_lin, n_ang in ((lin, ang, 9, 9), (lin / 4, ang / 4, 7, 7), (lin / 16, ang / 16, 5, 5)):
+        cov = None
+        for level, (lin_w, ang_w, n_lin, n_ang) in enumerate(
+                ((lin, ang, 9, 9), (lin / 4, ang / 4, 7, 7), (lin / 16, ang / 16, 5, 5))):
             dx = np.linspace(-lin_w, lin_w, n_lin)
             da = np.linspace(-ang_w, ang_w, n_ang)
             gx, gy, ga = np.meshgrid(dx, dx, da, indexing="ij")
@@ -127,9 +130,26 @@ class OccupancyGrid:
             pen = 0.15 * (np.hypot(cand[:, 0] - guess[0], cand[:, 1] - guess[1]) / max(lin, 1e-6)
                           + np.abs(cand[:, 2] - guess[2]) / max(ang, 1e-6))
             k = int(np.argmax(s - pen * s.max()))
+            if with_cov and level == 1:
+                cov = self._surface_cov(cand, s, cand[k], lin_w, ang_w)
             best = cand[k]
             best_score = float(s[k])
+        if with_cov:
+            return best, best_score, cov
         return best, best_score
+
+    def _surface_cov(self, cand, s, peak, lin_w, ang_w):
+        """Weighted second moment of near-peak candidates (Olson-style)."""
+        smax = float(s.max())
+        if smax <= 0:
+            return np.diag([lin_w ** 2, lin_w ** 2, ang_w ** 2])
+        w = np.exp((s - smax) / max(0.01, 0.08 * smax))
+        w /= w.sum()
+        d = cand - peak
+        d[:, 2] = np.arctan2(np.sin(d[:, 2]), np.cos(d[:, 2]))
+        cov = (d * w[:, None]).T @ d
+        floor = np.diag([(self.res / 2) ** 2, (self.res / 2) ** 2, math.radians(0.5) ** 2])
+        return cov + floor
 
     # --------------------------------------------------------- export
     def known_bbox(self, pad=10):

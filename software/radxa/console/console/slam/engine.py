@@ -15,6 +15,7 @@ import time
 
 import numpy as np
 
+from .fusion import PoseFilter
 from .grid import OccupancyGrid
 from .odom_core import Attitude, DSample, Odometry, OSample, axis_name, parse_line
 
@@ -57,7 +58,8 @@ class SlamEngine:
         self.mode = "idle"                     # idle | mapping | localizing
         self.map_name = ""
         self.grid = OccupancyGrid()
-        self.pose = np.zeros(3)                # map frame
+        self.pose = np.zeros(3)                # map frame (published copy of filter.mu)
+        self.filter = PoseFilter()
         self._odom_ref = None                  # odom pose at the last processed scan
         self._last_map_pose = None
         self.path = collections.deque(maxlen=3000)
@@ -242,27 +244,33 @@ class SlamEngine:
         od = self._odom_at(tmid) if robot_live else None
         with self.lock:
             grid = self.grid                                 # load/start may swap it from HTTP threads
-            guess = self.pose.copy()
             if od is not None and self._odom_ref is not None:
-                dx, dy = od[0] - self._odom_ref[0], od[1] - self._odom_ref[1]
+                # odometry increment in the previous robot frame -> filter prediction
+                d0, d1 = od[0] - self._odom_ref[0], od[1] - self._odom_ref[1]
+                cr, sr = math.cos(self._odom_ref[2]), math.sin(self._odom_ref[2])
                 dth = math.atan2(math.sin(od[2] - self._odom_ref[2]), math.cos(od[2] - self._odom_ref[2]))
-                ca, sa = math.cos(self.pose[2] - self._odom_ref[2]), math.sin(self.pose[2] - self._odom_ref[2])
-                guess = self.pose + np.array([ca * dx - sa * dy, sa * dx + ca * dy, dth])
+                slip, self.odom.slip_acc = self.odom.slip_acc, 0.0
+                self.filter.predict(cr * d0 + sr * d1, -sr * d0 + cr * d1, dth, slip)
             self._odom_ref = od
+            guess = self.filter.mu.copy()
 
         if self.mode == "localizing" and self._need_find:
             self._need_find = False
             self.relocalize(wide=True)
-            guess = self.pose.copy()
+            guess = self.filter.mu.copy()
         sub = pts[np.linspace(0, len(pts) - 1, min(len(pts), c["match_points"])).astype(int)]
         first = grid.version == 0
         if first:
             new_pose, score, ok = guess, 0.0, True
         else:
-            new_pose, score = grid.match(sub, guess)
-            ok = score >= (c["min_loc_score"] if self.mode == "localizing" else c["min_match_score"])
-            if not ok:
-                new_pose = guess                             # trust wheels for this scan
+            z, score, cov = grid.match(sub, guess, with_cov=True)
+            good = score >= (c["min_loc_score"] if self.mode == "localizing" else c["min_match_score"])
+            # A good match still has to agree with wheels+gyro (Mahalanobis gate);
+            # otherwise this scan is carried by the odometry prediction alone.
+            ok = good and self.filter.update(z, cov)
+            if not good:
+                self.filter.stats["skipped"] += 1
+            new_pose = self.filter.mu.copy()
         new_pose[2] = math.atan2(math.sin(new_pose[2]), math.cos(new_pose[2]))
         with self.lock:
             self.pose = new_pose
@@ -293,6 +301,7 @@ class SlamEngine:
                 self.pose = np.zeros(3)
                 self.path.clear()
                 self.map_name = ""
+            self.filter.reset(self.pose, sigma_xy=0.01, sigma_th=math.radians(0.5))
             self._odom_ref = None
             self._last_map_pose = None
             self.mode = "mapping"
@@ -335,6 +344,7 @@ class SlamEngine:
                 best, best_s = p, sc
         with self.lock:
             self.pose = best
+            self.filter.reset(best)
             self._odom_ref = None
         return best_s
 
@@ -400,6 +410,7 @@ class SlamEngine:
         with self.lock:
             self.grid = g
             self.pose = np.zeros(3)                 # assumes the robot starts where mapping started
+            self.filter.reset(self.pose, sigma_xy=0.5, sigma_th=math.radians(30))
             self.path.clear()
             self._odom_ref = None
             self.map_name = name
@@ -426,6 +437,7 @@ class SlamEngine:
             "lidar": lidar_status, "rates": self.rate_hz,
             "robot_live": now - self.last_o < 1.0, "odom": od, "attitude": att,
             "pose": pose, "path": path, "scan": scan, "gate": dict(self.gate), "match": dict(self.match),
+            "fusion": dict(self.filter.stats, sigma=self.filter.sigma()),
             "map_version": self.grid.version,
             "tests": {k: self.test_result(k) for k in self.tests},
             "settings": self.cfg,
