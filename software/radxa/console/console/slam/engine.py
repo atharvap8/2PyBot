@@ -17,6 +17,7 @@ import numpy as np
 
 from .fusion import PoseFilter
 from .grid import OccupancyGrid
+from .tof_layer import ToFLayer
 from .odom_core import Attitude, DSample, Odometry, OSample, axis_name, parse_line
 
 # Mount (robot frame: x forward, y left). Lidar centre is 31 mm right of the
@@ -31,6 +32,8 @@ DEFAULTS = {
     # dropped only for a large lean (resting/falling) or fast rocking.
     "max_tilt_deg": 12.0, "max_tilt_rate": 60.0, "plane_tol_deg": 0.75,
     "deskew": True,
+    "tof_height": 0.21,              # VL53L5CX above the floor (owner, wheel contact to sensor)
+    "tof_x": 0.0,                    # forward offset from the axle (not measured)
     "wheel_radius": 0.052, "track": 0.155, "cpr": 4096,
     "yaw_axis": "auto", "encoder_yaw_sign": 1.0,
     "match_points": 200,
@@ -60,6 +63,8 @@ class SlamEngine:
         self.grid = OccupancyGrid()
         self.pose = np.zeros(3)                # map frame (published copy of filter.mu)
         self.filter = PoseFilter()
+        self.tof_layer = ToFLayer(height=self.cfg["tof_height"], x_offset=self.cfg["tof_x"])
+        self.tof_source = None                 # console ToF supervisor (history deque), set by server
         self._odom_ref = None                  # odom pose at the last processed scan
         self._last_map_pose = None
         self.path = collections.deque(maxlen=3000)
@@ -190,6 +195,7 @@ class SlamEngine:
     def _worker(self):
         while not self._stop.is_set():
             self._update_rates()
+            self._process_tof()
             if not self._scan_q:
                 time.sleep(0.01)
                 continue
@@ -198,6 +204,26 @@ class SlamEngine:
                 self._process(scan)
             except Exception as e:  # keep the loop alive, show the reason
                 self.message = f"Processing error: {e}"
+
+    def _process_tof(self):
+        src = self.tof_source
+        history = getattr(src, "history", None)
+        if not history:
+            return
+        frame = history[-1]
+        if frame.get("sequence") == self.tof_layer.last_seq:
+            return                                # nothing new: avoid locking at 100 Hz
+        t = frame.get("capture_monotonic_ns", 0) / 1e9
+        with self.lock:
+            pose = self.pose.copy()
+            att = list(self.att_hist)[-25:]
+            balancing = self.att.balancing
+        near = min(att, key=lambda a: abs(a[0] - t)) if att else (t, 0.0, 0.0)
+        steady = balancing and abs(near[1]) < 2.0 and abs(near[2]) < 20.0
+        try:
+            self.tof_layer.update(frame, pose, near[1], steady, t)
+        except (KeyError, ValueError, TypeError):
+            pass                                  # malformed frame: skip, keep the loop alive
 
     def _update_rates(self):
         now = time.monotonic()
@@ -438,6 +464,7 @@ class SlamEngine:
             "robot_live": now - self.last_o < 1.0, "odom": od, "attitude": att,
             "pose": pose, "path": path, "scan": scan, "gate": dict(self.gate), "match": dict(self.match),
             "fusion": dict(self.filter.stats, sigma=self.filter.sigma()),
+            "tof": self.tof_layer.state(),
             "map_version": self.grid.version,
             "tests": {k: self.test_result(k) for k in self.tests},
             "settings": self.cfg,

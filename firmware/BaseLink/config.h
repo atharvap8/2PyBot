@@ -1,4 +1,4 @@
-/* 2PyBot v4.3.0 experimental self-uprighting: ESP32 + M0601 BLDC hubs.
+/* 2PyBot v4.4.0 sensing fusion + self-uprighting: ESP32 + M0601 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */

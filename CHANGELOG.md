@@ -3,6 +3,17 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.4.0 — Sensing fusion and single web port
+
+- Lidar at 20 Hz (C1M1R2, 1200 rpm); per-beam floor clipping from the measured 0.265 m
+  scan plane; scans de-skewed to the mid-sweep pose; whole scans dropped only above 12° / 60°/s.
+- EKF pose fusion: wheel + gyro prediction, gated lidar scan-match correction with a
+  score-surface covariance, wheel-slip detection.
+- VL53L5CX 3D layer at 0.21 m: low obstacles and drop-offs in the map; mount tilt is
+  estimated from floor returns. Worker retries the first transfer and backs off when absent.
+- Both camera servos detach after their own last command (SVIDLE, default 2 s).
+- One web port (8080): console, /sysmap/ and /slam/ linked, one orange system-map theme.
+
 ## Unreleased — Standalone lidar mapping (no ROS)
 
 - RPLIDAR C1 driver on the 40-pin UART4 (`console/lidar_c1.py`).

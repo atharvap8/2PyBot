@@ -150,6 +150,12 @@ function draw() {
     const [x, y] = w2s(pose[0] + c * p[0] - s * p[1], pose[1] + s * p[0] + c * p[1]);
     ctx.fillRect(x - 1.2, y - 1.2, 2.4, 2.4);
   }
+  // ToF 3D layer (already in map frame): low obstacles orange, drop-offs red
+  const T = S.tof || {};
+  ctx.fillStyle = "#f08a4b";
+  for (const p of T.obstacles || []) { const [x, y] = w2s(p[0], p[1]); ctx.fillRect(x - 2, y - 2, 4, 4); }
+  ctx.fillStyle = "#ff4d6d";
+  for (const p of T.cliffs || []) { const [x, y] = w2s(p[0], p[1]); ctx.fillRect(x - 2.5, y - 2.5, 5, 5); }
   drawRobot(...w2s(pose[0], pose[1]), pose[2]);
   // scale bar
   ctx.fillStyle = "#aba196"; ctx.font = "12px sans-serif";

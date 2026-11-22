@@ -78,5 +78,20 @@ beam is clipped at `0.265 / tan(dip + spread + 0.75°)`; side and rising beams k
 full range. Whole scans are skipped only above 12° lean or 60°/s rocking. Every
 point is moved to the mid-scan robot pose using odometry (de-skew).
 
+## Pose fusion
+`slam/fusion.py` keeps [x, y, yaw] with a covariance. Wheel distance + gyro yaw
+predict it at every scan; noise grows with distance, turning and detected slip
+(gyro yaw rate disagreeing with the wheels). A scan match corrects it with a
+covariance from the matcher's score surface, only if the score is good and it
+passes a 99 % Mahalanobis gate. `/api/state` → `fusion` shows updates, rejected
+matches and the 1σ uncertainty.
+
+## ToF 3D layer
+`slam/tof_layer.py` projects the VL53L5CX 8×8 frame (0.21 m above the floor)
+into the map: points 4–50 cm high are low obstacles (orange), returns more than
+6 cm below the floor are drop-offs (red). The sensor's down-tilt is estimated from
+floor returns in the bottom rows while the robot balances steadily
+(`tof.tilt_confident`). It is kept separate from the lidar map.
+
 ## Not verified on hardware yet
 1. `lidar_y` (−0.031 m) comes from the CAD assembly.
