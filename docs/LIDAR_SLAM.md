@@ -63,7 +63,7 @@ console service and the C1 is sent STOP when the service shuts down.
 leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py`.
 
 ## Try it without the robot
-`cd software/radxa/console && python -m console.slam_demo` → http://localhost:6970/
+`cd software/radxa/console && python -m console.slam_demo` → `localhost:6970` (set `BOT_SLAM_PORT`)
 
 ## Hardware findings
 - 460800 on UART4 needs the 96 MHz clock overlay above (verified).
