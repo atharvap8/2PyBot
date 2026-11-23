@@ -13,10 +13,27 @@ from pathlib import Path
 
 import pymupdf
 
+from ring_svg import svg as ring_svg
+
 HERE = Path(__file__).resolve().parent
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
-DOCS = {"user_manual": ("2PyBot_User_Manual.pdf", "2PyBot  |  UM-2PB-001 Rev 4.4"),
-        "technical_qa": ("2PyBot_Technical_QA.pdf", "2PyBot  |  AN-2PB-002 Rev 4.4")}
+DOCS = {"user_manual": ("2PyBot_User_Manual.pdf", "2PyBot  |  UM-2PB-001 Rev 4.7"),
+        "technical_qa": ("2PyBot_Technical_QA.pdf", "2PyBot  |  AN-2PB-002 Rev 4.7")}
+
+
+def expand(src):
+    """{{ring:NAME}} -> LED ring diagram; {{photo:FILE|Title|how to shoot}} -> the
+    photo if img/FILE.(jpg|png) exists, otherwise a labelled placeholder."""
+    src = re.sub(r"\{\{ring:(\w+)\}\}", lambda m: ring_svg(m.group(1)), src)
+
+    def photo(m):
+        name, title, how = (m.group(1).split("|") + ["", ""])[:3]
+        for ext in (".jpg", ".jpeg", ".png"):
+            if (HERE / "img" / (name + ext)).exists():
+                return f'<img class="photo" src="img/{name}{ext}" alt="{html.escape(title)}">'
+        return (f'<div class="ph"><b>{html.escape(title)}</b><span>Photo needed: {html.escape(how)}</span>'
+                f'<i>img/{name}.jpg</i></div>')
+    return re.sub(r"\{\{photo:([^}]+)\}\}", photo, src)
 
 
 def render(src_html: str, out: Path):
@@ -36,7 +53,7 @@ def norm(s):
 
 
 def build(name, pdf_name, footer):
-    src = (HERE / f"{name}.html").read_text(encoding="utf-8")
+    src = expand((HERE / f"{name}.html").read_text(encoding="utf-8"))
     src = src.replace("</head>", f'<style>@page {{ @bottom-left {{ content: "{footer}"; font: 8pt "Segoe UI", sans-serif; color: #73695f; }} }}'
                                  f'@page cover {{ @bottom-left {{ content: none }} }}</style></head>')
     out = HERE / pdf_name

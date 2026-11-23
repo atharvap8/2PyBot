@@ -1,16 +1,16 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>2PyBot User Manual</title>
 <link rel="stylesheet" href="manual.css"></head><body>
-<span class="doccode">UM-2PB-001 Rev 4.4</span>
+<span class="doccode">UM-2PB-001 Rev 4.7</span>
 
 <section class="cover">
   <div class="band"></div>
   <div class="brand"><svg width="34" height="34" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="#f08a4b" stroke-width="2.5"/><circle cx="16" cy="16" r="5" fill="#f08a4b"/><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke="#f08a4b" stroke-width="2.5" stroke-linecap="round"/></svg>2PyBot platform</div>
   <div class="title">2PyBot</div>
   <div class="kind">User manual</div>
-  <div class="sub">Self-balancing two-wheel robot with BLDC hub motors, 360° lidar mapping, 8×8 time-of-flight depth sensing, live camera streaming and a browser and Android control interface.</div>
-  <img class="art" src="img/maps_tilted.png" alt="">
-  <div class="meta"><b>UM-2PB-001</b> · Revision 4.4 · November 2026<br>Firmware BaseLink 4.4.0 · Host console 4.4.0 · Android app 4.4.0</div>
+  <div class="sub">Self-balancing two-wheel robot with BLDC hub motors, 360° lidar mapping and a lidar safety bubble, 8×8 depth sensing, live camera with distance overlay, supervised autonomy and a browser and Android control interface.</div>
+  <div class="hero">{{photo:photo_cover|Cover photo|robot balancing, three-quarter view from the front-left (about 30° to the side), camera at the robot's mid height, plain dark background, LED ring lit}}</div>
+  <div class="meta"><b>UM-2PB-001</b> · Revision 4.7 · November 2026<br>Firmware BaseLink 4.7.4 · Host console 4.7.4 · Android app 4.7.4</div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -24,26 +24,29 @@
   <a href="#s5">5 Getting started</a>
   <a href="#s6">6 Operating the robot</a>
   <a class="l2" href="#s6-1">6.1 Gamepad controls</a>
-  <a class="l2" href="#s6-5">6.5 Indicators</a>
-  <a href="#s7">7 Web console</a>
-  <a href="#s8">8 Android application</a>
-  <a href="#s9">9 Mapping and localization</a>
-  <a href="#s10">10 Configuration</a>
-  <a href="#s11">11 Software updates and maintenance</a>
-  <a href="#s12">12 Troubleshooting</a>
+  <a href="#s7">7 LED ring and status indicators</a>
+  <a class="l2" href="#s7-3">7.3 Error codes</a>
+  <a href="#s8">8 Lidar safety bubble</a>
+  <a href="#s9">9 Web console</a>
+  <a href="#s10">10 Mapping and localization</a>
+  <a href="#s11">11 Autonomy</a>
+  <a href="#s12">12 Android application</a>
+  <a href="#s13">13 Configuration</a>
+  <a href="#s14">14 Software updates, logs and maintenance</a>
+  <a href="#s15">15 Troubleshooting</a>
   <a href="#sA">Appendix A Limits and default values</a>
   <a href="#sB">Appendix B Serial protocol summary</a>
   <a href="#sR">Revision history</a>
 </div>
 
 <h1 id="s1"><span class="no">1</span>About this document</h1>
-<p>This manual describes the 2PyBot robot as delivered with firmware BaseLink 4.4.0 and host software 4.4.0. It covers the hardware, safe operation, the gamepad, the web console, the Android application, lidar mapping, configuration and software maintenance.</p>
+<p>This manual describes the 2PyBot robot with firmware BaseLink 4.7.4 and host software 4.7.4. It covers the hardware, safe operation, the gamepad, the LED ring, the lidar safety bubble, the web console, mapping, autonomy, the Android application, configuration and software maintenance.</p>
 <h2>1.1 Conventions</h2>
 <table><thead><tr><th style="width:28%">Convention</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><code>monospace</code></td><td>Commands, parameter keys, file paths and serial records.</td></tr>
 <tr><td>Control pitch</td><td>Forward-positive body angle used by the controller: <code>PITCHSGN × (raw IMU pitch − TRIM)</code>.</td></tr>
 <tr><td>Robot frame</td><td>x forward, y left, z up. Yaw is positive counter-clockwise seen from above.</td></tr>
-<tr><td>Counts</td><td>Hub encoder units: 4096 counts per wheel revolution.</td></tr>
+<tr><td>Ring diagrams</td><td>The LED ring seen from above, robot front at the top (orange marker), LEDs numbered clockwise.</td></tr>
 </tbody></table>
 <div class="box note"><b class="t">Note</b>Gives additional information or a recommended practice.</div>
 <div class="box warn"><b class="t">Caution</b>Identifies a condition that can damage the robot or cause unexpected motion.</div>
@@ -51,13 +54,13 @@
 <table><thead><tr><th style="width:34%">Document</th><th>Content</th></tr></thead><tbody>
 <tr><td>2PyBot Technical Q&amp;A</td><td>Design rationale and in-depth answers on the hardware and software stack.</td></tr>
 <tr><td><code>firmware/BaseLink/PROTOCOL.md</code></td><td>Complete serial protocol between the Radxa host and the ESP32.</td></tr>
+<tr><td><code>docs/AUTONOMY.md</code></td><td>Safety bubble geometry, missions and their API.</td></tr>
 <tr><td><code>docs/LIDAR_SLAM.md</code></td><td>Lidar driver, floor clipping, pose fusion and ToF layer.</td></tr>
 <tr><td><code>docs/SELF_UPRIGHTING.md</code></td><td>Front-bumper recovery behaviour and its limits.</td></tr>
-<tr><td><code>docs/BOT_COMMANDS.md</code></td><td>Command-line tools on the robot.</td></tr>
 </tbody></table>
 
 <h1 id="s2"><span class="no">2</span>Product overview</h1>
-<p>2PyBot is a two-wheel inverted-pendulum robot. An ESP32 runs the balance controller at 200 Hz and drives two M0601 BLDC hub motors in current (torque) mode over RS485. A Radxa Cubie A7A single-board computer runs the host console: telemetry, camera streaming, depth sensing, lidar mapping, the web interface and software deployment. The operator drives with a Bluetooth gamepad paired directly to the ESP32, so driving and stopping do not depend on Wi-Fi.</p>
+<p>2PyBot is a two-wheel inverted-pendulum robot. An ESP32 runs the balance controller at 200 Hz and drives two M0601 BLDC hub motors in current (torque) mode over RS485. A Radxa Cubie A7A single-board computer runs the host console: telemetry, camera streaming, depth sensing, lidar mapping, the safety bubble, autonomy, the web interface and software deployment. The operator drives with a Bluetooth gamepad paired directly to the ESP32, so driving and stopping do not depend on Wi-Fi.</p>
 <div class="kpi">
   <div><u>Control loop</u><b>200 Hz</b></div>
   <div><u>Mass</u><b>2.6 kg</b></div>
@@ -66,14 +69,14 @@
 </div>
 <h2>2.1 Features</h2>
 <ul>
-<li>Full-state LQR/LQI balance control with position hold, velocity tracking, stiff hold and a dedicated climb gain set.</li>
-<li>Current-mode hub motor control with balance-priority torque allocation between drive and steering.</li>
-<li>Encoder heading hold, fixed steering authority and a locally triggered front-bumper self-uprighting routine.</li>
-<li>RPLIDAR C1 2D mapping with wheel and gyro odometry fusion, scan de-skew, per-beam floor clipping, map save, load and relocalization.</li>
-<li>VL53L5CX 8×8 depth sensing for an optional forward obstacle guard and a low-obstacle and drop-off layer in the map.</li>
-<li>IMX708 camera with hardware H.264 encoding and WebRTC (WHEP) streaming.</li>
-<li>One web port for the console, the live system map and the mapping page. Android application with portrait and landscape layouts.</li>
-<li>Commit-bound deployment that updates the host software and reflashes the controller in one verified operation, with automatic rollback.</li>
+<li>Full-state LQR/LQI balance control with position hold, velocity tracking, stiff hold and a climb gain set.</li>
+<li>Current-mode hub motor control with balance-priority torque allocation and corrupt-frame rejection on the motor links.</li>
+<li>Lidar safety bubble: speed limits computed in the controller from live obstacle distances, for every drive source.</li>
+<li>RPLIDAR C1 2D mapping with odometry fusion, map extend and erase, named areas and relocalization.</li>
+<li>Supervised autonomy: go to a named place, vacuum-style roaming and exploration while mapping.</li>
+<li>Live camera view with lidar distances, the bubble and the planned path drawn into the image.</li>
+<li>16-LED status ring with direction animations and numbered error codes.</li>
+<li>Commit-bound deployment that updates the host and reflashes the controller in one verified operation.</li>
 </ul>
 <h2>2.2 Key specifications</h2>
 <table><thead><tr><th style="width:38%">Item</th><th>Value</th></tr></thead><tbody>
@@ -82,275 +85,369 @@
 <tr><td>Supply</td><td>5S Li-ion, configured nominal 18 V (no voltage sensing)</td></tr>
 <tr><td>Hub motors</td><td>2 × DDT M0601, RS485 115200 baud, current mode, K<sub>t</sub> 0.75 N·m/A</td></tr>
 <tr><td>Motor current limit</td><td>2.7 A per motor default, 4.4 A maximum setting</td></tr>
-<tr><td>Full-stick drive reference</td><td>1.0 m/s default (<code>DRIVEV</code>), no hidden speed cap</td></tr>
-<tr><td>Balance controller</td><td>ESP32-WROOM, 200 Hz fixed loop</td></tr>
+<tr><td>Full-stick drive reference</td><td>1.0 m/s default (<code>DRIVEV</code>)</td></tr>
+<tr><td>Balance controller</td><td>ESP32-WROOM, 200 Hz fixed loop, independent stall guard</td></tr>
 <tr><td>IMU</td><td>ST ISM6HG256X, 960 Hz, ±4 g, ±2000 dps; QMC5883L magnetometer</td></tr>
 <tr><td>Host computer</td><td>Radxa Cubie A7A (Allwinner A733)</td></tr>
-<tr><td>Lidar</td><td>Slamtec RPLIDAR C1M1R2, 460800 baud, 20 Hz, scan plane 265 mm above floor</td></tr>
-<tr><td>Depth sensor</td><td>ST VL53L5CX, 8×8 zones, 45° field of view, 10 Hz, 210 mm above floor, 40 mm left of centre</td></tr>
-<tr><td>Camera</td><td>Sony IMX708, H.264 hardware encoder, 2304 px wide, up to 56 fps, 12 Mbit/s</td></tr>
-<tr><td>Wireless</td><td>Robot hotspot at 10.42.0.1 (2.4 GHz, channel 6); Bluetooth gamepad on the ESP32</td></tr>
+<tr><td>Lidar</td><td>Slamtec RPLIDAR C1M1R2, 20 Hz, scan plane 265 mm above floor</td></tr>
+<tr><td>Depth sensor</td><td>ST VL53L5CX, 8×8 zones, 45° field of view, 10 Hz, 210 mm above floor</td></tr>
+<tr><td>Camera</td><td>Sony IMX708 with calibrated wide lens, H.264 hardware encoder, 2304 × 1296, up to 56 fps</td></tr>
+<tr><td>Wireless</td><td>Robot hotspot at 10.42.0.1; Bluetooth gamepad on the ESP32</td></tr>
 </tbody></table>
 
 <h1 id="s3"><span class="no">3</span>Safety</h1>
-<div class="box warn"><b class="t">Caution</b>The robot is an actively balanced machine. When armed it moves its wheels to stay upright, including when pushed, lifted or tilted. Keep hands, cables and loose clothing away from the wheels whenever the status LED breathes.</div>
+<div class="box warn"><b class="t">Caution</b>The robot is an actively balanced machine. When armed it moves its wheels to stay upright, including when pushed, lifted or tilted. Keep hands, cables and loose clothing away from the wheels while the ring shows an armed state (green, blue or violet).</div>
 <ul>
-<li><b>Stopping.</b> Press <b>SELECT</b> on the gamepad, the <b>STOP</b> button in the web console or Android application, or send <code>X</code> on the serial link. Each method commands zero motor torque immediately. Brakes are not engaged, so the robot coasts and falls onto its bumper.</li>
-<li><b>Arming.</b> Arming is a local action only: <b>START</b> on the paired gamepad or <code>E</code> on the USB serial console. No network client can arm the robot.</li>
-<li><b>Automatic stops.</b> The controller disarms on a tilt beyond 55°, a pitch rate above 450°/s, motor link, mode or fault loss, a control interval above 20 ms, or loss of the host readiness signal.</li>
-<li><b>Lifting.</b> Disarm before lifting. A balanced robot held off the ground drives its wheels without load and can reach high wheel speed.</li>
-<li><b>Battery.</b> Use a protected 5S pack and charge it outside the robot with a balance charger. Do not operate with damaged cells or wiring.</li>
-<li><b>Self-uprighting.</b> START from the front-bumper rest applies up to 2.7 A per wheel for up to 2 s. Clear the area in front of and behind the robot first.</li>
-<li><b>Torch.</b> The torch output is limited to 90 % duty in firmware. Do not look into it at close range.</li>
+<li><b>Stopping.</b> Press <b>SELECT</b> on the gamepad, <b>STOP</b> in the web console or Android application, or send <code>X</code>. Each commands zero motor torque immediately. Brakes are not engaged, so the robot coasts and falls onto its bumper.</li>
+<li><b>Arming.</b> Arming is a local action only: <b>START</b> on the paired gamepad or <code>E</code> on the USB serial console. No network client and no autonomy mission can arm the robot.</li>
+<li><b>Automatic stops.</b> The controller disarms on a tilt beyond 55°, a pitch rate above 450°/s, a confirmed motor fault, motor link or mode loss, a control interval above 20 ms, or loss of the host readiness signal.</li>
+<li><b>Controller stall.</b> If the control loop stops for 150 ms, an independent timer commands zero current to both motors; after 800 ms it restarts the controller. Zero current is also commanded from the first milliseconds after every reset.</li>
+<li><b>Safety bubble.</b> The bubble limits speed near obstacles that the lidar sees. It does not see objects lower than about 26 cm or glass (see section 8). It is an aid, not a guarantee.</li>
+<li><b>Autonomy.</b> Missions run only while the robot is armed by you, the gamepad is connected and a supervising page is open. Moving a stick takes over immediately.</li>
+<li><b>Lifting.</b> Disarm before lifting. A balanced robot held off the ground drives its wheels without load.</li>
+<li><b>Battery.</b> Use a protected 5S pack and charge it outside the robot with a balance charger.</li>
+<li><b>Self-uprighting.</b> START from the front-bumper rest applies up to 2.7 A per wheel for up to 2 s. Clear the area first.</li>
 </ul>
 
 <h1 id="s4"><span class="no">4</span>Hardware description</h1>
-<h2>4.1 System architecture</h2>
+<h2>4.1 The robot</h2>
+<div class="pair">
+<figure>{{photo:photo_front|Front view|straight on from the front at the robot's mid height, robot upright on a stand}}</figure>
+<figure>{{photo:photo_side|Side view|from the robot's left side, 90° to the front, camera at axle-to-mid height, robot upright}}</figure>
+</div>
+<p class="cap"><b>Figure 1.</b> Front and side views: camera head, depth sensor, LED ring, lidar, hub motors and front bumper.</p>
+<div class="pair">
+<figure>{{photo:photo_top|Top view|from directly above, robot upright, front of the robot pointing to the top of the photo}}</figure>
+<figure>{{photo:photo_rear|Rear view|straight on from behind, showing power switch, battery and connectors}}</figure>
+</div>
+<p class="cap"><b>Figure 2.</b> Top and rear views. The lidar sits 31 mm right of centre on the axle line.</p>
+<h2>4.2 System architecture</h2>
 <svg class="diagram" viewBox="0 0 700 330" font-family="Segoe UI, sans-serif" font-size="11">
   <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5d544b"/></marker></defs>
   <rect x="250" y="20" width="200" height="120" rx="8" fill="#141210"/><text x="350" y="46" text-anchor="middle" fill="#efe9e3" font-size="13" font-weight="600">Radxa Cubie A7A</text>
-  <text x="350" y="66" text-anchor="middle" fill="#aba196">Console, SLAM, video, ToF</text><text x="350" y="84" text-anchor="middle" fill="#aba196">Hotspot 10.42.0.1</text><text x="350" y="102" text-anchor="middle" fill="#aba196">Deployment, firmware worker</text>
+  <text x="350" y="66" text-anchor="middle" fill="#aba196">Console, SLAM, bubble, autonomy</text><text x="350" y="84" text-anchor="middle" fill="#aba196">Video, ToF, hotspot 10.42.0.1</text><text x="350" y="102" text-anchor="middle" fill="#aba196">Deployment, firmware worker</text>
   <rect x="250" y="200" width="200" height="110" rx="8" fill="#141210"/><text x="350" y="226" text-anchor="middle" fill="#efe9e3" font-size="13" font-weight="600">ESP32-WROOM</text>
-  <text x="350" y="246" text-anchor="middle" fill="#aba196">Balance loop 200 Hz</text><text x="350" y="264" text-anchor="middle" fill="#aba196">Motor current control</text><text x="350" y="282" text-anchor="middle" fill="#aba196">Bluepad32 gamepad</text>
+  <text x="350" y="246" text-anchor="middle" fill="#aba196">Balance loop 200 Hz</text><text x="350" y="264" text-anchor="middle" fill="#aba196">Motor current, bubble limits</text><text x="350" y="282" text-anchor="middle" fill="#aba196">Gamepad, LED ring</text>
   <line x1="350" y1="140" x2="350" y2="200" stroke="#f08a4b" stroke-width="2.5"/><text x="358" y="174" fill="#5d544b">USB serial 460800</text>
   <g fill="#fff" stroke="#d9cfc5"><rect x="20" y="20" width="170" height="34" rx="5"/><rect x="20" y="64" width="170" height="34" rx="5"/><rect x="20" y="108" width="170" height="34" rx="5"/><rect x="510" y="20" width="170" height="34" rx="5"/><rect x="510" y="64" width="170" height="34" rx="5"/>
   <rect x="20" y="200" width="170" height="34" rx="5"/><rect x="20" y="244" width="170" height="34" rx="5"/><rect x="510" y="200" width="170" height="34" rx="5"/><rect x="510" y="244" width="170" height="34" rx="5"/><rect x="510" y="288" width="170" height="34" rx="5"/></g>
   <g fill="#141210"><text x="105" y="41" text-anchor="middle">IMX708 camera</text><text x="105" y="85" text-anchor="middle">VL53L5CX ToF</text><text x="105" y="129" text-anchor="middle">RPLIDAR C1</text><text x="595" y="41" text-anchor="middle">Phones, browsers</text><text x="595" y="85" text-anchor="middle">GitHub (updates)</text>
-  <text x="105" y="221" text-anchor="middle">ISM6HG256X IMU</text><text x="105" y="265" text-anchor="middle">QMC5883L compass</text><text x="595" y="221" text-anchor="middle">M0601 hubs ×2</text><text x="595" y="265" text-anchor="middle">Gamepad (BT)</text><text x="595" y="309" text-anchor="middle">Servos, torch, LEDs</text></g>
+  <text x="105" y="221" text-anchor="middle">ISM6HG256X IMU</text><text x="105" y="265" text-anchor="middle">QMC5883L compass</text><text x="595" y="221" text-anchor="middle">M0601 hubs ×2</text><text x="595" y="265" text-anchor="middle">Gamepad (BT)</text><text x="595" y="309" text-anchor="middle">Servos, torch, LED ring</text></g>
   <g stroke="#5d544b" stroke-width="1.4" fill="none" marker-end="url(#ar)"><path d="M190 37 H250"/><path d="M190 81 H250"/><path d="M190 125 H250"/><path d="M510 37 H450"/><path d="M510 81 H450"/><path d="M190 217 H250"/><path d="M190 261 H250"/><path d="M450 217 H510"/><path d="M510 261 H450"/><path d="M450 300 H510"/></g>
   <g fill="#8a7f74" font-size="9.5"><text x="196" y="31">CSI</text><text x="196" y="75">I2C-7</text><text x="196" y="119">UART4</text><text x="458" y="31">Wi-Fi</text><text x="458" y="75">internet</text><text x="196" y="211">I2C</text><text x="196" y="255">I2C</text><text x="458" y="211">RS485</text><text x="458" y="255">BT</text><text x="458" y="294">PWM</text></g>
 </svg>
-<p class="cap"><b>Figure 1.</b> System block diagram.</p>
-<h2>4.2 Main components</h2>
+<p class="cap"><b>Figure 3.</b> System block diagram.</p>
 <table><thead><tr><th style="width:26%">Component</th><th>Function</th></tr></thead><tbody>
-<tr><td>ESP32-WROOM controller</td><td>Owns everything that moves: IMU fusion, balance control, motor current commands, gamepad, servos, torch, LED ring and status LED. Keeps balancing if the host or Wi-Fi fails.</td></tr>
-<tr><td>Radxa Cubie A7A host</td><td>Console web server, camera pipeline, ToF worker, lidar driver and SLAM, Wi-Fi hotspot, deployment and firmware update worker. Never arms the robot.</td></tr>
-<tr><td>M0601 hub motors</td><td>Brushless hub motors with integrated drivers. Left motor ID 1, right motor ID 2, each on its own RS485 bus. Reply frames carry mode, current, speed, position and fault byte.</td></tr>
-<tr><td>Front bumper</td><td>Rest support when disarmed. In the front-rest posture the body leans about 60° forward.</td></tr>
+<tr><td>ESP32-WROOM controller</td><td>Owns everything that moves: IMU fusion, balance control, motor current, bubble speed limits, gamepad, servos, torch, LED ring and status LED. Keeps balancing if the host or Wi-Fi fails.</td></tr>
+<tr><td>Radxa Cubie A7A host</td><td>Console, camera pipeline, ToF worker, lidar and SLAM, safety bubble, autonomy, hotspot and deployment. Never arms the robot.</td></tr>
+<tr><td>M0601 hub motors</td><td>Brushless hub motors with integrated drivers. Left ID 1, right ID 2, each on its own RS485 bus.</td></tr>
+<tr><td>Front bumper</td><td>Rest support when disarmed. At rest the body leans about 60° forward.</td></tr>
 <tr><td>Camera payload</td><td>Pan servo, zoom servo and a dimmable LED torch on the camera head.</td></tr>
 </tbody></table>
+<div class="pair">
+<figure>{{photo:photo_controller|Controller board|top-down close-up of the ESP32 board with the RS485 transceivers, connectors in focus, no flash glare}}</figure>
+<figure>{{photo:photo_radxa|Radxa host and wiring|top-down close-up of the Radxa with the 40-pin header wiring (lidar, ToF) and the camera ribbon visible}}</figure>
+</div>
+<p class="cap"><b>Figure 4.</b> Controller board and host computer.</p>
 <h2 id="s4-3">4.3 ESP32 controller pin assignment</h2>
 <table><thead><tr><th style="width:16%">GPIO</th><th style="width:30%">Signal</th><th>Notes</th></tr></thead><tbody>
 <tr><td>17 / 16 / 4</td><td>Left RS485 TX / RX / DE</td><td>Motor ID 1, Serial1, 115200 baud</td></tr>
 <tr><td>19 / 18 / 23</td><td>Right RS485 TX / RX / DE</td><td>Motor ID 2, Serial2, 115200 baud</td></tr>
 <tr><td>21 / 22</td><td>I2C SDA / SCL</td><td>IMU and compass, 400 kHz</td></tr>
-<tr><td>15</td><td>LED ring data</td><td>16 × WS2812, I2S1 DMA output</td></tr>
+<tr><td>15</td><td>LED ring data</td><td>16 × WS2812, I2S1 DMA output. Front is LED 9, numbered clockwise.</td></tr>
 <tr><td>32</td><td>Status LED</td><td>Active high, LEDC channel 0, 1 kHz</td></tr>
-<tr><td>26</td><td>Pan servo</td><td>50 Hz, 500 to 2400 µs, LEDC channel 4</td></tr>
-<tr><td>0</td><td>Zoom servo</td><td>50 Hz, LEDC channel 5. Boot strapping pin, fitted with a pull-down.</td></tr>
+<tr><td>26</td><td>Pan servo</td><td>50 Hz, 500 to 2400 µs. Driven low from the first line of start-up.</td></tr>
+<tr><td>0</td><td>Zoom servo</td><td>50 Hz. Boot strapping pin; fit a 10 kΩ pull-down if the boot log reports it HIGH.</td></tr>
 <tr><td>2</td><td>Torch MOSFET</td><td>20 kHz PWM, duty capped at 90 %</td></tr>
 <tr><td>USB</td><td>Host serial</td><td>460800 baud to the Radxa</td></tr>
 </tbody></table>
 <h2 id="s4-4">4.4 Radxa host connections</h2>
 <table><thead><tr><th style="width:24%">Interface</th><th style="width:30%">Connection</th><th>Notes</th></tr></thead><tbody>
-<tr><td>USB</td><td>ESP32 controller</td><td><code>/dev/ttyUSB0</code>, 460800 baud. The boot gate holds the ESP32 in reset until the host is ready.</td></tr>
-<tr><td>UART4</td><td>RPLIDAR C1: header pin 16 TX, 18 RX, 2 or 4 for 5 V, 6 for GND</td><td><code>/dev/ttyAS4</code>. Requires the UART4 overlay and the 96 MHz UART clock overlay for 460800 baud.</td></tr>
-<tr><td>I2C-7</td><td>VL53L5CX: header pin 3 SDA, 5 SCL</td><td>Address 0x29, 400 kHz, 3.3 V supply.</td></tr>
-<tr><td>MIPI CSI</td><td>IMX708 camera</td><td>Encoded by the Allwinner hardware H.264 encoder.</td></tr>
-<tr><td>Wi-Fi</td><td>Hotspot <code>10.42.0.1</code></td><td>2.4 GHz, channel 6. Optional client Wi-Fi for internet access and updates.</td></tr>
+<tr><td>USB</td><td>ESP32 controller</td><td><code>/dev/ttyUSB0</code>. If the adapter re-enumerates, the console also finds it as <code>/dev/2pybot</code> or another <code>ttyUSB</code>.</td></tr>
+<tr><td>UART4</td><td>RPLIDAR C1: header pin 16 TX, 18 RX, 2 or 4 for 5 V, 6 for GND</td><td><code>/dev/ttyAS4</code>, requires the UART4 and 96 MHz UART clock overlays.</td></tr>
+<tr><td>I2C-7</td><td>VL53L5CX: header pin 3 SDA, 5 SCL</td><td>Address 0x29, 3.3 V supply.</td></tr>
+<tr><td>MIPI CSI</td><td>IMX708 camera</td><td>Hardware H.264 encoder, WebRTC on port 8889.</td></tr>
+<tr><td>Wi-Fi</td><td>Hotspot <code>10.42.0.1</code></td><td>2.4 GHz. Optional client Wi-Fi for updates.</td></tr>
 </tbody></table>
 <h2>4.5 Sensor mounting</h2>
 <table><thead><tr><th style="width:24%">Sensor</th><th>Position (robot frame, robot upright)</th></tr></thead><tbody>
-<tr><td>Lidar</td><td>On the axle line, 31 mm right of centre, scan plane 265 mm above the floor, 0° mark facing forward.</td></tr>
-<tr><td>VL53L5CX</td><td>Facing forward, 210 mm above the floor, 40 mm left of centre. Down-tilt is estimated automatically from floor returns.</td></tr>
-<tr><td>Camera</td><td>Facing forward on the pan and zoom head.</td></tr>
-<tr><td>IMU</td><td>On the controller board. Pitch is read from the gyro X axis.</td></tr>
+<tr><td>Lidar</td><td>On the axle line, 31 mm right of centre, scan plane 265 mm above the floor, 0° mark forward.</td></tr>
+<tr><td>VL53L5CX</td><td>Facing forward, 210 mm above the floor, 40 mm left of centre.</td></tr>
+<tr><td>Camera</td><td>Facing forward on the pan and zoom head, about 195 mm above the floor.</td></tr>
+<tr><td>Body footprint</td><td>From the lidar centre: front 6 cm, back 7 cm, right 10 cm, left 17 cm. The bubble adds 1 cm on every side.</td></tr>
 </tbody></table>
 
 <h1 id="s5"><span class="no">5</span>Getting started</h1>
 <h2>5.1 Power-on sequence</h2>
 <ol>
 <li>Rest the robot on its front bumper on a flat floor and switch on the battery.</li>
-<li>The Radxa boots and starts the console. The status LED blinks slowly (1 Hz) while the ESP32 waits for the host.</li>
-<li>When the host is ready it releases the ESP32, which starts its sensors and calibrates the gyro. <b>Keep the robot still</b> during this phase.</li>
-<li>The LED turns steady on: the controller is READY and disarmed.</li>
+<li>The LED ring shows the <b>start-up loader</b>: a white light circles clockwise while a cyan bar fills from the front. The Radxa is booting.</li>
+<li>When the Radxa is ready it releases the controller, which calibrates the gyro. <b>Keep the robot still</b> while the bar completes.</li>
+<li>A green fill from the front confirms start-up. With the gamepad connected the ring turns violet with a white heartbeat at the front: <b>ready, waiting for START</b>.</li>
 </ol>
-<div class="box note"><b class="t">Note</b>The controller does not arm by itself after power-on, a firmware update or a host restart. START is always required.</div>
+<div class="ledgrid">
+<div class="led">{{ring:loading}}<b>Starting</b><span>White light circles, cyan bar fills from the front</span></div>
+<div class="led">{{ring:readyfill}}<b>Start-up complete</b><span>Green fill from the front, then fades</span></div>
+<div class="led">{{ring:waiting}}<b>Ready</b><span>Violet ring, white heartbeat at the front</span></div>
+</div>
+<div class="box note"><b class="t">Note</b>The controller never arms by itself after power-on, an update or a host restart. START is always required. If the Radxa restarts later, the loader returns until it is ready again.</div>
 <h2>5.2 Pairing the gamepad</h2>
-<p>Put the EVOFOX One S gamepad in pairing mode (hold HOME and B). The ESP32 pairs automatically. Sticks must rest centred when the gamepad connects; the centre position is captured on connection.</p>
+<p>Put the EVOFOX One S gamepad in pairing mode (hold HOME and B). The ESP32 pairs automatically. Let the sticks rest centred when it connects: the centre position is captured on connection, and the camera stick only starts working after it has read centred once.</p>
+<figure>{{photo:photo_gamepad|Gamepad|the EVOFOX gamepad flat on a table, photographed from directly above, all buttons visible}}</figure>
 <h2>5.3 Connecting a phone or computer</h2>
 <ol>
 <li>Join the robot's Wi-Fi hotspot.</li>
-<li>Open <code>http://10.42.0.1:8080</code> in a browser. The same server also answers on <code>http://2pybot.local:8080</code> where mDNS is available.</li>
-<li>For the Android application, download it from the console (<b>App</b> link) and install it. The application connects to <code>10.42.0.1</code> by default.</li>
+<li>Open <code>http://10.42.0.1:8080</code> (or <code>http://2pybot.local:8080</code>).</li>
+<li>For the Android application, download it from the console (<b>App</b> link) and install it.</li>
 </ol>
 <h2>5.4 First balance</h2>
 <ol>
-<li>Lift the robot upright by hand so the control pitch is within 5° of vertical.</li>
-<li>Press <b>START</b>. The LED blinks fast while arming, then breathes when balancing.</li>
-<li>Release the robot gently and drive with the left stick.</li>
-<li>Press <b>SELECT</b> to stop.</li>
+<li>Lift the robot upright by hand so it is within 5° of vertical, or leave it on its front bumper to self-upright.</li>
+<li>Press <b>START</b>. A green sweep confirms arming; the ring then shows <b>holding</b>.</li>
+<li>Release the robot and drive with the left stick. Press <b>SELECT</b> to stop.</li>
 </ol>
 
 <h1 id="s6"><span class="no">6</span>Operating the robot</h1>
 <h2 id="s6-1">6.1 Gamepad controls</h2>
 <table><thead><tr><th style="width:26%">Control</th><th>Function</th></tr></thead><tbody>
 <tr><td>Left stick Y</td><td>Drive forward and backward</td></tr>
-<tr><td>Left stick X</td><td>Steer (direct, linear, fixed authority of 4000 counts/s)</td></tr>
-<tr><td>Right stick X / Y</td><td>Camera pan / camera zoom</td></tr>
-<tr><td>START</td><td>Arm when upright. From the front-bumper rest: start one self-uprighting attempt.</td></tr>
+<tr><td>Left stick X</td><td>Steer (direct, fixed authority of 4000 counts/s)</td></tr>
+<tr><td>Right stick X / Y</td><td>Camera pan / camera zoom (rate control)</td></tr>
+<tr><td>START</td><td>Arm when upright. From the front-bumper rest: one self-uprighting attempt.</td></tr>
 <tr><td>SELECT</td><td>Stop immediately (zero torque)</td></tr>
-<tr><td>LB</td><td>Toggle speed mode LOW / HIGH. LOW scales drive by 50 %.</td></tr>
+<tr><td>LB</td><td>Speed mode LOW / HIGH. LOW scales drive by 50 %.</td></tr>
 <tr><td>RB</td><td>Torch on / off</td></tr>
-<tr><td>D-pad LEFT / RIGHT</td><td>Torch dimmer, repeats while held</td></tr>
-<tr><td>D-pad UP</td><td>Toggle stiff hold (high-stiffness position hold)</td></tr>
-<tr><td>D-pad DOWN</td><td>Toggle climb mode (slope gain set)</td></tr>
+<tr><td>D-pad LEFT / RIGHT</td><td>Torch dimmer</td></tr>
+<tr><td>D-pad UP</td><td>Toggle stiff hold</td></tr>
+<tr><td>D-pad DOWN</td><td>Toggle climb mode</td></tr>
 <tr><td>Y / B / X / A</td><td>Gestures: nod yes, nod no, spin, dance. Any stick input cancels a gesture.</td></tr>
 </tbody></table>
 <h2>6.2 Balance modes</h2>
 <table><thead><tr><th style="width:26%">Mode</th><th>Behaviour</th></tr></thead><tbody>
-<tr><td>Position hold</td><td>Sticks centred: full LQI control holds the current spot and returns to it after a push.</td></tr>
-<tr><td>Velocity tracking</td><td>Drive stick deflected: the robot tracks the commanded speed; on release it brakes and latches a new hold point.</td></tr>
-<tr><td>Stiff hold</td><td>Higher gains for a firm stance on the spot.</td></tr>
-<tr><td>Climb</td><td>Separate gain set and integral for slopes and loads. Automatic climb detection can enter and exit it with a smooth handover.</td></tr>
+<tr><td>Position hold</td><td>Sticks centred: the robot holds its spot and returns to it after a push.</td></tr>
+<tr><td>Velocity tracking</td><td>Stick deflected: the robot tracks the commanded speed and brakes to a new hold point on release.</td></tr>
+<tr><td>Stiff hold</td><td>Higher gains for a firm stance.</td></tr>
+<tr><td>Climb</td><td>Separate gain set for slopes and loads; can be entered automatically.</td></tr>
 </tbody></table>
 <h2>6.3 Self-uprighting</h2>
-<p>With the robot resting on its front bumper (control pitch 60° ± 10°), stationary, sticks centred and the gamepad connected, press START once. The controller confirms the rest for 200 ms, applies equal forward wheel torque to lift the body, damps the rise and hands over to the balance controller near vertical. Each attempt lasts at most 2 s and moves each wheel at most 0.45 m.</p>
-<p>The attempt stops on SELECT, a worsening lean, no lift after 0.75 s, excessive wheel speed or travel, loss of motor, IMU or gamepad data, or any drive input. After a stop the robot stays disarmed; there is no automatic retry.</p>
+<figure>{{photo:photo_rest|Resting on the front bumper|side view from the robot's left, robot resting on its front bumper (about 60° lean), same height as the side view}}</figure>
+<p>With the robot resting on its front bumper (60° ± 10°), stationary, sticks centred and the gamepad connected, press START once. The controller lifts the body with equal wheel torque, damps the rise and hands over to balancing near vertical. An attempt lasts at most 2 s and stops on SELECT, a worsening lean, no lift, excessive wheel speed or travel, sensor loss or any stick input. There is no automatic retry.</p>
 <h2>6.4 Camera payload</h2>
-<p>The pan and zoom servos move at a rate proportional to the right stick and stay where they are released. Both servos detach 2 s after their last command (<code>SVIDLE</code>) so they draw no holding current. The torch starts at 25 % and steps in 10 % increments.</p>
-<h2 id="s6-5">6.5 Indicators</h2>
-<table><thead><tr><th style="width:30%">Status LED pattern</th><th>State</th></tr></thead><tbody>
+<p>The pan and zoom servos move at a rate proportional to the right stick and stay where released. Both detach 2 s after their last command. The torch starts at 25 % and steps in 10 % increments.</p>
+
+<h1 id="s7"><span class="no">7</span>LED ring and status indicators</h1>
+<p>The 16-LED ring tells you the robot's state at a glance. <b>Colour says what, motion says where.</b> Red is used only for errors. Front is LED 9; the diagrams show the ring from above with the front at the top.</p>
+<h2>7.1 Not armed</h2>
+<div class="ledgrid">
+<div class="led">{{ring:loading}}<b>Starting</b><span>Radxa booting, controller calibrating. Keep still.</span></div>
+<div class="led">{{ring:waiting}}<b>Ready</b><span>Gamepad connected, waiting for START</span></div>
+<div class="led">{{ring:liftme}}<b>Lift me</b><span>START pressed while lying, self-uprighting not possible</span></div>
+<div class="led">{{ring:uprighting}}<b>Self-uprighting</b><span>Orange lights chase round</span></div>
+<div class="led">{{ring:readyfill}}<b>Start-up complete</b><span>One green fill, shown once</span></div>
+<div class="led">{{ring:fell}}<b>Fell</b><span>Red glow breathing on the side that hit the ground, for 10 s</span></div>
+</div>
+<h2>7.2 Armed</h2>
+<p>Green means you are driving, blue means an autonomy mission is driving, violet means climb mode. While a direction animation runs, every other LED is off. Animations run faster the further the stick is pushed.</p>
+<div class="ledgrid">
+<div class="led">{{ring:holding}}<b>Holding</b><span>Soft breathing, bright front "eye" that blinks; glow leans toward the tilt</span></div>
+<div class="led">{{ring:forward}}<b>Forward</b><span>Two lights run from the sides into the front LED</span></div>
+<div class="led">{{ring:reverse}}<b>Reverse</b><span>Two lights run from the sides into the rear LED</span></div>
+<div class="led">{{ring:turnright}}<b>Turning right</b><span>A light sweeps the front half from left to right</span></div>
+<div class="led">{{ring:turnleft}}<b>Turning left</b><span>A light sweeps the front half from right to left</span></div>
+<div class="led">{{ring:autofwd}}<b>Autopilot</b><span>The same animations in blue</span></div>
+<div class="led">{{ring:climbfwd}}<b>Climb, moving</b><span>Single violet lights hop LED by LED toward the travel direction</span></div>
+<div class="led">{{ring:climbturn}}<b>Climb, turning</b><span>One violet light hops across the front half</span></div>
+<div class="led">{{ring:climbstop}}<b>Climb, stopped</b><span>Front LED pulses violet</span></div>
+<div class="led">{{ring:stiff}}<b>Stiff hold</b><span>Holding with amber side LEDs</span></div>
+<div class="led">{{ring:pushed}}<b>Pushed</b><span>Amber fast blink on the side it was pushed toward</span></div>
+<div class="led">{{ring:bubble}}<b>Bubble limiting</b><span>Magenta on the side where an obstacle limits speed</span></div>
+</div>
+<h2 id="s7-3">7.3 Error codes</h2>
+<p>An error is shown by <b>n red LEDs flashing together</b>, counted clockwise from the front LED. Count the lit LEDs to read the code. A ring that flashes red all round is a fatal error: the controller has stopped and must be power-cycled.</p>
+<div class="ledgrid four">
+<div class="led">{{ring:err1}}<b>1</b><span>A hub motor does not answer</span></div>
+<div class="led">{{ring:err2}}<b>2</b><span>A hub motor reports a fault</span></div>
+<div class="led">{{ring:err3}}<b>3</b><span>A hub motor is not ready / wrong mode</span></div>
+<div class="led">{{ring:err4}}<b>4</b><span>IMU data stale</span></div>
+<div class="led">{{ring:err6}}<b>6</b><span>Firmware update in progress</span></div>
+<div class="led">{{ring:err7}}<b>7</b><span>Gamepad not connected</span></div>
+<div class="led">{{ring:err9}}<b>9</b><span>Self-uprighting aborted (10 s)</span></div>
+<div class="led">{{ring:fatal}}<b>All red</b><span>Fatal: IMU start or gyro calibration failed</span></div>
+</div>
+<table><thead><tr><th style="width:12%">Code</th><th style="width:34%">Meaning</th><th>What to do</th></tr></thead><tbody>
+<tr><td>1</td><td>Motor link lost</td><td>Check the motor RS485 cables and the battery. See the System map wheel blocks.</td></tr>
+<tr><td>2</td><td>Motor fault (repeated in 3 replies)</td><td>Let the motor cool; check for a blocked wheel. A single corrupt frame is ignored and logged.</td></tr>
+<tr><td>3</td><td>Motor not in current mode</td><td>Usually clears within a second after power-up. If it stays, power-cycle.</td></tr>
+<tr><td>4</td><td>IMU stale</td><td>Power-cycle; check the controller board.</td></tr>
+<tr><td>6</td><td>Maintenance</td><td>Wait for the update to finish (Deployment page).</td></tr>
+<tr><td>7</td><td>No gamepad</td><td>Switch the gamepad on or pair it (HOME + B).</td></tr>
+<tr><td>9</td><td>Self-uprighting aborted</td><td>Clear the area, centre the sticks, try START again.</td></tr>
+</tbody></table>
+<h2>7.4 Status LED</h2>
+<table><thead><tr><th style="width:30%">Blue status LED</th><th>State</th></tr></thead><tbody>
 <tr><td>Slow blink, 1 Hz</td><td>Booting or waiting for the host</td></tr>
 <tr><td>Steady on</td><td>READY, disarmed</td></tr>
 <tr><td>Fast blink, 2.5 Hz</td><td>START received, waiting to be upright</td></tr>
 <tr><td>Breathing</td><td>Balancing or self-uprighting</td></tr>
 <tr><td>Double flash</td><td>Stopped by the operator</td></tr>
-<tr><td>Triple flash</td><td>Firmware maintenance or auto-tune in progress</td></tr>
-<tr><td>Rapid blink, 5 Hz</td><td>Error: fall, rate spike, motor fault, link loss or failed recovery</td></tr>
+<tr><td>Triple flash</td><td>Firmware maintenance or auto-tune</td></tr>
+<tr><td>Rapid blink, 5 Hz</td><td>Error</td></tr>
 </tbody></table>
-<p>The 16-LED ring shows arming, driving direction, speed mode changes and fall events.</p>
+<figure>{{photo:photo_ring|LED ring lit|close-up of the LED ring from above at an angle, ring showing the green holding state, room lights dimmed}}</figure>
 
-<h1 id="s7"><span class="no">7</span>Web console</h1>
-<p>All pages are served on one port, <code>8080</code>. Video is streamed separately by the media server on port <code>8889</code>.</p>
-<table><thead><tr><th style="width:24%">Page</th><th style="width:20%">Address</th><th>Content</th></tr></thead><tbody>
-<tr><td>Console</td><td><code>/</code></td><td>Telemetry, driving view, camera, calibration, object detection, all parameter groups, log and actions. Sections are listed in a left sidebar.</td></tr>
-<tr><td>System map</td><td><code>/sysmap/</code></td><td>Live health of every board, sensor and link with root-cause highlighting, including the lidar.</td></tr>
-<tr><td>Maps</td><td><code>/slam/</code></td><td>Five-step lidar mapping guide, live map, radar view and tilted map view.</td></tr>
-<tr><td>Autopilot</td><td><code>/ui/autonomy.html</code></td><td>Teach and replay routes at the recorded speed.</td></tr>
-<tr><td>Deployment</td><td><code>/ui/deployment.html</code></td><td>Progress of source and firmware updates.</td></tr>
+<h1 id="s8"><span class="no">8</span>Lidar safety bubble</h1>
+<p>The safety bubble keeps the robot from driving into obstacles the lidar can see. On every scan (20 per second) the Radxa measures the free distance in front of and behind the body, along the path the robot is actually taking (straight, or the current curve while turning), and sends it to the controller. The controller then limits the speed every 5 ms so that the robot can still stop before the obstacle, subtracting the distance it has driven since the scan.</p>
+<table><thead><tr><th style="width:34%">Free space to an obstacle</th><th>Allowed speed (defaults)</th></tr></thead><tbody>
+<tr><td>5 cm or less</td><td>0, blocked</td></tr>
+<tr><td>15 cm</td><td>about 0.20 m/s</td></tr>
+<tr><td>30 cm</td><td>about 0.37 m/s</td></tr>
+<tr><td>50 cm</td><td>about 0.54 m/s</td></tr>
+<tr><td>1 m</td><td>about 0.84 m/s</td></tr>
 </tbody></table>
-<figure><img src="img/system_map.png" style="width:100%"></figure>
-<p class="cap"><b>Figure 2.</b> System map. Each block reports its own state; a failed link greys out everything behind it so only the cause is shown in red.</p>
-<div class="box note"><b class="t">Note</b>The console can stop the robot but cannot arm it. Parameter saves are confirmed by the controller only after its NVS storage is read back.</div>
+<ul>
+<li><b>All drive sources.</b> The limit applies to the gamepad, gestures, host drive commands and autonomy missions, forward and reverse.</li>
+<li><b>Turning.</b> A turn that would swing a corner of the body into an obstacle is blocked in that direction; turning away is allowed.</li>
+<li><b>Noise.</b> A single stray lidar point is ignored; an obstacle seen in two consecutive scans counts.</li>
+<li><b>Fail-closed.</b> If lidar data stops, or the robot leans more than 12°, the robot holds position (it can still turn away).</li>
+<li><b>Switch.</b> Maps page, step 8, "Gamepad too". Autonomy always uses the bubble.</li>
+</ul>
+<div class="box warn"><b class="t">Caution</b>The lidar sees a single plane 26.5 cm above the floor. Low objects (cables, shoes, bowls), glass and mirrors are not seen. The depth sensor covers low objects only in front, and only when the ToF guard is enabled.</div>
+<p>Braking is tuned with three parameters in the BUBBLE group: <code>BUBDEC</code> (assumed braking, 0.5 m/s²), <code>BUBLAT</code> (balance braking delay, 0.30 s) and <code>BUBMRG</code> (stop distance from the body, 5 cm).</p>
 
-<h1 id="s8"><span class="no">8</span>Android application</h1>
-<p>The application uses the same palette and status vocabulary as the web pages. A permanent STOP button sits in the top bar in portrait and at the bottom of the side rail in landscape.</p>
-<table><thead><tr><th style="width:20%">Workspace</th><th>Content</th></tr></thead><tbody>
-<tr><td>Drive</td><td>Live 3D robot pose, velocity, pitch, heading, ToF guard and range calibration.</td></tr>
-<tr><td>Live</td><td>Camera stream over WebRTC with attitude, stick mirror and gestures.</td></tr>
-<tr><td>Maps</td><td>The lidar mapping page, including the tilted map view.</td></tr>
-<tr><td>System</td><td>The live system map.</td></tr>
-<tr><td>More</td><td>Routes, odometry trail, parameter tuning, camera studio, session recorder, setup and firmware update.</td></tr>
+<h1 id="s9"><span class="no">9</span>Web console</h1>
+<p>All pages are served on port <code>8080</code>. Video is streamed by the media server on port <code>8889</code>.</p>
+<table><thead><tr><th style="width:20%">Page</th><th style="width:18%">Address</th><th>Content</th></tr></thead><tbody>
+<tr><td>Console</td><td><code>/</code></td><td>Telemetry, driving view, camera, calibration, parameters, log and actions.</td></tr>
+<tr><td>System map</td><td><code>/sysmap/</code></td><td>Live health of every board, sensor and link with root-cause highlighting.</td></tr>
+<tr><td>Maps</td><td><code>/slam/</code></td><td>Eight-step guide: lidar check, wheel check, mapping, save, load, correct, name areas, drive by itself. Views: Map, Radar, 3D and Drive.</td></tr>
+<tr><td>Autopilot</td><td><code>/ui/autonomy.html</code></td><td>Teach and replay routes.</td></tr>
+<tr><td>Deployment</td><td><code>/ui/deployment.html</code></td><td>Progress of updates.</td></tr>
 </tbody></table>
-<p>Hold the phone sideways for driving. In landscape the navigation moves to a side rail, the primary view fills the height and the instruments sit in a scrolling column on the right. Only the selected workspace runs, so video, 3D view and web pages never compete for the GPU.</p>
+<figure>{{photo:web_maps|Maps page|screenshot (taken by the build)}}</figure>
+<p class="cap"><b>Figure 5.</b> Maps page.</p>
+<h2>9.1 Drive view</h2>
+<p>The Drive view on the Maps page shows the live camera with the lidar drawn into the image: a distance post on every return with labels on the nearest obstacles, distance rings on the floor, the bubble zone, the planned path as a blue ribbon, the goal and named areas, plus speed and clear distance ahead. <b>Align camera</b> sets the camera height, tilt and pan if the posts do not sit on real walls; the lens calibration is used automatically when present.</p>
+<figure>{{photo:web_drive|Drive view|screenshot of the Drive tab with the camera live (taken by the build or supplied)}}</figure>
+<div class="box note"><b class="t">Note</b>The console can stop the robot but cannot arm it.</div>
 
-<h1 id="s9"><span class="no">9</span>Mapping and localization</h1>
-<h2>9.1 Making a map</h2>
+<h1 id="s10"><span class="no">10</span>Mapping and localization</h1>
+<h2>10.1 Making a map</h2>
 <ol>
-<li>Open <b>Maps</b>. Check that the lidar reports about 20 Hz and good health.</li>
-<li>Run the push test (1 m forward) and the turn test (90° left) to confirm odometry. Spin the robot a few times so the gyro axis is detected.</li>
+<li>Open <b>Maps</b>. Check that the lidar reports about 20 Hz.</li>
+<li>Run the push and turn tests to confirm odometry.</li>
 <li>Press <b>Start mapping</b> and drive slowly while balancing. Finish where you started.</li>
 <li>Enter a name and press <b>Save map</b>.</li>
 </ol>
-<h2>9.2 Using a map</h2>
-<p>Select the map and press <b>Load</b>. The robot searches the whole map for its position. If it reports that it cannot match the view, drive to a mapped area or press <b>Find me</b>.</p>
-<figure><img src="img/maps_tilted.png" style="width:92%"></figure>
-<p class="cap"><b>Figure 3.</b> Tilted map view: the saved 2D map seen from a corner at 45°, walls raised.</p>
-<h2>9.3 How the position is estimated</h2>
+<h2>10.2 Using, correcting and extending a map</h2>
 <ul>
-<li>Wheel encoders and the gyro predict motion at every lidar scan. Gyro bias is learnt while the robot stands still.</li>
-<li>Each scan is corrected for the robot's motion during the sweep, then matched against the map. The match corrects the position only if it is good and agrees with the prediction.</li>
-<li>Wheel slip is detected when the gyro disagrees with the wheels, and the position uncertainty grows accordingly.</li>
-<li>When the body leans forward, only beams that would reach the floor are discarded. Scans are skipped only above 12° lean or during fast rocking.</li>
+<li><b>Load</b> a map: the robot searches the whole map for its position. <b>Find me</b> repeats the search.</li>
+<li><b>Extend selected map</b>: loads the map, finds the robot, then keeps mapping on top: new rooms are added and changed areas redrawn. Save when done.</li>
+<li><b>Erase tool</b>: tap the map to forget a spot (moved furniture, ghost walls) so mapping draws it again.</li>
+<li><b>Label tool</b> (step 7): tap a spot and name it, e.g. <i>kitchen</i>. Labels are saved with the map and used as destinations.</li>
 </ul>
-<div class="box note"><b class="t">Note</b>A robot resting on its bumper leans about 20° to 60°. Mapping is intended while balancing; scans taken at rest are skipped by design.</div>
+<figure><img class="photo" src="img/maps_tilted.png" style="width:92%"></figure>
+<p class="cap"><b>Figure 6.</b> Tilted map view.</p>
 
-<h1 id="s10"><span class="no">10</span>Configuration</h1>
-<p>About 130 tunable parameters live in the ESP32. Each has fixed bounds. Edit them in the console or the Android Tune workspace, then press <b>Save</b>. A save is reported as successful only after the controller has written every value and read it back from flash.</p>
+<h1 id="s11"><span class="no">11</span>Autonomy</h1>
+<p>Step 8 on the Maps page runs supervised missions. The robot must be armed by you (START), the gamepad connected and the page open. Moving a stick takes over at once; leaving the page pauses the mission.</p>
+<table><thead><tr><th style="width:18%">Mission</th><th>What it does</th></tr></thead><tbody>
+<tr><td>Go to</td><td>Drives to a named area or a spot picked on the map. Plans a route over mapped free space, follows it on the map position and re-plans around new obstacles.</td></tr>
+<tr><td>Roam</td><td>Wanders like a robot vacuum for a set time: straight runs, turns away from obstacles toward open, less-visited space.</td></tr>
+<tr><td>Explore</td><td>Drives to the edges of the map while mapping until no reachable unmapped edge is left.</td></tr>
+<tr><td>Teach &amp; replay</td><td>Repeats a route you drove (Autopilot page).</td></tr>
+</tbody></table>
+<p>Speeds are Slow (0.15 m/s), Normal (0.25 m/s) and Fast (0.40 m/s). The bubble limits every mission. The status card reports progress in plain words, for example "Going to kitchen · 0.7 m to go" or "Paused · You took over with the gamepad".</p>
+
+<h1 id="s12"><span class="no">12</span>Android application</h1>
+<p>The application uses the same palette and status vocabulary as the web pages. A permanent STOP button sits in the top bar in portrait and on the side rail in landscape.</p>
+<div class="pair">
+<figure>{{photo:app_drive|App, Drive workspace|phone screenshot, landscape, Drive workspace while connected to the robot}}</figure>
+<figure>{{photo:app_maps|App, Maps workspace|phone screenshot, Maps workspace showing a loaded map}}</figure>
+</div>
+<table><thead><tr><th style="width:20%">Workspace</th><th>Content</th></tr></thead><tbody>
+<tr><td>Drive</td><td>Live 3D robot pose, velocity, pitch, heading, ToF guard.</td></tr>
+<tr><td>Live</td><td>Camera stream with attitude and gestures.</td></tr>
+<tr><td>Maps</td><td>The Maps page including step 8 and the Drive view.</td></tr>
+<tr><td>System</td><td>The live system map.</td></tr>
+<tr><td>More</td><td>Routes, tuning, camera studio, recorder, setup and firmware update.</td></tr>
+</tbody></table>
+
+<h1 id="s13"><span class="no">13</span>Configuration</h1>
+<p>About 135 tunable parameters live in the ESP32, each with fixed bounds. Edit them in the console or the Android Tune workspace and press <b>Save</b>. Settings are stored as one block in flash; a save reports success only after it has been read back.</p>
 <table><thead><tr><th style="width:22%">Group</th><th>Examples</th></tr></thead><tbody>
-<tr><td>BALANCE</td><td><code>K1</code> to <code>K5</code> LQI gains, stiff-hold gains, integral limit, braking lookahead</td></tr>
-<tr><td>MOTOR</td><td>Current limit, acceleration limit, velocity loop gains, mass, direction and polarity (fixed)</td></tr>
-<tr><td>DRIVE</td><td>Full-stick speed, deadbands, stick expo, LOW mode scales, gamepad signs</td></tr>
-<tr><td>YAW</td><td>Steering authority (fixed 4000 counts/s), heading hold gains, track width</td></tr>
+<tr><td>BALANCE</td><td><code>K1</code> to <code>K5</code>, stiff-hold gains, integral limit, braking lookahead</td></tr>
+<tr><td>MOTOR</td><td>Current limit, acceleration limit, velocity loop gains, mass</td></tr>
+<tr><td>DRIVE</td><td>Full-stick speed, deadbands, stick expo, LOW mode scales</td></tr>
+<tr><td>YAW</td><td>Steering authority (fixed), heading hold gains, track width</td></tr>
 <tr><td>SAFETY</td><td>Arm angle, fall angle, rate limit, link timeouts, host boot wait</td></tr>
-<tr><td>SELFRIGHT</td><td>Enable, rest angle, current, gains, slew, timeout, travel and speed limits</td></tr>
-<tr><td>IMU, CLIMB, LED, PAYLOAD, TERRAIN</td><td>Filter, signs, climb gains, ring, servos, torch, terrain adaptation</td></tr>
+<tr><td>BUBBLE</td><td><code>BUBDEC</code>, <code>BUBLAT</code>, <code>BUBMRG</code>, <code>BUBSTALE</code></td></tr>
+<tr><td>LED</td><td>Brightness, frame rate, <code>LEDFRONT</code> (front LED, 9) and <code>LEDDIR</code> (+1 clockwise)</td></tr>
+<tr><td>SELFRIGHT, IMU, CLIMB, PAYLOAD, TERRAIN</td><td>Recovery, filter, climb gains, servos, torch, terrain adaptation</td></tr>
 </tbody></table>
-<div class="box warn"><b class="t">Caution</b><code>TRIM</code> (−1.2603°) and <code>MAXSTR</code> (4000 counts/s) are fixed in firmware and cannot be changed or overwritten by a saved configuration. Motor polarity and encoder sign parameters are also fixed.</div>
+<div class="box warn"><b class="t">Caution</b><code>TRIM</code> (−1.2603°) and <code>MAXSTR</code> (4000 counts/s) are fixed in firmware. Motor polarity and encoder signs are also fixed.</div>
+<p>If the LED ring is ever remounted, send <code>LT,1</code> to show a colour compass (LED 0 white, LED 1 dim yellow, 4 red, 8 green, 12 blue), set <code>LEDFRONT</code> and <code>LEDDIR</code>, then check with <code>LT,2</code> (front white, right green, back red).</p>
 
-<h1 id="s11"><span class="no">11</span>Software updates and maintenance</h1>
-<h2>11.1 Command-line tools</h2>
-<p>Log in with SSH to the robot. The <code>bot</code> command works from any directory.</p>
-<table><thead><tr><th style="width:34%">Command</th><th>Purpose</th></tr></thead><tbody>
-<tr><td><code>bot status</code></td><td>Host readiness, controller state and firmware versions</td></tr>
-<tr><td><code>bot update</code></td><td>Pull the configured branch and deploy it</td></tr>
-<tr><td><code>bot check deploy-status</code></td><td>Show the state of the current or last deployment</td></tr>
-<tr><td><code>bot firmware-status</code></td><td>Installed and latest firmware builds</td></tr>
-<tr><td><code>bot params get KEY</code></td><td>Read a parameter or capability</td></tr>
-<tr><td><code>bot stop</code></td><td>Operator stop</td></tr>
-<tr><td><code>bot backup</code> / <code>bot restore</code></td><td>Back up and restore firmware, NVS prefix and tuning</td></tr>
-<tr><td><code>bot diagnostics</code></td><td>One-shot report of telemetry, logs, USB, services and network</td></tr>
-</tbody></table>
-<h2>11.2 Deploying a branch</h2>
+<h1 id="s14"><span class="no">14</span>Software updates, logs and maintenance</h1>
+<h2>14.1 Deploying a branch</h2>
 <p>Stop the robot with SELECT and run, from <code>~/projects/2PyBot</code>:</p>
 <pre>git fetch origin BRANCH &amp;&amp; git show FETCH_HEAD:scripts/radxa/deploy_branch.py | sudo python3 - BRANCH</pre>
-<p>The helper selects the branch, waits for the matching CI bundle, installs the host software and reflashes the controller. Return to the stable release with:</p>
-<pre>git fetch origin feature/fusion-slam &amp;&amp; git show FETCH_HEAD:scripts/radxa/deploy_branch.py | sudo python3 - stable</pre>
-<h2>11.3 What a deployment does</h2>
-<ol>
-<li>Takes the controller maintenance lock and saves the live tuning.</li>
-<li>Backs up the boot and NVS region, verifies the current image as a rollback copy.</li>
-<li>Writes only the application partition, verifies it and confirms that boot and NVS are unchanged.</li>
-<li>Restarts and calibrates the controller, restores tuning and verifies it.</li>
-<li>On any failure, writes back the previous application and restores it.</li>
-</ol>
+<p>The helper waits for the matching CI bundle, installs the host software and reflashes the controller. The deployment backs up the boot and NVS region, writes only the application, verifies everything and restores the live tuning; any failure restores the previous firmware.</p>
+<h2>14.2 Logs and diagnostics</h2>
+<table><thead><tr><th style="width:40%">Where</th><th>What</th></tr></thead><tbody>
+<tr><td><code>/var/lib/2pybot/logs/controller.log</code></td><td>Every controller message (falls, faults, resets, link loss), kept across reboots, 5 × 4 MB rotation.</td></tr>
+<tr><td><code>[BOOT] Reset reason</code></td><td>Logged at every controller start: power-on, watchdog, brownout, panic.</td></tr>
+<tr><td><code>POST /api/debug/record</code></td><td>Records all raw controller lines for up to 120 s, with an optional 100 Hz wheel stream.</td></tr>
+<tr><td><code>PN</code> / <code>PX,ns</code></td><td>Settings flash usage per namespace / erase an obsolete namespace.</td></tr>
+</tbody></table>
 
-<h1 id="s12"><span class="no">12</span>Troubleshooting</h1>
-<table><thead><tr><th style="width:32%">Symptom</th><th style="width:34%">Likely cause</th><th>Action</th></tr></thead><tbody>
-<tr><td>START does nothing</td><td>Not upright, not READY, or maintenance active</td><td>Hold within 5° of vertical; wait for steady LED; check Deployment page.</td></tr>
-<tr><td>Rapid blink after a fall</td><td>Tilt or rate limit reached</td><td>Normal. Return upright and press START.</td></tr>
-<tr><td>"Motor link/mode/fault" stop</td><td>RS485 reply lost or driver fault byte set</td><td>Check System map wheel blocks; reseat motor cables; check supply.</td></tr>
-<tr><td>Depth sensor shows an I2C error</td><td>Sensor unpowered or connector loose</td><td>Check 3.3 V and the I2C-7 connector at header pins 3 and 5.</td></tr>
-<tr><td>Lidar below 20 Hz</td><td>Motor speed not applied or supply sag</td><td>Check the Maps page rate and the lidar block on the System map.</td></tr>
-<tr><td>Map shows "not sure where I am"</td><td>Poor match or featureless area</td><td>Drive slower near walls, or press Find me.</td></tr>
-<tr><td>Deployment waits for artifact</td><td>CI bundle still building or slow uplink</td><td>Wait for the GitHub "Bot deployment bundle" run to finish.</td></tr>
-<tr><td>Old page layout in the browser</td><td>Cached files</td><td>Hard refresh (Ctrl+F5).</td></tr>
+<h1 id="s15"><span class="no">15</span>Troubleshooting</h1>
+<table><thead><tr><th style="width:30%">Symptom</th><th style="width:32%">Likely cause</th><th>Action</th></tr></thead><tbody>
+<tr><td>Loader keeps spinning</td><td>Radxa still booting or camera/hotspot not ready</td><td>Wait up to 2 minutes; check the System map.</td></tr>
+<tr><td>Red LEDs flashing</td><td>Error code</td><td>Count the LEDs and see 7.3.</td></tr>
+<tr><td>START does nothing</td><td>Not upright, not ready, or maintenance</td><td>Hold within 5° of vertical; wait for the violet ready ring.</td></tr>
+<tr><td>Robot will not drive toward a wall</td><td>Safety bubble</td><td>Normal: magenta shows where it is limiting. Turn away or reverse.</td></tr>
+<tr><td>Robot holds still, magenta both sides</td><td>Boxed in, or lidar stale</td><td>Check the bubble line in step 8; disable "Gamepad too" only if the lidar has failed.</td></tr>
+<tr><td>Settings lost after reboot</td><td>Save not confirmed</td><td>Press Save again and look for "saved" in the log.</td></tr>
+<tr><td>Map shows "not sure where I am"</td><td>Poor match</td><td>Drive slower near walls, or press Find me.</td></tr>
+<tr><td>Mission paused</td><td>Page hidden, stick moved, or lost balance</td><td>The status card gives the reason; press Resume.</td></tr>
+<tr><td>Old page layout</td><td>Cached files</td><td>Hard refresh (Ctrl+F5).</td></tr>
 </tbody></table>
 
 <h1 id="sA"><span class="no">Appendix A</span>Limits and default values</h1>
-<table><thead><tr><th style="width:36%">Parameter</th><th style="width:16%">Key</th><th>Default</th></tr></thead><tbody>
+<table><thead><tr><th style="width:36%">Parameter</th><th style="width:18%">Key</th><th>Default</th></tr></thead><tbody>
 <tr><td>Arm angle</td><td><code>ARMANG</code></td><td>5°</td></tr>
 <tr><td>Fall cutoff</td><td><code>MAXTILT</code></td><td>55°</td></tr>
 <tr><td>Pitch rate cutoff</td><td><code>MAXRATE</code></td><td>450°/s</td></tr>
 <tr><td>Motor current limit</td><td><code>CURRENT</code></td><td>2700 mA</td></tr>
-<tr><td>Balance acceleration limit</td><td><code>MAXACC</code></td><td>6 m/s²</td></tr>
 <tr><td>Full-stick speed</td><td><code>DRIVEV</code></td><td>1.0 m/s</td></tr>
-<tr><td>Speed ceiling</td><td><code>MAXSPD</code></td><td>0 (none)</td></tr>
 <tr><td>Steering authority</td><td><code>MAXSTR</code></td><td>4000 counts/s, fixed</td></tr>
 <tr><td>Raw pitch trim</td><td><code>TRIM</code></td><td>−1.2603°, fixed</td></tr>
-<tr><td>Host link timeout</td><td><code>RADXATMO</code></td><td>600 ms</td></tr>
-<tr><td>Gamepad timeout</td><td><code>JOYTMO</code></td><td>200 ms</td></tr>
-<tr><td>Self-uprighting current / time</td><td><code>SRMAXMA</code> / <code>SRTIME</code></td><td>2700 mA / 2.0 s</td></tr>
+<tr><td>Bubble braking / delay / margin</td><td><code>BUBDEC</code> / <code>BUBLAT</code> / <code>BUBMRG</code></td><td>0.5 m/s² / 0.30 s / 0.05 m</td></tr>
+<tr><td>Bubble fail-closed time</td><td><code>BUBSTALE</code></td><td>300 ms</td></tr>
+<tr><td>Front LED / direction</td><td><code>LEDFRONT</code> / <code>LEDDIR</code></td><td>9 / +1</td></tr>
+<tr><td>Stall guard</td><td>fixed</td><td>Zero current after 150 ms, restart after 800 ms</td></tr>
 <tr><td>Servo release time</td><td><code>SVIDLE</code></td><td>0 = 2000 ms</td></tr>
 </tbody></table>
 
 <h1 id="sB"><span class="no">Appendix B</span>Serial protocol summary</h1>
 <p>USB serial at 460800 baud, ASCII lines terminated by a newline.</p>
-<table><thead><tr><th style="width:18%">Record</th><th style="width:16%">Rate</th><th>Content</th></tr></thead><tbody>
-<tr><td><code>O</code></td><td>50 Hz</td><td>Time, left and right encoder counts, raw pitch, compass yaw, gyro X, Y, Z</td></tr>
-<tr><td><code>D</code></td><td>50 Hz</td><td>Controller state: pitch, rate, acceleration command, velocity, position error, saturation, loop time, modes</td></tr>
-<tr><td><code>HM</code></td><td>10 Hz</td><td>Motor current commands and feedback, speed, temperature, fault bytes, link and mode</td></tr>
-<tr><td><code>SR</code></td><td>20 Hz</td><td>Self-uprighting phase, reason, attempt, timing and wheel travel</td></tr>
-<tr><td><code>P? / P / PS / PL / PD</code></td><td>On request</td><td>Parameter dump, set, save, load, defaults</td></tr>
-<tr><td><code>V,f,s,e</code></td><td>Host</td><td>Host drive input; may stop the robot, never arm it</td></tr>
+<table><thead><tr><th style="width:24%">Record</th><th style="width:14%">Rate</th><th>Content</th></tr></thead><tbody>
+<tr><td><code>O</code> / <code>D</code></td><td>50 Hz</td><td>Odometry and IMU / controller state</td></tr>
+<tr><td><code>HM</code></td><td>10 Hz</td><td>Motor currents, speed, temperature, faults</td></tr>
+<tr><td><code>BB</code></td><td>10 Hz</td><td>Bubble as the controller sees it: clearance, caps, flags</td></tr>
+<tr><td><code>NR</code></td><td>10 Hz</td><td>Navigation lease state</td></tr>
+<tr><td><code>BG,en,front,back,flags,age</code></td><td>Host, 20 Hz</td><td>Bubble distances from the Radxa</td></tr>
+<tr><td><code>AN</code> / <code>AU</code></td><td>Host</td><td>Autonomy lease grant / drive command; never arms</td></tr>
+<tr><td><code>P? / P / PS / PL / PD / PN</code></td><td>On request</td><td>Parameter dump, set, save, load, defaults, flash report</td></tr>
+<tr><td><code>LT,n</code> / <code>HF,s</code></td><td>On request</td><td>LED ring test / 100 Hz wheel diagnostics</td></tr>
 <tr><td><code>X / E</code></td><td>Host</td><td>Stop / arm request (arm only from the USB console)</td></tr>
 </tbody></table>
 
 <h1 id="sR">Revision history</h1>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:14%">Revision</th><th>Changes</th></tr></thead><tbody>
-<tr><td>November 2026</td><td>4.4</td><td>Initial release for firmware and host 4.4.0: 20 Hz lidar, pose fusion, ToF map layer, single web port, tilted map view, landscape application layout.</td></tr>
+<tr><td>November 2026</td><td>4.4</td><td>Initial release for firmware and host 4.4.0.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.4: LED ring states and error codes, start-up loader, lidar safety bubble, map correction and labels, autonomy missions, camera Drive view, settings persistence, stall guard and controller log.</td></tr>
 </tbody></table>
 <h2>Important notice</h2>
-<p class="legal">This document describes a development platform. Specifications reflect configured values in the released software and may differ from measured behaviour. Operate the robot only in a clear area under direct supervision. Values marked fixed are enforced by the firmware and cannot be changed by configuration.</p>
+<p class="legal">This document describes a development platform. Specifications reflect configured values in the released software and may differ from measured behaviour. Operate the robot only in a clear area under direct supervision.</p>
 </body></html>

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>2PyBot Technical Q&amp;A</title>
 <link rel="stylesheet" href="manual.css"></head><body>
-<span class="doccode">AN-2PB-002 Rev 4.4</span>
+<span class="doccode">AN-2PB-002 Rev 4.7</span>
 
 <section class="cover">
   <div class="band"></div>
@@ -9,8 +9,8 @@
   <div class="title">2PyBot</div>
   <div class="kind">Technical questions and answers</div>
   <div class="sub">Design decisions, control theory, interfaces and software architecture, answered for engineers reviewing the robot in person.</div>
-  <img class="art" src="img/maps_tilted.png" alt="">
-  <div class="meta"><b>AN-2PB-002</b> · Revision 4.4 · November 2026<br>Applies to firmware BaseLink 4.4.0 and host software 4.4.0</div>
+  <div class="hero">{{photo:photo_cover|Cover photo|same as the user manual cover}}</div>
+  <div class="meta"><b>AN-2PB-002</b> · Revision 4.7 · November 2026<br>Applies to firmware BaseLink 4.7.4 and host software 4.7.4</div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -25,6 +25,7 @@
   <a class="l2" href="#s-fw">Firmware structure</a>
   <a class="l2" href="#s-host">Host software</a>
   <a class="l2" href="#s-slam">Mapping and localization</a>
+  <a class="l2" href="#s-safe">Safety bubble, autonomy and indicators</a>
   <a class="l2" href="#s-ops">Deployment, applications and quality</a>
 </div>
 
@@ -48,9 +49,10 @@
 <p>Velocity mode was evaluated and removed: the drivers' internal speed loop and position-derived feedback delay produced oscillation under load. Steppers were used in earlier revisions and replaced because they lose steps under shock loads and cannot report torque.</p></div></div>
 <div class="qa"><div class="q"><i>H6</i>How is the RS485 link scheduled, and what happens if a reply is lost?</div><div class="a">
 <p>Each motor has its own RS485 bus. Every 5 ms control cycle sends exactly one frame to each motor, regardless of whether the previous reply arrived. A missed reply costs one feedback sample, not a torque update. Earlier revisions waited for replies and froze a wheel's torque for up to 25 ms after a single late frame.</p>
-<p>Every reply carries the motor's actual mode byte and fault byte. If a motor reports the wrong mode, a fault, or no reply for 60 ms, the controller disarms.</p></div></div>
+<p>Every reply carries the motor's actual mode byte and fault byte. If a motor reports the wrong mode, a fault, or no reply for 60 ms, the controller disarms.</p>
+<p>The frame check is an 8-bit CRC, so on a noisy link a misaligned 10-byte window passes it about once in 256 tries. Replies that pass the CRC but are impossible (fault bits outside the documented 0x1F, more than 900 rpm) are rejected and the parser resynchronises. A fault must repeat in three consecutive replies (about 7.5 ms) and a mode change in two before they count. This removed false "overheat" trips caused by a single corrupt frame; ignored frames are logged.</p></div></div>
 <div class="qa"><div class="q"><i>H7</i>How is wheel speed measured?</div><div class="a">
-<p>From the unwrapped 16-bit absolute position in every drive reply, differentiated against the reply timestamp and low-pass filtered at 30 Hz. The motors' reported RPM is coarse and delayed, so it is kept only as a fallback source selectable with <code>HUBVSRC</code>. Positions are converted to 4096 counts per revolution and per-wheel forward signs before any control code sees them.</p></div></div>
+<p>From the unwrapped 16-bit absolute position in every drive reply, differentiated against the time the request was sent (when the driver sampled the position) and low-pass filtered at 30 Hz. Using the reply arrival time instead adds UART and loop jitter that, multiplied by wheel speed, becomes velocity noise at high speed. The motors' reported RPM is coarse and delayed, so it is kept only as a fallback source selectable with <code>HUBVSRC</code>. Positions are converted to 4096 counts per revolution and per-wheel forward signs before any control code sees them.</p></div></div>
 <div class="qa"><div class="q"><i>H8</i>What limits the motor current, and why 2.7 A?</div><div class="a">
 <p>A per-motor software limit (<code>CURRENT</code>, default 2700 mA, maximum 4400 mA) is applied before the command is quantised to the driver's ±8 A scale. 2.7 A gives about 2 N·m per wheel, which recovers the 2.6 kg robot from the tilts it meets in normal driving while staying well inside the drivers' thermal and overcurrent limits on a 5S supply.</p>
 <p>Balance current is allocated first; steering only receives the remaining headroom per wheel. A sharp turn therefore cannot steal the torque needed to catch a fall.</p></div></div>
@@ -75,7 +77,9 @@
 <div class="qa"><div class="q"><i>H15</i>Why is the lidar offset from the centreline, and does it matter?</div><div class="a">
 <p>It is placed 31 mm right of centre on the axle line for packaging. The offset is part of the sensor transform, so every scan point is expressed in the robot frame before matching. Placing it on the axle line keeps it from translating when the body pitches.</p></div></div>
 <div class="qa"><div class="q"><i>H16</i>What happens when the robot falls?</div><div class="a">
-<p>Beyond 55° tilt or 450°/s pitch rate the controller commands zero torque and disarms; brakes are never applied, so the motors coast. The robot comes to rest on its front bumper at about 60°. From that posture a local START can trigger the self-uprighting routine.</p></div></div>
+<p>Beyond 55° tilt or 450°/s pitch rate the controller commands zero torque and disarms; brakes are never applied, so the motors coast. The robot comes to rest on its front bumper at about 60°. The ring flashes red once and then glows red on the side that hit the ground for 10 s. From the bumper rest a local START can trigger the self-uprighting routine.</p></div></div>
+<div class="qa"><div class="q"><i>H19</i>What happens if the controller hangs or resets?</div><div class="a">
+<p>The M0601 drivers keep applying their last current while no frames arrive, so a stalled controller could leave a wheel spinning. An esp_timer task independent of the control loop watches a loop heartbeat: after 150 ms without it, it sends zero-current frames to both motors every 20 ms; after 800 ms it restarts the ESP32 (5 s if a blocking maintenance command is running with motors off). Zero-current frames are also sent from the first milliseconds after any reset and throughout the wait for the host. The reset reason is printed at boot and kept in the persistent controller log on the Radxa.</p></div></div>
 <div class="qa"><div class="q"><i>H17</i>Which pins needed special care on the ESP32?</div><div class="a">
 <p>GPIO0 (zoom servo) and GPIO2 (torch) are boot strapping pins. They are reset to plain GPIO and driven low before the PWM peripheral takes them, and GPIO0 has a pull-down so the chip boots normally. The status LED uses its own PWM channel and timer so its animation continues during blocking calibration.</p></div></div>
 <div class="qa"><div class="q"><i>H18</i>Why do the camera servos detach?</div><div class="a">
@@ -104,10 +108,10 @@
 
 <h2 id="s-fw">Firmware structure</h2>
 <div class="qa"><div class="q"><i>S7</i>How is the 200 Hz loop kept deterministic?</div><div class="a">
-<p>The loop runs on a fixed 5 ms period on core 1; the Bluetooth stack runs on core 0. Each cycle reads the IMU, services the motor UARTs, runs the controller and transmits both motor frames immediately after. Serial parsing has a per-cycle byte budget, and the parameter dump writes one line per cycle only if it fits the transmit buffer. A loop interval above 20 ms disarms the robot, and the worst interval is reported in telemetry.</p></div></div>
+<p>The loop runs on a fixed 5 ms period on core 1; the Bluetooth stack runs on core 0. A separate stall guard (H19) zeroes the motors and restarts the controller if the loop stops. Each cycle reads the IMU, services the motor UARTs, runs the controller and transmits both motor frames immediately after. Serial parsing has a per-cycle byte budget, and the parameter dump writes one line per cycle only if it fits the transmit buffer. A loop interval above 20 ms disarms the robot, and the worst interval is reported in telemetry.</p></div></div>
 <div class="qa"><div class="q"><i>S8</i>How are parameters stored and protected?</div><div class="a">
 <p>All tunables are defined once in an X-macro table with key, default, bounds, group and description. The same table generates the RAM structure, bounds checks, the protocol dump and NVS storage. Every write is bounds-checked; mode, direction and radius changes are refused while motors are active.</p>
-<p>A save writes every value, closes, reopens read-only and compares every stored value before it reports success. Values that must never drift, such as <code>TRIM</code> and <code>MAXSTR</code>, have equal minimum and maximum and are re-imposed on every recompute.</p></div></div>
+<p>All values are stored as one NVS blob of (key hash, value) records. An earlier layout used one NVS entry per key; about 150 entries plus the Bluetooth bonds filled the 20 KB partition, so saves failed and every boot used defaults. A save now clears the old entries, writes the blob, reopens read-only and compares it byte for byte before it reports success; <code>PN</code> reports partition usage. Values that must never drift, such as <code>TRIM</code> and <code>MAXSTR</code>, have equal minimum and maximum and are re-imposed on every recompute.</p></div></div>
 <div class="qa"><div class="q"><i>S9</i>How does the gamepad connect, and why not through Wi-Fi?</div><div class="a">
 <p>The EVOFOX gamepad pairs directly with the ESP32 through Bluepad32. Driving and stopping then work without the host and without Wi-Fi, with a single radio hop and no network queuing. A stale gamepad (200 ms) zeroes its inputs while balance continues. Button actions are edge-detected so a button held during connection cannot arm the robot.</p></div></div>
 
@@ -135,6 +139,17 @@
 <div class="qa"><div class="q"><i>S19</i>How does the robot find itself on a saved map?</div><div class="a">
 <p>On load, and automatically after about 2 s of failed matching, it runs a global search: candidate positions on a 0.25 m lattice over confidently free cells at 36 headings are scored with a subset of scan points in bounded batches, and the best eight are refined locally. The searches are serialised so the button and the automatic retry never run at the same time.</p></div></div>
 
+<h2 id="s-safe">Safety bubble, autonomy and indicators</h2>
+<div class="qa"><div class="q"><i>S25</i>What is the safety bubble, and why is braking computed in the controller?</div><div class="a">
+<p>On every 20 Hz scan the Radxa finds the free distance ahead of and behind the body inside the corridor the body sweeps along the current path (straight, or an arc from the measured speed and yaw rate). The footprint is the measured body (lidar-relative front 6, back 7, right 10, left 17 cm) plus 1 cm. Returns on the body are ignored; a return counts only if a neighbour lies within 6 cm or it was also seen in the previous scan. Turning flags block a rotation that would swing a corner into a return.</p>
+<p>The host sends distances, not speeds: <code>BG,en,front,back,flags,age_ms</code>. Every 5 ms the controller subtracts the wheel travel since the scan and limits the drive reference to <code>v = √((a·t)² + 2a(d − m)) − a·t</code>, with braking a = <code>BUBDEC</code>, delay t = <code>BUBLAT</code> and margin m = <code>BUBMRG</code>. An earlier version sent speed caps at 10 Hz; a cap computed 100 to 200 ms earlier was too late for a fast approach. The limit applies to every drive source and fails closed after <code>BUBSTALE</code> without data.</p></div></div>
+<div class="qa"><div class="q"><i>S26</i>How do autonomy missions work, and how are they supervised?</div><div class="a">
+<p>Missions run on the Radxa and drive through the firmware navigation lease: <code>AN</code> requests a lease (granted only while balancing with the gamepad connected and the sticks centred), <code>AU</code> streams speed and yaw-rate commands at 20 Hz, and the lease expires after 500 ms without them. Any stick movement cancels it. Go to plans with A* over the inflated occupancy grid (10 cm cells, robot radius 17 cm, extra cost near walls) and follows the path with pure pursuit on the SLAM pose; it re-plans around obstacles the lidar sees when blocked for 2 s. Roam is a reactive vacuum-style planner; Explore drives to frontier cells while mapping. The supervising page must send a heartbeat at least every 3 s and pauses the mission when hidden.</p></div></div>
+<div class="qa"><div class="q"><i>S27</i>How does the Drive view place lidar distances in the camera image?</div><div class="a">
+<p>In the browser. Each lidar return is a point in the robot frame at the 265 mm scan height; it is transformed into the camera frame using the camera mount (position, tilt, pan, roll, plus the robot's measured lean) and projected with the calibrated intrinsics, including the fisheye distortion model when the lens calibration is present. Floor features such as the bubble zone, distance rings and the planned path are projected at floor height. The mount can be adjusted live in the Align panel.</p></div></div>
+<div class="qa"><div class="q"><i>S28</i>How are the LED ring states chosen?</div><div class="a">
+<p>The ring follows a fixed priority: test patterns, fatal error, start-up loader (until the host sends <code>BR,1</code> and calibration completes), fall, numbered error codes, self-uprighting, gestures, pushed, then the armed motion animations and the ready heartbeat. Red is reserved for errors. Error n lights n LEDs clockwise from the front LED (<code>LEDFRONT</code>, numbered in the <code>LEDDIR</code> direction), which is set once with the <code>LT</code> test patterns. Animations are rate-limited and skip a frame rather than stall the control loop.</p></div></div>
+
 <h2 id="s-ops">Deployment, applications and quality</h2>
 <div class="qa"><div class="q"><i>S20</i>How is software deployed to the robot?</div><div class="a">
 <p>Each push builds a commit-bound bundle in CI containing the controller firmware compiled with a locked toolchain and the Android application. On the robot, a managed pull fetches the configured branch and the deployment service downloads the bundle for that exact commit. It stages an immutable host release, takes the controller maintenance lock and flashes the firmware through the worker. It then verifies that the controller reconnects READY and records the result.</p></div></div>
@@ -145,10 +160,11 @@
 <div class="qa"><div class="q"><i>S23</i>How is behaviour verified without risking the robot?</div><div class="a">
 <p>Every change is compiled for the exact board and partition layout, and the Python host code is checked for the robot's Python version. Unit and simulation tests exist for the control and protocol logic and run when explicitly enabled in CI. Physical motion tests are always operator-initiated: no build or deployment arms or drives the robot.</p></div></div>
 <div class="qa"><div class="q"><i>S24</i>What are the main known limitations?</div><div class="a">
-<p>The lidar sees one plane, so mapping is 2D; the tilted view raises walls visually, not from measured height. Supply voltage is not measured, so torque headroom at low charge is not compensated. The ToF layer covers only what the sensor has looked at. Self-uprighting is validated only from the front-bumper rest. Loop closure relies on scan matching against the existing map rather than a pose-graph optimiser.</p></div></div>
+<p>The lidar sees one plane, so mapping is 2D; the tilted view raises walls visually, not from measured height. Supply voltage is not measured, so torque headroom at low charge is not compensated. The ToF layer covers only what the sensor has looked at. Self-uprighting is validated only from the front-bumper rest. Loop closure relies on scan matching against the existing map rather than a pose-graph optimiser. The safety bubble cannot see objects below the scan plane, glass or mirrors, and its braking parameters are model values to be confirmed by stopping tests.</p></div></div>
 
 <h2>Revision history</h2>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:14%">Revision</th><th>Changes</th></tr></thead><tbody>
 <tr><td>November 2026</td><td>4.4</td><td>Initial release for firmware and host 4.4.0.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.4: corrupt-frame rejection, stall guard, settings blob, sample-time wheel speed, safety bubble, autonomy, Drive view and LED ring states.</td></tr>
 </tbody></table>
 </body></html>
