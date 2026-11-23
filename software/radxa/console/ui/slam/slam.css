@@ -107,3 +107,19 @@ canvas[hidden]{display:none}
 .legend3d{position:absolute;left:14px;bottom:14px;display:flex;flex-wrap:wrap;gap:6px 14px;max-width:calc(100% - 28px);padding:8px 12px;background:rgba(20,18,16,.92);border:1px solid var(--line);border-radius:6px;font-size:12px;color:var(--sub)}
 .legend3d[hidden]{display:none}.legend3d i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}.legend3d b{color:var(--ink);font-weight:600}
 
+
+/* ---- map tools, labels, autonomy ---- */
+.btn.tool[aria-pressed="true"] { background: var(--accbg); border-color: var(--acc); color: var(--acc); }
+.btn.danger { border-color: #5a2630; color: var(--err); }
+.labels { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.labels li { display: flex; align-items: center; gap: 6px; background: var(--card2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 13px; }
+.labels li b { flex: 1; font-weight: 500; }
+.labels li button { border: 0; background: none; color: var(--sub); padding: 2px 6px; }
+.labels li button:hover { color: var(--acc); }
+.bubble { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0 8px; background: var(--card2); display: grid; gap: 4px; }
+.bubble.clear { border-color: #1f5a46; } .bubble.limiting { border-color: #6a5320; }
+.bubble.blocked, .bubble.stale { border-color: #6a2533; }
+.switch { font-size: 12.5px; color: var(--sub); display: flex; gap: 6px; align-items: center; }
+select { background: var(--card2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#m-status { color: var(--sub); }
+#m-status.run { color: var(--ok); } #m-status.bad { color: var(--warn); }

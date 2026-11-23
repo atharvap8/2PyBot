@@ -99,7 +99,12 @@ function render() {
 
   const warn = /skipping|not sure|can't|Problem|error/i.test(S.message);
   setSay(S.message, warn ? "warn" : "");
-  draw();
+  if (S.map_name && !$("map-name").value && document.activeElement !== $("map-name")) $("map-name").value = S.map_name;
+  $("b-extend").disabled = S.mode === "mapping";
+  renderLabels();
+  if (!guard) renderBubble();
+  if (view === "drive") { if (drive) drive.update(S); }
+  else draw();
 }
 
 // ---------------------------------------------------------------- drawing
@@ -156,6 +161,7 @@ function draw() {
   for (const p of T.obstacles || []) { const [x, y] = w2s(p[0], p[1]); ctx.fillRect(x - 2, y - 2, 4, 4); }
   ctx.fillStyle = "#ff4d6d";
   for (const p of T.cliffs || []) { const [x, y] = w2s(p[0], p[1]); ctx.fillRect(x - 2.5, y - 2.5, 5, 5); }
+  drawOverlays(pose);
   drawRobot(...w2s(pose[0], pose[1]), pose[2]);
   // scale bar
   ctx.fillStyle = "#aba196"; ctx.font = "12px sans-serif";
@@ -186,18 +192,192 @@ function drawRadar(r) {
 }
 
 // ---------------------------------------------------------------- input
-let drag = null, pinch = null;
+let drag = null, pinch = null, tap = null;
 cv.addEventListener("wheel", (e) => {
   e.preventDefault(); cam.scale = Math.max(8, Math.min(400, cam.scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); draw();
 }, { passive: false });
-cv.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointerdown", (e) => {
+  drag = { x: e.clientX, y: e.clientY }; tap = { x: e.clientX, y: e.clientY, moved: 0 };
+  cv.setPointerCapture(e.pointerId);
+});
 cv.addEventListener("pointermove", (e) => {
   if (!drag || pinch) return;
+  if (tap) tap.moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
+  if (tap && tap.moved < 6) return;                     // still a tap, not a pan
   cam.follow = false;
   cam.x -= (e.clientX - drag.x) / cam.scale; cam.y += (e.clientY - drag.y) / cam.scale;
   drag = { x: e.clientX, y: e.clientY }; draw();
 });
-cv.addEventListener("pointerup", () => { drag = null; });
+cv.addEventListener("pointerup", (e) => {
+  const t = tap; drag = null; tap = null;
+  if (t && t.moved < 6 && !pinch && view === "map" && tool) {
+    const r = cv.getBoundingClientRect();
+    toolTap(...s2w(e.clientX - r.left, e.clientY - r.top));
+  }
+});
+
+// ---------------------------------------------------------------- map tools
+let tool = null;                                              // null | "label" | "erase" | "goal"
+function s2w(px, py) {                                        // screen (css px) -> world (m)
+  const r = cv.getBoundingClientRect();
+  return [cam.x + (px - r.width / 2) / cam.scale, cam.y - (py - r.height / 2) / cam.scale];
+}
+function setTool(t) {
+  tool = tool === t ? null : t;
+  document.querySelectorAll(".btn.tool").forEach((b) => b.setAttribute("aria-pressed", b.dataset.tool === tool));
+  if (tool && view !== "map") setView("map");
+  $("view-note").textContent = tool === "label" ? "Tap a spot to name it"
+    : tool === "erase" ? "Tap to erase (drag still pans)" : tool === "goal" ? "Tap where the robot should go"
+    : "Scroll or pinch to zoom · drag to move";
+}
+document.querySelectorAll(".btn.tool").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
+async function toolTap(x, y) {
+  if (tool === "label") {
+    const name = (prompt(`Name this spot (${x.toFixed(2)}, ${y.toFixed(2)} m):`) || "").trim();
+    if (!name) return;
+    const r = await post("api/labels", { name, x, y });
+    if (!r.ok) setSay(r.error || "Could not add the label.", "warn");
+  } else if (tool === "erase") {
+    const r = await post("api/map/erase", { x, y, r: +$("erase-r").value });
+    if (!r.ok) setSay(r.error || "Could not erase.", "warn");
+  } else if (tool === "goal") {
+    startMission("goto", { goal: { x, y, name: "tapped point" } });
+    setTool("goal");                                          // one tap = one goal
+  }
+}
+function renderLabels() {
+  const labels = S.labels || [];
+  const key = JSON.stringify(labels);
+  if (key === renderLabels.key) return;
+  renderLabels.key = key;
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  $("label-list").innerHTML = labels.map((l) =>
+    `<li><b>${esc(l.name)}</b><span class="sub">${l.x.toFixed(1)}, ${l.y.toFixed(1)}</span>` +
+    `<button data-go="${esc(l.name)}" title="Drive there">Go</button><button data-del="${esc(l.name)}" title="Delete">✕</button></li>`).join("")
+    || `<li class="sub">No labels yet.</li>`;
+  const sel = $("goal-label"), cur = sel.value;
+  sel.innerHTML = `<option value="">Go to area…</option>` + labels.map((l) => `<option>${esc(l.name)}</option>`).join("");
+  sel.value = labels.some((l) => l.name === cur) ? cur : "";
+  $("label-list").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => post("api/labels/delete", { name: b.dataset.del })));
+  $("label-list").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => startMission("goto", { goal: { label: b.dataset.go } })));
+}
+function drawOverlays(pose) {
+  // planned path + goal
+  if (S.plan && S.plan.length > 1) {
+    ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath();
+    S.plan.forEach((p, i) => { const [x, y] = w2s(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (S.goal) {
+    const [gx, gy] = w2s(S.goal.x, S.goal.y);
+    ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(gx, gy, 9, 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(gx, gy, 3, 0, 2 * Math.PI); ctx.fillStyle = "#38bdf8"; ctx.fill();
+  }
+  // area labels
+  ctx.font = "600 12px sans-serif"; ctx.textBaseline = "bottom";
+  for (const l of S.labels || []) {
+    const [x, y] = w2s(l.x, l.y);
+    ctx.fillStyle = "#f08a4b"; ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI); ctx.fill();
+    const w = ctx.measureText(l.name).width + 10;
+    ctx.fillStyle = "rgba(20,18,16,.85)"; ctx.fillRect(x - w / 2, y - 24, w, 17);
+    ctx.fillStyle = "#efe9e3"; ctx.fillText(l.name, x - w / 2 + 5, y - 9);
+  }
+  ctx.textBaseline = "alphabetic";
+  // safety bubble footprint (+ stop margin), coloured by state
+  const B = S.bubble;
+  if (B && B.footprint) {
+    const [x0, x1, y0, y1] = B.footprint, m = B.stop_margin || 0.06;
+    const col = { clear: "#34d399", limiting: "#f0b84b", stale: "#73695f" }[B.state] || "#ff4d6d";
+    const c = Math.cos(pose[2]), s = Math.sin(pose[2]);
+    const poly = (pts) => {
+      ctx.beginPath();
+      pts.forEach(([px, py], i) => { const [X, Y] = w2s(pose[0] + c * px - s * py, pose[1] + s * px + c * py); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+      ctx.closePath();
+    };
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+    poly([[x1, y0], [x1, y1], [x0, y1], [x0, y0]]); ctx.stroke();
+    ctx.setLineDash([3, 3]);
+    poly([[x1 + m, y0 - 0.03], [x1 + m, y1 + 0.03], [x0 - m, y1 + 0.03], [x0 - m, y0 - 0.03]]); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ---------------------------------------------------------------- autonomy
+let sup = null, guard = null;                                 // {id, key} supervision lease
+async function api(path, body) {
+  const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" },
+                                 body: body === undefined ? undefined : JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+  return j;
+}
+function mStatus(text, cls) { const e = $("m-status"); e.textContent = text; e.className = "hint " + (cls || ""); }
+async function startMission(kind, extra) {
+  try {
+    const body = Object.assign({ kind, speed_mps: +$("m-speed").value, duration_s: +$("m-time").value }, extra || {});
+    const r = await api("/api/autonomy/mission/start", body);
+    sup = { id: r.mission_id, key: r.lease_key }; mStatus("Started.", "run");
+  } catch (e) { mStatus(e.message, "bad"); }
+}
+async function heartbeat() {
+  if (!sup) return;
+  try { await api("/api/autonomy/heartbeat", { mission_id: sup.id, lease_key: sup.key }); }
+  catch (e) { sup = null; }
+}
+async function pollMission() {
+  try {
+    const r = await api("/api/autonomy/mission");
+    guard = r.bubble;
+    const m = r.mission;
+    if (drive) drive.setHud(m ? { state: m.state, name: m.name, v: m.command_v, w: m.command_w } : null);
+    if (!m) mStatus(`Ready. ${(r.blocked_reasons.roam || []).join("; ") || "Roam can start."}`);
+    else {
+      const info = m.info || {}, extra = Object.entries(info).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(" · ");
+      mStatus(`${m.name}: ${m.state}${m.reason ? " (" + m.reason + ")" : ""} · v ${fmt(m.command_v)} m/s · w ${fmt(m.command_w)} rad/s${extra ? " · " + extra : ""}`,
+              m.state === "running" ? "run" : m.state === "paused" || m.state === "aborted" ? "bad" : "");
+      if (m.state !== "running") sup = m.state === "paused" ? sup : null;
+    }
+    renderBubble();
+  } catch (e) { /* console offline or separate SLAM port: no autonomy here */ }
+}
+function renderBubble() {
+  const B = guard || (S && S.bubble);
+  if (!B) return;
+  const blocked = /blocked|boxed/.test(B.state);
+  $("bubble-box").className = "bubble " + (blocked ? "blocked" : B.state);
+  $("bubble-state").textContent = { clear: "clear", limiting: "slowing", front_blocked: "front blocked",
+    rear_blocked: "rear blocked", boxed_in: "boxed in", stale: "no lidar" }[B.state] || B.state;
+  const cap = (v) => (v >= 2.99 ? "free" : `${fmt(v)} m/s`);
+  $("bubble-caps").textContent = `fwd ${cap(B.forward_cap)} · rev ${cap(B.reverse_cap)} · front ${fmt(B.front_m)} m · back ${fmt(B.back_m)} m`
+    + (guard ? (guard.active ? " · controller limited" : guard.enabled ? (guard.firmware_supported ? " · waiting for lidar" : " · firmware lacks BG") : " · not limiting") : "");
+  if (guard && document.activeElement !== $("bubble-on")) $("bubble-on").checked = !!guard.enabled;
+}
+$("bubble-on").onchange = async (e) => { try { guard = await api("/api/bubble", { enabled: e.target.checked }); renderBubble(); } catch (err) { mStatus(err.message, "bad"); } };
+$("b-roam").onclick = () => startMission("roam");
+$("b-explore").onclick = () => startMission("explore");
+$("b-goto").onclick = () => { const l = $("goal-label").value; if (l) startMission("goto", { goal: { label: l } }); };
+$("b-mpause").onclick = () => api("/api/autonomy/pause", {}).catch((e) => mStatus(e.message, "bad"));
+$("b-mstop").onclick = () => { sup = null; api("/api/autonomy/stop", {}).catch((e) => mStatus(e.message, "bad")); };
+$("b-mresume").onclick = async () => {
+  try { const r = await api("/api/autonomy/resume", {}); sup = { id: r.mission_id, key: r.lease_key }; }
+  catch (e) { mStatus(e.message, "bad"); }
+};
+$("b-extend").onclick = async () => {
+  const n = $("map-list").value; if (!n) return;
+  const r = await post("api/maps/extend", { name: n });
+  if (r.ok) $("map-name").value = n; else setSay(r.error || "Could not load the map.", "warn");
+};
+$("b-delete").onclick = async () => {
+  const n = $("map-list").value;
+  if (n && confirm(`Delete map “${n}” permanently?`)) { await post("api/maps/delete", { name: n }); refreshMaps(); }
+};
+// Supervision: the robot only keeps driving while this page is visible.
+const pauseNow = () => { if (sup) fetch("/api/autonomy/pause", { method: "POST", keepalive: true }); };
+document.addEventListener("visibilitychange", () => { if (document.hidden) pauseNow(); });
+window.addEventListener("pagehide", pauseNow);
+setInterval(heartbeat, 1000);
+setInterval(pollMission, 700);
 cv.addEventListener("touchmove", (e) => {
   if (e.touches.length !== 2) return;
   const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
@@ -224,17 +404,33 @@ async function update3d(force) {
   } catch (e) { /* the next state message retries */ }
   scene3dBusy = false;
 }
+const cvd = $("cvd"), drive = window.DriveView ? window.DriveView.create(cvd) : null;
 function setView(v) {
   if (v === "3d" && !s3d) { setSay("3D needs WebGL, which this browser does not provide.", "warn"); v = "map"; }
   view = v;
-  for (const k of ["map", "radar", "3d"]) $("v-" + k).setAttribute("aria-selected", v === k);
-  cv.hidden = v === "3d"; cv3.hidden = v !== "3d"; $("legend3d").hidden = v !== "3d";
+  for (const k of ["map", "radar", "3d", "drive"]) $("v-" + k).setAttribute("aria-selected", v === k);
+  cv.hidden = v === "3d" || v === "drive"; cv3.hidden = v !== "3d"; cvd.hidden = v !== "drive";
+  $("legend3d").hidden = v !== "3d";
   if (s3d) s3d.show(v === "3d");
+  if (drive) drive.show(v === "drive");
   $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
     : v === "radar" ? "Live scan around the robot (top = front)"
+    : v === "drive" ? "What the robot sees: walls, live lidar, safety bubble, planned path · drag to orbit"
     : "45° corner view · drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
-  if (v === "3d") update3d(true); else resize();
+  if (v === "3d") update3d(true);
+  else if (v === "drive") { if (drive) { drive.resize(); fetchDriveScene(true); } }
+  else resize();
 }
+let driveAt = 0;
+async function fetchDriveScene(force) {
+  if (!drive || view !== "drive" || !S) return;
+  const now = Date.now();
+  if (!force && (drive.version === S.map_version || now - driveAt < 2000)) return;
+  driveAt = now;
+  try { drive.setScene(await (await fetch(base + "api/scene3d")).json()); } catch (e) { /* retry later */ }
+}
+setInterval(() => fetchDriveScene(false), 1000);
+$("v-drive").onclick = () => setView("drive");
 $("v-map").onclick = () => setView("map");
 $("v-radar").onclick = () => setView("radar");
 $("v-3d").onclick = () => setView("3d");
@@ -257,4 +453,4 @@ $("b-find").onclick = async () => {
 };
 window.addEventListener("resize", resize);
 resize(); connect(); refreshMaps();
-setView({ radar: "radar", "3d": "3d" }[new URLSearchParams(location.search).get("view")] || "map");
+setView({ radar: "radar", "3d": "3d", drive: "drive" }[new URLSearchParams(location.search).get("view")] || "map");

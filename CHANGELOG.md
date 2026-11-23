@@ -3,6 +3,21 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.6.0 — Lidar autonomy: bubble, labels, roaming, map navigation
+
+- Safety bubble from the measured body footprint (R10/L17/F6/B7 cm from the lidar,
+  diagonals triangulated). Forward/reverse caps and turn clearance on every scan.
+  New firmware `BG` command caps all drive sources, including the navigation lease;
+  fails closed. Switch on the Maps page (default on).
+- Map correction: *Extend* a saved map (relocalize, then keep mapping on top), an
+  eraser tool, and map deletion.
+- Area labels: tap the map and name a spot; stored with the map.
+- Missions through the navigation lease: vacuum-style *Roam*, *Go to* a label or a
+  tapped point (A* on the map, re-planning around new obstacles) and *Explore & map*
+  (frontier exploration).
+- *Drive* view: chase-camera reality view with walls, live lidar, bubble, path and labels.
+- See [docs/AUTONOMY.md](docs/AUTONOMY.md). Not yet driven on hardware.
+
 ## 4.5.0 — Safety fixes, fusion SLAM merged to main
 
 Merges all work since 4.1.1: self-uprighting, lidar SLAM with

@@ -217,6 +217,39 @@ async def autonomy_pause():autonomy.pause();return autonomy.status()
 async def autonomy_stop():autonomy.stop();return autonomy.status()
 
 
+class MissionInput(BaseModel):
+    kind: str                       # roam | goto | explore
+    speed_mps: Optional[float]=None
+    duration_s: Optional[float]=None
+    goal: Optional[dict]=None       # {"label": name} or {"x": m, "y": m, "name": str}
+
+
+@app.post("/api/autonomy/mission/start")
+async def autonomy_mission(body: MissionInput):
+    try:return await autonomy.start_task(body.kind,body.speed_mps,body.duration_s,body.goal)
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.get("/api/autonomy/mission")
+async def autonomy_mission_status():
+    m=autonomy.mission
+    return {"mission":None if not m else {k:v for k,v in m.items() if k not in ("points","samples","origin")},
+            "blocked_reasons":{k:autonomy.mission_prerequisites(k) for k in ("roam","goto","explore")},
+            "bubble":bubble_guard.status()}
+
+
+class BubbleInput(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/bubble")
+def bubble_status():return bubble_guard.status()
+
+
+@app.post("/api/bubble")
+def bubble_set(body: BubbleInput):return bubble_guard.set_enabled(body.enabled)
+
+
 @app.middleware("http")
 async def firmware_mutation_gate(request,call_next):
     internal=request.url.path.startswith("/api/internal/deployment/")
@@ -291,6 +324,7 @@ async def _startup():
                                    asyncio.create_task(autonomy.run()),
                                   asyncio.create_task(publish_ready(link, host_ready))]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
+    app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
     if os.environ.get("BOT_LIDAR", "1") != "0":
         lidar.start()
@@ -602,6 +636,9 @@ slam_engine = SlamEngine(MAPS_DIR)
 slam_engine.tof_source = tof                     # read-only: latest depth frames for the 3D layer
 lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan, rpm=LIDAR_RPM)
 link.add_line_listener(slam_engine.on_line)      # read-only raw O/D lines
+autonomy.slam = slam_engine                      # map pose + safety bubble for lidar missions
+from .bubble_guard import BubbleGuard
+bubble_guard = BubbleGuard(slam_engine, link)    # BG caps to the controller (started in _startup)
 # Threads start in _startup(), not at import: the deployer's import check
 # must not open /dev/ttyAS4 next to the running console.
 slam_web = slam_app.create_app(slam_engine, lidar, estop)

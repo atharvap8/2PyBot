@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.5.0
+ *  BaseLink.ino — 2PyBot v4.6.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -39,6 +39,7 @@
 #include "autotune.h"
 #include "terrain.h"
 #include "tof_guard.h"
+#include "bubble_guard.h"
 #include "startup_gate.h"
 #include "auto_climb.h"
 #include "descent_guard.h"
@@ -125,6 +126,7 @@ uint32_t radxaLastRx = 0;
 float    radxaFwd = 0.0f, radxaSteer = 0.0f;
 uint8_t  radxaEn = 0, radxaEnPrev = 0;
 ToFGuard tofGuard;
+BubbleGuard bubbleGuard;   // lidar safety bubble from the Radxa (BG)
 AutoClimb autoClimb;
 DescentGuard descentGuard;
 NavigationLease navigation;
@@ -364,7 +366,7 @@ void handleLine(char* line) {
         // stop. Keep discovery, E-STOP, host heartbeat and camera usable.
         const bool safe = !strcasecmp(line,"X") || !strcasecmp(line,"P?") ||
             !strcasecmp(line,"S") || !strcasecmp(line,"L") || !strcasecmp(line,"N") ||
-            !strcasecmp(line,"F") || !strncmp(line,"V,",2) || !strncmp(line,"TG,",3) ||
+            !strcasecmp(line,"F") || !strncmp(line,"V,",2) || !strncmp(line,"TG,",3) || !strncmp(line,"BG,",3) ||
             !strncmp(line,"B=",2) || !strncmp(line,"P=",2) || !strncmp(line,"Z=",2);
         if (!safe) { Serial.println("PE,self-uprighting active; SELECT or X aborts"); return; }
     }
@@ -409,6 +411,14 @@ void handleLine(char* line) {
         if (sscanf(line + 3, "%d,%f%c", &en, &limit, &extra) != 2 ||
             !tofGuard.update(en, limit, millis()))
             Serial.println("[TOF] Invalid TG command");
+        return;
+    }
+
+    if (!strncmp(line, "BG,", 3)) {
+        int en = 0; float fwd = 0, rev = 0; char extra = 0;
+        if (sscanf(line + 3, "%d,%f,%f%c", &en, &fwd, &rev, &extra) != 3 ||
+            !bubbleGuard.update(en, fwd, rev, millis()))
+            Serial.println("[BUBBLE] Invalid BG command");
         return;
     }
 
@@ -563,6 +573,8 @@ void runController(float dt) {
             tofGuard.apply(effectiveDriveV/driveScale,driveScale,millis())*driveScale : 0.0f;
         effectiveDriveV=fminf(effectiveDriveV,boundedRef);
     }
+    // Lidar bubble: both directions, every source including navigation.
+    effectiveDriveV=bubbleGuard.apply(effectiveDriveV,millis());
     const bool wasAutomatic=autoClimb.active;
     const bool wasLimited=autoClimb.actuatorLimited;
     const bool wasExiting=autoClimb.exitPending;
@@ -642,6 +654,7 @@ void runController(float dt) {
             const float cap=tofGuard.apply(climbDriveRef/P.climbVel,P.climbVel,millis())*P.climbVel;
             climbDriveRef=fminf(climbDriveRef,cap);
         }
+        climbDriveRef=bubbleGuard.apply(climbDriveRef,millis());
         if(airborne)climbDriveRef=0;
         climbRecovery=0;
         climbXRef+=climbDriveRef*dt;
@@ -746,7 +759,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.5.0");
+    Serial.println("     2PyBot BaseLink v4.6.0");
     Serial.println("==================================================");
 
     params_begin();

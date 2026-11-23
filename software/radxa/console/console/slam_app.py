@@ -24,6 +24,18 @@ class NameBody(BaseModel):
     name: str
 
 
+class LabelBody(BaseModel):
+    name: str
+    x: float
+    y: float
+
+
+class EraseBody(BaseModel):
+    x: float
+    y: float
+    r: float = 0.25
+
+
 def _safe(v):
     if isinstance(v, float) and not math.isfinite(v):
         return None
@@ -95,6 +107,44 @@ def create_app(engine, lidar, estop):
             return {"ok": True}
         except (ValueError, OSError) as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.post("/api/maps/extend")
+    def extend(body: NameBody):
+        """Map correction: load a saved map and keep mapping on top of it."""
+        try:
+            engine.extend(body.name.strip())
+            return {"ok": True}
+        except (ValueError, OSError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.post("/api/maps/delete")
+    def delete(body: NameBody):
+        try:
+            return {"ok": engine.delete_map(body.name.strip()) > 0}
+        except (ValueError, OSError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.post("/api/map/erase")
+    def erase(body: EraseBody):
+        try:
+            return {"ok": True, "cells": engine.erase(body.x, body.y, body.r)}
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.get("/api/labels")
+    def labels():
+        return engine.labels
+
+    @app.post("/api/labels")
+    def add_label(body: LabelBody):
+        try:
+            return {"ok": True, "labels": engine.add_label(body.name, body.x, body.y)}
+        except (ValueError, OSError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.post("/api/labels/delete")
+    def delete_label(body: NameBody):
+        return {"ok": engine.remove_label(body.name), "labels": engine.labels}
 
     @app.post("/api/relocalize")
     def relocalize():

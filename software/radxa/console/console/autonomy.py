@@ -102,6 +102,100 @@ class Autonomy:
         self.last_operator=0;self.sequence=0;self.last_tick=clock();self.last_progress=clock();self.best_metric=math.inf
         self.last_v=self.last_w=0;self.events=[];self.lock=asyncio.Lock()
         self.action_epoch=0
+        self.slam=None          # SlamEngine (set by the server): map pose + lidar safety bubble
+        self.planner=None       # RoamPlanner / GotoPlanner / ExplorePlanner for lidar missions
+    # ---------------------------------------------------------------- lidar missions
+    def slam_pose(self):
+        """(pose, localized) from SLAM, or (None, False) when it is not running."""
+        engine=self.slam
+        if engine is None or engine.mode not in ("mapping","localizing"):return None,False
+        with engine.lock:
+            pose=tuple(float(v) for v in engine.pose)
+            match=dict(engine.match)
+        return pose,(match.get("ok") or match.get("lost",99)<6) and engine.robot_live()
+    def nav_pose(self,kind):
+        if kind in ("goto","explore"):
+            pose,localized=self.slam_pose()
+            if pose is None:raise ValueError("Load a map (or start mapping) first")
+            return pose,localized
+        pose,_=self.slam_pose()
+        return (pose if pose is not None else self.pose()),True
+    def bubble(self):
+        if self.slam is None:return {"stale":True,"forward_cap":0.0,"reverse_cap":0.0}
+        return self.slam.bubble.status()
+    def mission_prerequisites(self,kind):
+        reasons=self.prerequisites()
+        if self.slam is None:reasons.append("Lidar mapping is not available")
+        elif self.bubble().get("stale",True):reasons.append("Lidar safety bubble has no fresh scans")
+        if kind in ("goto","explore") and self.slam is not None:
+            if kind=="explore" and self.slam.mode!="mapping":reasons.append("Start mapping (or extend a map) before exploring")
+            if kind=="goto" and self.slam.mode not in ("mapping","localizing"):reasons.append("Load a map first")
+            elif self.slam_pose()[0] is not None and not self.slam_pose()[1]:reasons.append("Not localized on the map yet (press Find me)")
+        return reasons
+    def resolve_goal(self,goal):
+        if not isinstance(goal,dict):raise ValueError("Goal required")
+        if goal.get("label"):
+            found=self.slam.label(goal["label"]) if self.slam else None
+            if not found:raise ValueError("Unknown area label")
+            return found
+        try:x=float(goal["x"]);y=float(goal["y"])
+        except (KeyError,TypeError,ValueError):raise ValueError("Goal needs x and y (metres) or a label")
+        if not (math.isfinite(x) and math.isfinite(y)):raise ValueError("Goal must be finite")
+        return {"name":str(goal.get("name") or "point")[:32],"x":x,"y":y}
+    async def start_task(self,kind,speed=None,duration_s=None,goal=None):
+        from .missions import ExplorePlanner,GotoPlanner,RoamPlanner
+        async with self.lock:
+            if self.mission and self.mission["state"] in ENGAGED:raise ValueError("A mission is already engaged")
+            if self.teach:raise ValueError("Save or cancel route teaching first")
+            if kind not in ("roam","goto","explore"):raise ValueError("Unknown mission")
+            reasons=self.mission_prerequisites(kind)
+            if reasons:raise ValueError("; ".join(reasons))
+            for value in (speed,duration_s):
+                if value is not None and (not isinstance(value,(int,float)) or not math.isfinite(value) or value<=0):raise ValueError("Speed/duration must be positive")
+            if kind=="roam":planner=RoamPlanner(speed or .25,duration_s or 600);name="Roam"
+            elif kind=="explore":planner=ExplorePlanner(self.slam,speed or .25,duration_s or 1200);name="Explore and map"
+            else:
+                target=self.resolve_goal(goal);planner=GotoPlanner(self.slam,target,speed or .30);name="Go to "+target["name"]
+            generation=self.action_epoch;owner=await self.grant()
+            if generation!=self.action_epoch:
+                self.tx(f"AN,{owner},0");raise ValueError("Start was cancelled")
+            self.planner=planner
+            self.mission={"id":uuid.uuid4().hex,"kind":kind,"route_id":None,"name":name,"state":"running","reason":"",
+                "origin":None,"points":[],"index":0,"speed_mps":planner.speed,"elapsed_s":0,"samples":[],"sample_index":0,
+                "replay_mode":kind,"distance_m":0,"command_v":0,"command_w":0,"epoch":self.link.pose_epoch,"token":owner,"info":{}}
+            self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock()
+            self.last_v=self.last_w=0;self.event("Mission started: "+name)
+            return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
+    def clear_plan(self):
+        if self.slam is not None:
+            with self.slam.lock:self.slam.plan=[];self.slam.goal=None
+    def planner_tick(self,m,now,dt):
+        kind=m["kind"]
+        pose,localized=self.nav_pose(kind)
+        bubble=self.bubble()
+        if bubble.get("stale",True):
+            self.drive(0,0);m["info"]=dict(m.get("info",{}),waiting="lidar bubble stale")
+            if now-self.last_progress>2.0:self.pause("lidar safety bubble stale")
+            return
+        self.last_progress=now
+        # Low obstacles under the 26.5 cm scan plane: the ToF corridor guard's
+        # floor-aware cap, only when the operator has enabled the ToF guard.
+        try:depth_cap=self.depth().get("forward_limit_mps")
+        except Exception:depth_cap=None
+        depth_cap=9.0 if not isinstance(depth_cap,(int,float)) else float(depth_cap)
+        measured=float(self.link.debug.get("v",self.link.tel.get("v_ms",0)) or 0)
+        args=(now,dt,pose,bubble,depth_cap,measured)
+        step=self.planner.step(*args) if kind=="roam" else self.planner.step(*args,localized=localized)
+        m["elapsed_s"]=round(m["elapsed_s"]+dt,2);m["info"]=step.info
+        if step.done:
+            self.drive(0,0);self.stop(step.reason,"completed" if step.reason in ("goal reached","roam time finished","explore time finished") or step.reason.startswith("exploration complete") else "aborted")
+            return
+        v=step.v;w=step.w
+        # host-side bubble limits (firmware repeats the speed caps via BG)
+        v=min(v,bubble["forward_cap"],depth_cap) if v>0 else max(v,-bubble["reverse_cap"])
+        if w>0 and not bubble.get("turn_left_ok"):w=0.0
+        if w<0 and not bubble.get("turn_right_ok"):w=0.0
+        self.last_v=v;self.last_w=w;self.drive(v,w)
     def pose(self):
         pose=(float(self.link.tel.get("x_m",0)),float(self.link.tel.get("y_m",0)),math.radians(float(self.link.tel.get("heading",0))))
         if not all(math.isfinite(v) for v in pose):raise ValueError("Odometry pose is invalid")
@@ -231,17 +325,24 @@ class Autonomy:
         self.action_epoch+=1
         if self.mission and self.mission["state"] in ENGAGED:
             self.tx(f"AN,{self.mission['token']},0");self.mission.update(state="paused",reason=reason,command_v=0,command_w=0)
-            self.last_v=self.last_w=0;self.lease_key=None;self.event("Replay paused: "+reason)
+            self.last_v=self.last_w=0;self.lease_key=None;self.event(self.mission["name"]+" paused: "+reason)
     def stop(self,reason="operator_stop",state="stopped"):
         self.action_epoch+=1
         if self.mission:
-            self.tx(f"AN,{self.mission['token']},0");self.mission.update(state=state,reason=reason,command_v=0,command_w=0)
-            self.last_v=self.last_w=0;self.lease_key=None;self.event("Replay "+state+": "+reason)
+            if self.mission["state"] in ENGAGED or self.mission["state"]=="paused":
+                self.tx(f"AN,{self.mission['token']},0")
+            was=self.mission["state"]
+            self.mission.update(state=state,reason=reason,command_v=0,command_w=0)
+            self.last_v=self.last_w=0;self.lease_key=None
+            if was in ENGAGED or was=="paused":self.event(self.mission["name"]+" "+state+": "+reason)
+            if self.mission.get("kind"):self.planner=None;self.clear_plan()
     async def resume(self):
         async with self.lock:
             if not self.mission or self.mission["state"]!="paused":raise ValueError("No paused route to resume")
-            if self.mission["epoch"]!=self.link.pose_epoch:raise ValueError("Odometry frame changed; restart at the marked route start")
-            reasons=self.prerequisites()
+            kind=self.mission.get("kind")
+            if kind not in ("goto","explore") and self.mission["epoch"]!=self.link.pose_epoch:raise ValueError("Odometry frame changed; restart at the marked route start")
+            if kind and self.planner is None:raise ValueError("Mission state was cleared; start it again")
+            reasons=self.mission_prerequisites(kind) if kind else self.prerequisites()
             if reasons:raise ValueError("; ".join(reasons))
             generation=self.action_epoch;owner=await self.grant()
             if generation!=self.action_epoch:
@@ -266,13 +367,16 @@ class Autonomy:
                 if math.hypot(point["x"]-last["x"],point["y"]-last["y"])>=.20:self.add_teach_point()
         m=self.mission
         if not m or m["state"] not in ENGAGED:return
-        if self.firmware_busy() or self.link.pose_epoch!=m["epoch"]:self.stop("odometry/maintenance change","aborted");return
+        slam_frame=m.get("kind") in ("goto","explore")   # map pose: independent of odometry resets
+        if self.firmware_busy() or (not slam_frame and self.link.pose_epoch!=m["epoch"]):self.stop("odometry/maintenance change","aborted");return
         if not self.link.connected or self.link.tel.get("stale",True) or now-self.link.last_odom_monotonic>.30:self.pause("controller feedback lost");return
         if not self.link.tel.get("balancing"):self.stop("controller disarmed/fell","aborted");return
         nav=self.link.nav
         if nav.get("token")!=m["token"] or nav.get("state") not in (1,2) or now-nav.get("received_monotonic",0)>.35:
             self.pause("gamepad takeover / native lease lost");return
         if now-self.last_operator>3:self.pause("supervisor disconnected/backgrounded");return
+        if m.get("kind") in ("roam","goto","explore"):
+            self.planner_tick(m,now,dt);return
         if m["samples"]:
             m["elapsed_s"]+=dt;samples=m["samples"];index=m["sample_index"]
             while index<len(samples)-1 and samples[index+1]["t"]<=m["elapsed_s"]:index+=1

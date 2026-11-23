@@ -267,9 +267,10 @@ field only triggers a balancing stop on a 1-to-0 transition. It never arms. A fi
 - `AN,<nonzero-token>,1`: grant only while balancing, local gamepad connected,
   drive sticks neutral and attitude stable. Replies `AN!,<token>` or
   `AN?,<token>`. A cancelled token cannot be reused.
-- `AU,<token>,<sequence>,<forward-m/s>,<yaw-rad/s>`: finite 0–0.60 m/s forward,
-  at most ±0.75 rad/s yaw, monotonically increasing sequence (32-bit wrap supported).
-  The host currently plans at most ±0.45 rad/s. Commands expire after 500 ms.
+- `AU,<token>,<sequence>,<forward-m/s>,<yaw-rad/s>`: finite values, monotonically
+  increasing sequence (32-bit wrap supported). Speed is clamped to ±`DRIVEV`
+  (reverse allowed) and yaw to the `MAXSTR` wheel-speed limit. Lidar missions plan at
+  most ±0.85 rad/s. Commands expire after 500 ms.
 - `AN,<token>,0`: release that lease without disarming. Local drive-stick input,
   disconnect, disarm, unsafe attitude and timeout also revoke it; stale commands
   cannot restore authority. SELECT remains an immediate motor stop.
@@ -281,6 +282,17 @@ Camera/torch/payload position and controls do not gate or revoke navigation.
 ToF is advisory for routes: the optional manual-drive guard does not cap a granted
 navigation reference. Native turns use physical yaw units without the gamepad deadband. See
 [route autopilot](../../docs/ROUTE_AUTOPILOT.md) for host supervision policy.
+
+### Lidar safety bubble (4.6.0)
+
+`PR,BUBBLE,1` advertises support. `BG,<en 0|1>,<forward-cap m/s>,<reverse-cap m/s>`
+(caps 0–3) limits the drive reference of every source: gamepad, gestures, host `V`
+and a granted navigation lease, in both directions, including auto-climb. The Radxa
+computes the caps from each lidar scan and the measured body footprint, and sends them
+at 10 Hz. An enabled bubble fails closed: without a fresh `BG` for 500 ms both caps
+are 0 and the robot holds position while balancing. Steering and balance recovery are
+never limited. `BG,0,0,0` releases it. Accepted during self-uprighting. See
+[autonomy](../../docs/AUTONOMY.md).
 
 ## Legacy tuning forms
 
