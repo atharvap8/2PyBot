@@ -33,6 +33,8 @@
  */
 
 #include "config.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "params.h"
 #include "autotune.h"
 #include "terrain.h"
@@ -142,6 +144,32 @@ uint8_t rxLen = 0;
 
 // Timing
 unsigned long lastLoopUs = 0;
+
+// ---- stall guard: independent of loop(), runs in the esp_timer task ----
+// If loop() stops for 150 ms the drivers would hold their last current, so the
+// guard re-zeroes both motors every 20 ms and restarts the ESP32 after 800 ms.
+// Blocking maintenance commands (gyro calibration, NVS) run only with motors
+// off; they suppress the restart for up to 5 s but still get zero frames.
+volatile uint32_t loopBeatMs = 0;
+volatile bool blockingOp = false;
+volatile bool guardArmed = false;
+static esp_timer_handle_t stallTimer = nullptr;
+static void stallGuard(void*) {
+    if (!guardArmed) return;
+    const uint32_t age = millis() - loopBeatMs;
+    if (age > 150) hub.emergencyZero();
+    if ((age > 800 && !blockingOp) || age > 5000) esp_restart();
+}
+static const char* resetReasonName(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON: return "POWER_ON";   case ESP_RST_SW: return "SOFTWARE";
+        case ESP_RST_PANIC: return "PANIC";        case ESP_RST_INT_WDT: return "INTERRUPT_WATCHDOG";
+        case ESP_RST_TASK_WDT: return "TASK_WATCHDOG"; case ESP_RST_WDT: return "OTHER_WATCHDOG";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";  case ESP_RST_EXT: return "EXTERNAL_PIN";
+        case ESP_RST_DEEPSLEEP: return "DEEP_SLEEP"; case ESP_RST_SDIO: return "SDIO";
+        default: return "UNKNOWN";
+    }
+}
 uint32_t lastOdomMs = 0, lastDbgMs = 0, lastBlinkMs = 0;
 bool ledState = false;
 
@@ -345,7 +373,10 @@ void handleLine(char* line) {
         Serial.println("[MAIN] Auto-tune blocked during firmware maintenance");return;
     }
     if (at_handleLine(line)) return;      // AT,<routine>, only after startup
-    if (params_handleLine(line)) return;
+    blockingOp = (line[0] == 'P' || line[0] == 'p') && (line[1] == 'S' || line[1] == 'L' || line[1] == 'D');
+    const bool paramLine = params_handleLine(line);
+    blockingOp = false;
+    if (paramLine) return;
 
     if(!strncmp(line,"AN,",3)) {
         unsigned long owner=0;int en=0;char extra=0;
@@ -458,7 +489,9 @@ void handleLine(char* line) {
         case 'C':
             requestDisable("gyro cal");
             status_led::setMode(status_led::BOOT);
+            blockingOp = true;
             if (!imu.calibrateGyro()) statusErrorLatched = true;
+            blockingOp = false;
             updateStatusLed();
             Serial.println("[TUNE] Send 'E' to re-arm.");
             break;
@@ -687,6 +720,8 @@ void waitForHostStartup() {
             Serial.println("BR?,0");
             lastRequest = millis();
         }
+        hub.emergencyZero();  // keep both drivers at zero current while the host boots
+        hub.service(0);
         delay(5);  // yield while waiting; no timeout that starts calibration prematurely
     }
     Serial.println("BS,INITIALIZING");
@@ -701,7 +736,12 @@ void setup() {
     pinMode(TORCH_PIN, OUTPUT);
     Serial.setTxBufferSize(1024);
     Serial.begin(SERIAL_BAUD);
-    delay(300);
+    // First action: zero both motors. After a crash, brownout or watchdog reset
+    // the drivers may still be applying the previous application's last current.
+    hub.startPorts();
+    hub.emergencyZero();
+    for (int i = 0; i < 60; ++i) { delay(5); hub.emergencyZero(); hub.service(0); }
+    Serial.printf("[BOOT] Reset reason: %s\n", resetReasonName(esp_reset_reason()));
     // GPIO 2 is the torch MOSFET gate; GPIO 32 is the blue status LED.
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
@@ -753,12 +793,24 @@ void setup() {
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
 
     lastLoopUs = micros();
+    loopBeatMs = millis();
+    esp_timer_create_args_t guardArgs = {};
+    guardArgs.callback = stallGuard;
+    guardArgs.dispatch_method = ESP_TIMER_TASK;
+    guardArgs.name = "stall_guard";
+    if (esp_timer_create(&guardArgs, &stallTimer) == ESP_OK && esp_timer_start_periodic(stallTimer, 20000) == ESP_OK) {
+        guardArmed = true;
+        Serial.println("[MAIN] Stall guard armed: motors zeroed after 150 ms, restart after 800 ms of loop stall");
+    } else {
+        Serial.println("[MAIN] Stall guard could not start");
+    }
 }
 
 // ============================================================
 //  MAIN LOOP — fixed 200 Hz
 // ============================================================
 void loop() {
+    loopBeatMs = millis();
     unsigned long nowUs = micros();
     unsigned long elapsed = nowUs - lastLoopUs;
     if (elapsed < LOOP_PERIOD_US) return;

@@ -11,8 +11,21 @@ void HubDrive::applyTuning() {
     rightWheel.direction = P.dirR < 0 ? -1 : 1;
 }
 
+void HubDrive::startPorts() {
+    if (portsStarted) return;
+    rightPort.begin(); leftPort.begin(); portsStarted = true;
+}
+
+void HubDrive::emergencyZero() {
+    // Raw zero-current frames, no state checks. In current mode this is zero
+    // torque; in any other mode it is zero speed. Both are safe.
+    if (!portsStarted) return;
+    leftWheel.current = rightWheel.current = 0;
+    leftPort.sendDriveRaw(0); rightPort.sendDriveRaw(0);
+}
+
 bool HubDrive::begin() {
-    applyTuning(); rightPort.begin(); leftPort.begin(); disable();
+    applyTuning(); startPorts(); disable();
     uint32_t start = millis();
     while (millis() - start < 1500) {
         service(LOOP_PERIOD_US * 1e-6f);

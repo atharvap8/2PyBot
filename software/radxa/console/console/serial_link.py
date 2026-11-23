@@ -17,6 +17,35 @@ import serial
 
 from .config import SERIAL_PORT, SERIAL_BAUD, ENCODER_CPR
 
+import logging
+import logging.handlers
+import os
+
+
+def _controller_logger():
+    """Persistent controller log (falls, faults, resets, gamepad, link loss).
+
+    Survives reboots so incidents can be diagnosed afterwards:
+    /var/lib/2pybot/logs/controller.log, 5 x 4 MB rotation."""
+    log = logging.getLogger("2pybot.controller")
+    if log.handlers:
+        return log
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    directory = os.environ.get("BOT_LOG_DIR", "/var/lib/2pybot/logs")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(os.path.join(directory, "controller.log"),
+                                                       maxBytes=4_000_000, backupCount=5)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+        log.addHandler(handler)
+    except OSError:
+        log.addHandler(logging.NullHandler())   # read-only/dev machine: keep the console running
+    return log
+
+
+CONTROLLER_LOG = _controller_logger()
+
 
 class Param:
     __slots__ = ("key", "value", "lo", "hi", "group", "desc", "dirty")
@@ -245,6 +274,8 @@ class SerialLink:
     # ---------------- inbound ----------------
     def _log(self, text):
         self.log.append({"t": time.time(), "text": text})
+        if not text.startswith("[PAD] btn="):          # button-state chatter is not worth keeping
+            CONTROLLER_LOG.info(text)
 
     def _publish(self, msg):
         for q in list(self._subs):
@@ -507,7 +538,12 @@ class SerialLink:
             now = time.time()
             if now - last_tel >= 0.1:         # 10 Hz telemetry push
                 last_tel = now
+                was_stale = self.tel.get("stale", True)
                 self.tel["stale"] = not self.connected or (now - self.tel["last_rx"]) > 1.0
+                if self.tel["stale"] != was_stale and not self._serial_paused:
+                    # Link edges are the key evidence after a hang or reset.
+                    self._log("[console] controller telemetry " + ("LOST" if self.tel["stale"] else "restored")
+                              + f" (balancing={self.tel.get('balancing')}, last pitch={self.tel.get('pitch')})")
                 if self.tel["stale"]:
                     self.tel["rx_hz"] = 0.0
                 self._publish({"type": "telemetry", "tel": self.tel,

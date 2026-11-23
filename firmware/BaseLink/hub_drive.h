@@ -45,6 +45,11 @@ public:
     void resetYaw() { controller.resetYaw(); }
     void applyTuning();
     void printStatus() const;
+    // Start both RS485 ports before anything else and command zero current.
+    // The M0601 keeps its last current setpoint while no frames arrive, so a
+    // controller that resets or stalls must re-zero both drivers immediately.
+    void startPorts();
+    void emergencyZero();
 
 private:
     void serviceWheel(HubWheel& wheel);
@@ -58,7 +63,7 @@ private:
     bool enabled = false, currentLimited = false;
     float balanceAcceleration = 0;
     bool balanceControl = false, recoveryControl = false, turningControl = false;
-    bool torqueControl = false, zeroCommandPending = true;
+    bool torqueControl = false, zeroCommandPending = true, portsStarted = false;
     float torqueL = 0, torqueR = 0;
     uint32_t lastDriveUs = 0, lastQueryMs = 0;
     void reportFaults(HubWheel& wheel);
