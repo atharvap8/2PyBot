@@ -3,9 +3,9 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
-## 4.5.0 — Stable v1
+## 4.5.0 — Safety fixes, fusion SLAM merged to main
 
-First stable release. Merges all work since 4.1.1: self-uprighting, lidar SLAM with
+Merges all work since 4.1.1: self-uprighting, lidar SLAM with
 pose fusion, ToF map layer, single web port, tilted map view, the redesigned Android
 app (portrait and landscape) and the user manual and technical Q&A PDFs.
 

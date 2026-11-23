@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.5.0 (Stable v1)
+ *  BaseLink.ino — 2PyBot v4.5.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -746,7 +746,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.5.0 — Stable v1");
+    Serial.println("     2PyBot BaseLink v4.5.0");
     Serial.println("==================================================");
 
     params_begin();
