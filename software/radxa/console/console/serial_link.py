@@ -97,9 +97,30 @@ class SerialLink:
         self._line_listeners=[]
 
     # ---------------- lifecycle ----------------
+    @staticmethod
+    def _port_candidates():
+        """Configured port first. If the CP2102 dropped off USB and came back
+        under another name (ttyUSB1 while the old node was still held, or only
+        the udev /dev/2pybot link), find it instead of retrying a dead path."""
+        import glob
+        found = [SERIAL_PORT, "/dev/2pybot"]
+        found += sorted(glob.glob("/dev/serial/by-id/*CP210*") + glob.glob("/dev/serial/by-id/*Silicon_Labs*"))
+        found += sorted(glob.glob("/dev/ttyUSB*"))
+        out = []
+        for path in found:
+            real = os.path.realpath(path)
+            if os.path.exists(path) and real not in [os.path.realpath(p) for p in out]:
+                out.append(path)
+        return out
+
     def open(self):
+        candidates = self._port_candidates()
+        if not candidates:
+            raise FileNotFoundError(f"{SERIAL_PORT} is gone and no CP210x/ttyUSB device is present "
+                                    "(controller USB disconnected: check cable/5 V; see dmesg)")
+        port = candidates[0]
         s = serial.Serial()
-        s.port, s.baudrate, s.timeout = SERIAL_PORT, SERIAL_BAUD, 0
+        s.port, s.baudrate, s.timeout = port, SERIAL_BAUD, 0
         s.dtr = False          # never reset the ESP32 by connecting
         s.rts = False
         s.exclusive = True
@@ -116,7 +137,8 @@ class SerialLink:
         self.hub.clear()
         self.tel["host_ready"] = False
         self.connected = True
-        self._log(f"[console] opened {SERIAL_PORT} @ {SERIAL_BAUD}")
+        self._log(f"[console] opened {port} @ {SERIAL_BAUD}" + ("" if port == SERIAL_PORT else f" ({SERIAL_PORT} missing)"))
+        self._last_open_error = ""
 
     def close(self):
         with self._write_lock:
@@ -502,7 +524,10 @@ class SerialLink:
                     self.request_dump()
                     next_dump = time.monotonic() + 2
                 except Exception as e:
-                    self._log(f"[console] serial unavailable: {e}")
+                    # Log each distinct failure once (it retries every 3 s).
+                    if str(e) != getattr(self, "_last_open_error", ""):
+                        self._log(f"[console] serial unavailable: {e}")
+                        self._last_open_error = str(e)
                     self.close()
                     self.ser = None
                     next_open = time.monotonic() + 3

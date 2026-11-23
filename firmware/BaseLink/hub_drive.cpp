@@ -162,19 +162,33 @@ void HubDrive::transmit(float dt) {
 }
 
 void HubDrive::reportFaults(HubWheel& w) {
-    const uint8_t f = w.port->fb().fault;
+    const auto& fb = w.port->fb();
+    if (fb.transientFaults != w.transientReported) {
+        // Rate-limited: at most one line per second per wheel.
+        if (millis() - w.transientPrintMs >= 1000) {
+            Serial.printf("[HUB] %s ignored unconfirmed fault 0x%02X (%lu so far, %lu corrupt frames rejected)\n",
+                w.port->name(), fb.lastTransient, (unsigned long)fb.transientFaults, (unsigned long)fb.implausible);
+            w.transientReported = fb.transientFaults; w.transientPrintMs = millis();
+        }
+    }
+    const uint8_t f = fb.fault;
     if (f == w.lastFault) return;
     w.lastFault = f;
-    Serial.printf("[HUB] %s fault 0x%02X%s\n", w.port->name(), f,
-        !f ? " cleared" : (f & 0x02) ? " BUS OVERCURRENT" : (f & 0x04) ? " PHASE OVERCURRENT" :
-        (f & 0x08) ? " STALL" : (f & 0x10) ? " OVERHEAT" : (f & 0x01) ? " SENSOR" : "");
+    const uint8_t* r = fb.lastFrame;
+    Serial.printf("[HUB] %s fault 0x%02X%s%s%s%s%s (confirmed %u replies, temp %dC, rpm %d, %.2fA) frame %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+        w.port->name(), f, !f ? " cleared" : "",
+        (f & 0x01) ? " SENSOR" : "", (f & 0x02) ? " BUS_OVERCURRENT" : "", (f & 0x04) ? " PHASE_OVERCURRENT" : "",
+        (f & 0x08) ? " STALL" : (f & 0x10) ? " OVERHEAT" : "",
+        (unsigned)m0601::FAULT_CONFIRM, (int)fb.tempC, (int)fb.rpm, fb.currentA,
+        r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]);
 }
 
 void HubDrive::printStatus() const {
     for (const auto* w : {&leftWheel, &rightWheel}) {
         const auto& f = w->port->fb();
-        Serial.printf("[HUB] %s id%u mode%u rpm%d cmd%.2fA measured%.2fA fault%u age%lums CRC%lu timeout%lu\n",
-            w->port->name(), w->port->id(), f.mode, f.rpm, w->current, f.currentA, f.fault,
-            (unsigned long)(millis() - f.rxMs), (unsigned long)f.crcErrors, (unsigned long)f.timeouts);
+        Serial.printf("[HUB] %s id%u mode%u rpm%d cmd%.2fA measured%.2fA fault%u temp%dC age%lums CRC%lu timeout%lu implausible%lu transient%lu\n",
+            w->port->name(), w->port->id(), f.mode, f.rpm, w->current, f.currentA, f.fault, (int)f.tempC,
+            (unsigned long)(millis() - f.rxMs), (unsigned long)f.crcErrors, (unsigned long)f.timeouts,
+            (unsigned long)f.implausible, (unsigned long)f.transientFaults);
     }
 }

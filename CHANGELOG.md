@@ -3,6 +3,21 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.6.1 — No more false motor faults from corrupt RS485 frames
+
+- The "LEFT fault 0xD1 OVERHEAT" trip was a corrupt reply, not a hot motor. 0xD1
+  sets undefined bits 0x80/0x40, it cleared on the next reply, and the left link
+  had 2094 timeouts and 14 CRC errors. A misaligned 10-byte window passes the 8-bit
+  CRC about 1 time in 256.
+- Replies that pass the CRC but are impossible (fault bits outside 0x1F, |rpm| > 900)
+  are now rejected and resynchronised.
+- A fault disarms only after 3 consecutive replies agree (~7.5 ms). A mode change
+  needs 2 consecutive replies (~2.5 ms).
+- Ignored transient faults are logged, rate-limited. Confirmed faults are logged with
+  temperature, rpm, current and the raw frame.
+- Console: after a controller USB drop, the serial port is found again under
+  `/dev/2pybot`, by-id or any `ttyUSB*`, and the retry message is logged once.
+
 ## 4.6.0 — Lidar autonomy: bubble, labels, roaming, map navigation
 
 - Safety bubble from the measured body footprint (R10/L17/F6/B7 cm from the lidar,

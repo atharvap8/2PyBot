@@ -13,6 +13,7 @@ struct HubWheel {
     uint32_t positionFrames = 0, lastPositionUs = 0;
     bool initialized = false, modeOk = false, queryNext = false;
     uint8_t lastFault = 0;
+    uint32_t transientReported = 0, transientPrintMs = 0;
 };
 
 class HubDrive {
