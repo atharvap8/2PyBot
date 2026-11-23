@@ -182,10 +182,10 @@ class Bubble:
         else:
             nearest = math.inf
         # returns within 25 cm of the body, for diagnosis / drawing (base frame, rounded)
-        near_mask = self._inside(raw, 0.25) if len(raw) else np.zeros(0, bool)
+        near_mask = self._inside(raw, 0.25) if len(raw) else np.zeros(0, bool)   # raw already excludes the body
         near_raw, near_ok = raw[near_mask], sup[near_mask]
         res = {
-            "near": [[round(float(x), 3), round(float(y), 3), int(k)] for (x, y), k in zip(near_raw[:80], near_ok[:80])],
+            "near": [[round(float(x), 3), round(float(y), 3), int(k)] for (x, y), k in zip(near_raw[:150], near_ok[:150])],
             "front_m": front, "back_m": back, "nearest_m": nearest, "kappa": kappa,
             "turn_left_ok": self._turn_clear(pts, +1) if len(pts) else True,
             "turn_right_ok": self._turn_clear(pts, -1) if len(pts) else True,
@@ -201,9 +201,10 @@ class Bubble:
         tilted / resting). Diagnostic only: finds self-detection (fence, cables)."""
         pts = np.asarray(pts, float).reshape(-1, 2)
         if len(pts):
-            pts = pts[self._inside(pts, 0.25)]
+            # outside the body (+ self tolerance) but within 25 cm of it
+            pts = pts[self._inside(pts, 0.25) & ~self._inside(pts, self.cfg["self_tol"])]
         with self.lock:
-            self.near_diag = [[round(float(x), 3), round(float(y), 3)] for x, y in pts[:80]]
+            self.near_diag = [[round(float(x), 3), round(float(y), 3)] for x, y in pts[:150]]
             self.near_diag_t = time.monotonic()
 
     # ---------------------------------------------------------------- output
