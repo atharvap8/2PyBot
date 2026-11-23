@@ -164,8 +164,8 @@ class Bubble:
             pts = pts[~self._inside(pts, c["self_tol"])]
             pts = pts[np.hypot(pts[:, 0], pts[:, 1]) <= c["max_range"] + 0.5]
         raw = pts
-        if len(pts):
-            pts = pts[self._supported(pts)]
+        sup = self._supported(raw) if len(raw) else np.zeros(0, bool)
+        pts = raw[sup] if len(raw) else raw
         self._prev = raw
         kappa = 0.0
         if abs(v) > 0.08:
@@ -181,7 +181,11 @@ class Bubble:
             nearest = float(np.hypot(dx, dy).min())
         else:
             nearest = math.inf
+        # returns within 25 cm of the body, for diagnosis / drawing (base frame, rounded)
+        near_mask = self._inside(raw, 0.25) if len(raw) else np.zeros(0, bool)
+        near_raw, near_ok = raw[near_mask], sup[near_mask]
         res = {
+            "near": [[round(float(x), 3), round(float(y), 3), int(k)] for (x, y), k in zip(near_raw[:80], near_ok[:80])],
             "front_m": front, "back_m": back, "nearest_m": nearest, "kappa": kappa,
             "turn_left_ok": self._turn_clear(pts, +1) if len(pts) else True,
             "turn_right_ok": self._turn_clear(pts, -1) if len(pts) else True,
@@ -203,7 +207,7 @@ class Bubble:
             res, t = self.result, self.t
         stale = res is None or now - t > c["stale_s"]
         if stale:
-            res = {"front_m": 0.0, "back_m": 0.0, "nearest_m": None, "kappa": 0.0, "turn_left_ok": False,
+            res = {"near": [], "front_m": 0.0, "back_m": 0.0, "nearest_m": None, "kappa": 0.0, "turn_left_ok": False,
                    "turn_right_ok": False, "free_by_heading": [], "points": 0, "rejected": 0}
         out = dict(res, stale=stale, age_s=None if res is None or t == 0 else round(now - t, 3),
                    footprint=list(self.box), diagonals=diagonals(), stop_margin=margin)
