@@ -404,18 +404,18 @@ async function update3d(force) {
   } catch (e) { /* the next state message retries */ }
   scene3dBusy = false;
 }
-const cvd = $("cvd"), drive = window.DriveView ? window.DriveView.create(cvd) : null;
+const driveEl = $("drive"), drive = window.DriveView ? window.DriveView.create(driveEl) : null;
 function setView(v) {
   if (v === "3d" && !s3d) { setSay("3D needs WebGL, which this browser does not provide.", "warn"); v = "map"; }
   view = v;
   for (const k of ["map", "radar", "3d", "drive"]) $("v-" + k).setAttribute("aria-selected", v === k);
-  cv.hidden = v === "3d" || v === "drive"; cv3.hidden = v !== "3d"; cvd.hidden = v !== "drive";
+  cv.hidden = v === "3d" || v === "drive"; cv3.hidden = v !== "3d"; driveEl.hidden = v !== "drive";
   $("legend3d").hidden = v !== "3d";
   if (s3d) s3d.show(v === "3d");
   if (drive) drive.show(v === "drive");
   $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
     : v === "radar" ? "Live scan around the robot (top = front)"
-    : v === "drive" ? "What the robot sees: walls, live lidar, safety bubble, planned path · drag to orbit"
+    : v === "drive" ? "Camera with lidar distances · 360° panorama · camera-coloured 3D world"
     : "45° corner view · drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
   if (v === "3d") update3d(true);
   else if (v === "drive") { if (drive) { drive.resize(); fetchDriveScene(true); } }

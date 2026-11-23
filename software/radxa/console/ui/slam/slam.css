@@ -123,3 +123,22 @@ canvas[hidden]{display:none}
 select { background: var(--card2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 #m-status { color: var(--sub); }
 #m-status.run { color: var(--ok); } #m-status.bad { color: var(--warn); }
+
+/* ---- Drive tab: camera reality view ---- */
+.drive { position: relative; flex: 1; min-height: 360px; background: #05070a; overflow: hidden; }
+.drive[hidden] { display: none; }
+.drive .dv-video, .drive .dv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.drive .dv-video { object-fit: contain; background: #05070a; }
+.drive .dv-canvas { background: transparent; touch-action: none; }
+.drive .dv-bar { position: absolute; left: 10px; top: 10px; right: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: none; }
+.drive .dv-bar > * { pointer-events: auto; }
+.drive .dv-bar .btn { background: rgba(20,18,16,.8); }
+.drive .dv-modes button { padding: 5px 12px; }
+.drive .dv-note { color: #cbd5e1; font-size: 12px; text-shadow: 0 1px 2px #000; }
+.drive .dv-align { position: absolute; right: 10px; top: 52px; width: 300px; max-height: calc(100% - 140px); overflow: auto; background: rgba(20,18,16,.94); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; font-size: 12.5px; z-index: 2; }
+.drive .dv-align[hidden] { display: none; }
+.drive .dv-align label { display: grid; grid-template-columns: 110px 1fr 58px; gap: 6px; align-items: center; color: var(--sub); }
+.drive .dv-align label.chk { display: flex; gap: 6px; }
+.drive .dv-align em { font-style: normal; color: var(--ink); text-align: right; }
+.drive .dv-align p { margin: 0; }
+@media (max-width: 760px) { .drive { min-height: 55vh; } .drive .dv-align { width: auto; left: 10px; } }
