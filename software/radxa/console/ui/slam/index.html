@@ -99,33 +99,45 @@
       <ul class="labels" id="label-list"></ul>
     </section>
 
-    <section class="step" data-step="8">
-      <h2><span class="num">8</span>Drive by itself</h2>
-      <p>Press local START, keep the gamepad connected and this page open. Moving a stick takes over at once; STOP disarms.</p>
-      <div class="bubble" id="bubble-box">
-        <div><b>Safety bubble</b> <span id="bubble-state">–</span></div>
-        <div class="sub" id="bubble-caps">–</div>
-        <label class="switch"><input type="checkbox" id="bubble-on"> Limit all driving (gamepad too)</label>
+    <section class="step auto" data-step="8">
+      <h2><span class="num">8</span>Drive by itself <span class="pill" id="m-pill">–</span></h2>
+
+      <div class="auto-card" id="m-card">
+        <div class="auto-main" id="m-title">Not ready</div>
+        <div class="auto-sub" id="m-detail">Waiting for the robot…</div>
+        <div class="auto-bar" id="m-bar" hidden><i id="m-bar-fill"></i></div>
       </div>
-      <div class="row">
-        <label class="sub">Speed <select id="m-speed"><option>0.15</option><option selected>0.25</option><option>0.35</option><option>0.5</option></select> m/s</label>
-        <label class="sub">Time <select id="m-time"><option value="120">2 min</option><option value="600" selected>10 min</option><option value="1800">30 min</option></select></label>
+
+      <div id="m-setup">
+        <div class="seg kinds" role="tablist">
+          <button data-kind="goto" aria-selected="true">Go to</button>
+          <button data-kind="roam" aria-selected="false">Roam</button>
+          <button data-kind="explore" aria-selected="false">Explore</button>
+        </div>
+        <div class="kind-opts" data-for="goto">
+          <select id="goal-label"><option value="">Choose a place…</option></select>
+          <button class="btn tool" data-tool="goal" id="t-goal" title="Tap the map to pick a spot">Pick on map</button>
+        </div>
+        <p class="kind-opts sub" data-for="roam">Wanders like a robot vacuum and turns away from obstacles.</p>
+        <p class="kind-opts sub" data-for="explore">Drives to the edges of the map while mapping. Start mapping first.</p>
+        <div class="auto-params">
+          <label>Speed <select id="m-speed"><option value="0.15">Slow</option><option value="0.25" selected>Normal</option><option value="0.4">Fast</option></select></label>
+          <label class="kind-opts" data-for="roam explore">For <select id="m-time"><option value="120">2 min</option><option value="600" selected>10 min</option><option value="1800">30 min</option></select></label>
+        </div>
       </div>
-      <div class="row">
-        <button class="btn primary" id="b-roam" title="Vacuum-style: straight lines, turns away from obstacles">Roam</button>
-        <button class="btn" id="b-explore" title="Drives to unmapped edges while mapping">Explore &amp; map</button>
+
+      <div class="auto-actions">
+        <button class="btn primary big" id="b-mstart">Start</button>
+        <button class="btn big" id="b-mpause" hidden>Pause</button>
+        <button class="btn primary big" id="b-mresume" hidden>Resume</button>
+        <button class="btn danger big" id="b-mstop" hidden>Stop</button>
       </div>
-      <div class="row">
-        <select id="goal-label"><option value="">Go to area…</option></select>
-        <button class="btn" id="b-goto">Go</button>
-        <button class="btn tool" data-tool="goal" id="t-goal" title="Tap the map to send the robot there">Tap to go</button>
+
+      <div class="auto-safety" id="bubble-box">
+        <i class="dot" id="bubble-dot"></i><span id="bubble-text">Safety bubble</span>
+        <label class="switch" title="Also limit gamepad driving with the lidar bubble"><input type="checkbox" id="bubble-on"> Gamepad too</label>
       </div>
-      <div class="row">
-        <button class="btn" id="b-mpause">Pause</button>
-        <button class="btn" id="b-mresume">Resume</button>
-        <button class="btn" id="b-mstop">Stop mission</button>
-      </div>
-      <div class="hint" id="m-status">No mission.</div>
+      <p class="tips">Needs local START, the gamepad and this page open. Any stick move takes over.</p>
     </section>
   </aside>
 

@@ -116,13 +116,8 @@ canvas[hidden]{display:none}
 .labels li b { flex: 1; font-weight: 500; }
 .labels li button { border: 0; background: none; color: var(--sub); padding: 2px 6px; }
 .labels li button:hover { color: var(--acc); }
-.bubble { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0 8px; background: var(--card2); display: grid; gap: 4px; }
-.bubble.clear { border-color: #1f5a46; } .bubble.limiting { border-color: #6a5320; }
-.bubble.blocked, .bubble.stale { border-color: #6a2533; }
 .switch { font-size: 12.5px; color: var(--sub); display: flex; gap: 6px; align-items: center; }
 select { background: var(--card2); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-#m-status { color: var(--sub); }
-#m-status.run { color: var(--ok); } #m-status.bad { color: var(--warn); }
 
 /* ---- Drive tab: camera reality view ---- */
 .drive { position: relative; flex: 1; min-height: 360px; background: #05070a; overflow: hidden; }
@@ -142,3 +137,26 @@ select { background: var(--card2); color: var(--ink); border: 1px solid var(--li
 .drive .dv-align em { font-style: normal; color: var(--ink); text-align: right; }
 .drive .dv-align p { margin: 0; }
 @media (max-width: 760px) { .drive { min-height: 55vh; } .drive .dv-align { width: auto; left: 10px; } }
+
+/* ---- step 8: autonomy ---- */
+.step.auto h2 .pill { margin-left: auto; }
+.pill { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--sub); }
+.pill.ok { color: var(--ok); border-color: #1f5a46; } .pill.run { color: #38bdf8; border-color: #1e4f6b; }
+.pill.warn { color: var(--warn); border-color: #6a5320; }
+.auto-card { border: 1px solid var(--line); border-left: 3px solid var(--mute); border-radius: 8px; padding: 10px 12px; background: var(--card2); margin: 4px 0 10px; }
+.auto-card.ok { border-left-color: var(--ok); } .auto-card.run { border-left-color: #38bdf8; } .auto-card.warn { border-left-color: var(--warn); }
+.auto-main { font-size: 15px; font-weight: 600; color: var(--ink); }
+.auto-sub { font-size: 12.5px; color: var(--sub); margin-top: 2px; min-height: 1em; }
+.auto-bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.auto-bar i { display: block; height: 100%; width: 0; background: #38bdf8; transition: width .4s; }
+.kinds { margin-bottom: 8px; } .kinds button { flex: 1; }
+.kind-opts[hidden] { display: none !important; }
+div.kind-opts { display: flex; gap: 8px; margin-bottom: 8px; } div.kind-opts select { flex: 1; min-width: 0; }
+p.kind-opts { margin: 0 0 8px; }
+.auto-params { display: flex; gap: 14px; margin-bottom: 10px; } .auto-params label { font-size: 12.5px; color: var(--sub); display: flex; gap: 6px; align-items: center; }
+.auto-actions { display: flex; gap: 8px; }
+.auto-actions .btn[hidden] { display: none; }
+.btn.big { flex: 1; padding: 10px 12px; font-size: 14px; }
+.auto-safety { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--sub); }
+.auto-safety span { flex: 1; }
+.dot.bad { background: var(--err); } .dot.off { background: var(--mute); }

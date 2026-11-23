@@ -241,8 +241,11 @@ async function toolTap(x, y) {
     const r = await post("api/map/erase", { x, y, r: +$("erase-r").value });
     if (!r.ok) setSay(r.error || "Could not erase.", "warn");
   } else if (tool === "goal") {
-    startMission("goto", { goal: { x, y, name: "tapped point" } });
-    setTool("goal");                                          // one tap = one goal
+    picked = { x, y };                                        // chosen; Start sends it
+    setKind("goto"); renderLabels.key = null; renderLabels();
+    $("goal-label").value = "__picked";
+    setTool("goal");                                          // one tap = one spot
+    draw();
   }
 }
 function renderLabels() {
@@ -256,10 +259,14 @@ function renderLabels() {
     `<button data-go="${esc(l.name)}" title="Drive there">Go</button><button data-del="${esc(l.name)}" title="Delete">✕</button></li>`).join("")
     || `<li class="sub">No labels yet.</li>`;
   const sel = $("goal-label"), cur = sel.value;
-  sel.innerHTML = `<option value="">Go to area…</option>` + labels.map((l) => `<option>${esc(l.name)}</option>`).join("");
-  sel.value = labels.some((l) => l.name === cur) ? cur : "";
+  sel.innerHTML = `<option value="">${labels.length ? "Choose a place…" : "No places yet: name one in step 7"}</option>`
+    + labels.map((l) => `<option>${esc(l.name)}</option>`).join("")
+    + (picked ? `<option value="__picked">Spot picked on map (${picked.x.toFixed(1)}, ${picked.y.toFixed(1)})</option>` : "");
+  sel.value = cur === "__picked" && picked ? cur : labels.some((l) => l.name === cur) ? cur : "";
   $("label-list").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => post("api/labels/delete", { name: b.dataset.del })));
-  $("label-list").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => startMission("goto", { goal: { label: b.dataset.go } })));
+  $("label-list").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => {
+    setKind("goto"); $("goal-label").value = b.dataset.go; startMission();
+  }));
 }
 function drawOverlays(pose) {
   // planned path + goal
@@ -267,6 +274,11 @@ function drawOverlays(pose) {
     ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath();
     S.plan.forEach((p, i) => { const [x, y] = w2s(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (picked && !S.goal) {                                     // chosen but not started yet
+    const [px, py] = w2s(picked.x, picked.y);
+    ctx.strokeStyle = "#38bdf8"; ctx.setLineDash([4, 4]); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, py, 10, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
   }
   if (S.goal) {
     const [gx, gy] = w2s(S.goal.x, S.goal.y);
@@ -304,65 +316,133 @@ function drawOverlays(pose) {
 }
 
 // ---------------------------------------------------------------- autonomy
-let sup = null, guard = null;                                 // {id, key} supervision lease
+let sup = null, guard = null, picked = null, kind = "goto", lastPoll = null, flash = null;   // sup: {id, key}
 async function api(path, body) {
   const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" },
                                  body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`);
+  if (!r.ok) { const e = new Error(j.detail || `HTTP ${r.status}`); e.status = r.status; throw e; }
   return j;
 }
-function mStatus(text, cls) { const e = $("m-status"); e.textContent = text; e.className = "hint " + (cls || ""); }
-async function startMission(kind, extra) {
+function setKind(k) {
+  kind = k;
+  document.querySelectorAll(".kinds [data-kind]").forEach((b) => b.setAttribute("aria-selected", b.dataset.kind === k));
+  document.querySelectorAll(".kind-opts").forEach((el) => (el.hidden = !el.dataset.for.split(" ").includes(k)));
+  renderMission();
+}
+document.querySelectorAll(".kinds [data-kind]").forEach((b) => (b.onclick = () => setKind(b.dataset.kind)));
+function showFlash(text) { flash = { text, until: Date.now() + 6000 }; renderMission(); }
+async function startMission() {
+  const body = { kind, speed_mps: +$("m-speed").value };
+  if (kind !== "goto") body.duration_s = +$("m-time").value;
+  else {
+    const v = $("goal-label").value;
+    if (v === "__picked" && picked) body.goal = { x: picked.x, y: picked.y, name: "picked spot" };
+    else if (v) body.goal = { label: v };
+    else return showFlash("Choose a place, or press Pick on map and tap the map.");
+  }
   try {
-    const body = Object.assign({ kind, speed_mps: +$("m-speed").value, duration_s: +$("m-time").value }, extra || {});
     const r = await api("/api/autonomy/mission/start", body);
-    sup = { id: r.mission_id, key: r.lease_key }; mStatus("Started.", "run");
-  } catch (e) { mStatus(e.message, "bad"); }
+    sup = { id: r.mission_id, key: r.lease_key }; flash = null; pollMission();
+  } catch (e) { showFlash(e.message); }
 }
 async function heartbeat() {
   if (!sup) return;
   try { await api("/api/autonomy/heartbeat", { mission_id: sup.id, lease_key: sup.key }); }
-  catch (e) { sup = null; }
+  catch (e) { if (e.status === 409) sup = null; }            // network blips retry; only a stale lease ends supervision
+}
+const REASONS = [
+  [/supervisor|backgrounded/, "The page was hidden or lost its connection."],
+  [/gamepad takeover|lease lost/, "You took over with the gamepad."],
+  [/feedback lost|telemetry/, "Lost contact with the controller."],
+  [/disarmed|fell/, "The robot stopped balancing."],
+  [/bubble stale/, "The lidar stopped seeing (lean or lidar off)."],
+  [/boxed in/, "Boxed in: no room to turn or back out."],
+  [/lost localization/, "Lost its place on the map."],
+  [/path blocked|No mapped path|not on mapped/, null],
+  [/operator|E-STOP/, "Stopped by you."],
+];
+function human(reason) {
+  for (const [re, text] of REASONS) if (re.test(reason || "")) return text || reason;
+  return reason || "";
+}
+function progressText(m) {
+  const i = m.info || {};
+  if (i.waiting) return { planning: "Planning a route…", localizing: "Finding itself on the map…", "finding frontiers": "Looking for unmapped edges…",
+    "lidar bubble stale": "Waiting for the lidar…" }[i.waiting] || `Waiting: ${i.waiting}`;
+  if (m.kind === "goto") return i.distance_m !== undefined ? `${fmt(i.distance_m, 1)} m to go` : "On the way";
+  const mins = i.remaining_s !== undefined ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, i.remaining_s % 60)).padStart(2, "0")} left` : "";
+  if (m.kind === "roam") return [`${fmt(i.distance_m, 1)} m driven`, `${i.turns || 0} turns`, mins].join(" · ");
+  if (m.kind === "explore") return [`${i.frontiers_reached || 0} edges reached`, mins].join(" · ");
+  return "";
+}
+function renderMission() {
+  const r = lastPoll, m = r && r.mission, pill = $("m-pill"), card = $("m-card");
+  const active = m && (m.state === "running" || m.state === "paused");
+  $("m-setup").hidden = !!active;
+  $("b-mstart").hidden = !!active;
+  $("b-mpause").hidden = !(m && m.state === "running");
+  $("b-mresume").hidden = !(m && m.state === "paused");
+  $("b-mstop").hidden = !active;
+  $("m-bar").hidden = true;
+  let title, detail, tone;
+  if (!r) { title = "Autonomy unavailable"; detail = "Open this page from the console (port 8080)."; tone = "off"; }
+  else if (m && m.state === "running") {
+    title = m.name; detail = progressText(m); tone = "run";
+    if (m.kind === "goto" && m.info && m.info.distance_m !== undefined) {
+      if (!renderMission.start || renderMission.id !== m.id) { renderMission.start = m.info.distance_m; renderMission.id = m.id; }
+      $("m-bar").hidden = false;
+      $("m-bar-fill").style.width = `${Math.round(100 * (1 - m.info.distance_m / Math.max(0.01, renderMission.start)))}%`;
+    }
+  } else if (m && m.state === "paused") { title = `Paused · ${m.name}`; detail = human(m.reason); tone = "warn"; }
+  else {
+    const reasons = (r.blocked_reasons || {})[kind] || [];
+    const last = m && (m.state === "completed" || m.state === "aborted" || m.state === "stopped") ? m : null;
+    if (reasons.length) { title = "Not ready"; detail = reasons[0]; tone = "off"; }
+    else { title = "Ready"; detail = kind === "goto" ? "Choose a place and press Start." : "Press Start."; tone = "ok"; }
+    if (last && Date.now() - (renderMission.lastSeen || 0) < 15000) {
+      title = last.state === "completed" ? (last.kind === "goto" ? `Arrived · ${last.name.replace(/^Go to /, "")}` : `Done · ${last.name}`) : `Stopped · ${last.name}`;
+      detail = human(last.reason); tone = last.state === "completed" ? "ok" : "warn";
+    }
+  }
+  if (flash && Date.now() < flash.until && !(m && m.state === "running")) { detail = flash.text; tone = tone === "ok" ? "warn" : tone; }
+  $("m-title").textContent = title; $("m-detail").textContent = detail;
+  card.className = "auto-card " + tone;
+  pill.textContent = { run: "Driving", warn: "Paused", ok: "Ready", off: "Not ready" }[tone] || "";
+  if (m && m.state === "paused") pill.textContent = "Paused";
+  pill.className = "pill " + tone;
 }
 async function pollMission() {
   try {
     const r = await api("/api/autonomy/mission");
-    guard = r.bubble;
     const m = r.mission;
+    if (m && (m.state === "running" || m.state === "paused")) renderMission.lastSeen = Date.now();
+    lastPoll = r; guard = r.bubble;
     if (drive) drive.setHud(m ? { state: m.state, name: m.name, v: m.command_v, w: m.command_w } : null);
-    if (!m) mStatus(`Ready. ${(r.blocked_reasons.roam || []).join("; ") || "Roam can start."}`);
-    else {
-      const info = m.info || {}, extra = Object.entries(info).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join(" · ");
-      mStatus(`${m.name}: ${m.state}${m.reason ? " (" + m.reason + ")" : ""} · v ${fmt(m.command_v)} m/s · w ${fmt(m.command_w)} rad/s${extra ? " · " + extra : ""}`,
-              m.state === "running" ? "run" : m.state === "paused" || m.state === "aborted" ? "bad" : "");
-      if (m.state !== "running") sup = m.state === "paused" ? sup : null;
-    }
-    renderBubble();
+    if (m && m.state !== "running" && m.state !== "paused") sup = null;
   } catch (e) { /* console offline or separate SLAM port: no autonomy here */ }
+  renderMission(); renderBubble();
 }
 function renderBubble() {
   const B = guard || (S && S.bubble);
   if (!B) return;
-  const blocked = /blocked|boxed/.test(B.state);
-  $("bubble-box").className = "bubble " + (blocked ? "blocked" : B.state);
-  $("bubble-state").textContent = { clear: "clear", limiting: "slowing", front_blocked: "front blocked",
-    rear_blocked: "rear blocked", boxed_in: "boxed in", stale: "no lidar" }[B.state] || B.state;
-  const cap = (v) => (v >= 2.99 ? "free" : `${fmt(v)} m/s`);
-  $("bubble-caps").textContent = `fwd ${cap(B.forward_cap)} · rev ${cap(B.reverse_cap)} · front ${fmt(B.front_m)} m · back ${fmt(B.back_m)} m`
-    + (guard ? (guard.active ? " · controller limited" : guard.enabled ? (guard.firmware_supported ? " · waiting for lidar" : " · firmware lacks BG") : " · not limiting") : "");
+  const tone = { clear: "ok", limiting: "warn", stale: "off" }[B.state] || "bad";
+  $("bubble-dot").className = "dot " + tone;
+  const what = { clear: "clear", limiting: "slowing down", front_blocked: "blocked ahead", rear_blocked: "blocked behind",
+    boxed_in: "boxed in", stale: "no lidar data" }[B.state] || B.state;
+  const ahead = B.front_m !== null && B.front_m !== undefined ? ` · ${fmt(B.front_m, 2)} m ahead` : "";
+  $("bubble-text").textContent = `Safety bubble ${what}${ahead}`;
   if (guard && document.activeElement !== $("bubble-on")) $("bubble-on").checked = !!guard.enabled;
 }
-$("bubble-on").onchange = async (e) => { try { guard = await api("/api/bubble", { enabled: e.target.checked }); renderBubble(); } catch (err) { mStatus(err.message, "bad"); } };
-$("b-roam").onclick = () => startMission("roam");
-$("b-explore").onclick = () => startMission("explore");
-$("b-goto").onclick = () => { const l = $("goal-label").value; if (l) startMission("goto", { goal: { label: l } }); };
-$("b-mpause").onclick = () => api("/api/autonomy/pause", {}).catch((e) => mStatus(e.message, "bad"));
-$("b-mstop").onclick = () => { sup = null; api("/api/autonomy/stop", {}).catch((e) => mStatus(e.message, "bad")); };
+$("bubble-on").onchange = async (e) => { try { guard = await api("/api/bubble", { enabled: e.target.checked }); renderBubble(); } catch (err) { showFlash(err.message); } };
+$("b-mstart").onclick = () => startMission();
+$("b-mpause").onclick = () => api("/api/autonomy/pause", {}).then(pollMission).catch((e) => showFlash(e.message));
+$("b-mstop").onclick = () => { sup = null; api("/api/autonomy/stop", {}).then(pollMission).catch((e) => showFlash(e.message)); };
 $("b-mresume").onclick = async () => {
-  try { const r = await api("/api/autonomy/resume", {}); sup = { id: r.mission_id, key: r.lease_key }; }
-  catch (e) { mStatus(e.message, "bad"); }
+  try { const r = await api("/api/autonomy/resume", {}); sup = { id: r.mission_id, key: r.lease_key }; pollMission(); }
+  catch (e) { showFlash(e.message); }
 };
+setKind("goto");
 $("b-extend").onclick = async () => {
   const n = $("map-list").value; if (!n) return;
   const r = await post("api/maps/extend", { name: n });
@@ -376,7 +456,7 @@ $("b-delete").onclick = async () => {
 const pauseNow = () => { if (sup) fetch("/api/autonomy/pause", { method: "POST", keepalive: true }); };
 document.addEventListener("visibilitychange", () => { if (document.hidden) pauseNow(); });
 window.addEventListener("pagehide", pauseNow);
-setInterval(heartbeat, 1000);
+setInterval(heartbeat, 700);
 setInterval(pollMission, 700);
 cv.addEventListener("touchmove", (e) => {
   if (e.touches.length !== 2) return;
@@ -415,7 +495,7 @@ function setView(v) {
   if (drive) drive.show(v === "drive");
   $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
     : v === "radar" ? "Live scan around the robot (top = front)"
-    : v === "drive" ? "Camera with lidar distances · 360° panorama · camera-coloured 3D world"
+    : v === "drive" ? "Live camera with lidar distances, safety bubble and planned path"
     : "45° corner view · drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
   if (v === "3d") update3d(true);
   else if (v === "drive") { if (drive) { drive.resize(); fetchDriveScene(true); } }

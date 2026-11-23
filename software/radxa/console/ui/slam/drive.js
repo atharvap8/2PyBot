@@ -1,12 +1,6 @@
-/* 2PyBot Drive tab: camera-based reality view, no WebGL, no assets.
- *
- *   Camera    live WebRTC video with the lidar projected into it: distance posts
- *             and tags on every return, floor distance rings, the safety bubble,
- *             the planned path as a blue ribbon, goal beacon, area labels, HUD.
- *   Panorama  frames stitched by robot heading into a 360 degree cylinder; look
- *             around with drag; the 360 lidar is drawn into it everywhere.
- *   World     the lidar map rebuilt in 3D and coloured with real camera pixels
- *             (walls and floor), chase camera behind the robot.
+/* 2PyBot Drive tab: live camera with the lidar projected into it (distance
+ * posts and tags, floor distance rings, safety bubble, planned path ribbon,
+ * goal beacon, area labels, HUD). No WebGL, no assets.
  *
  * Frames: robot x forward, y left, z up (m). Map frame from SLAM (or wheel
  * odometry while SLAM is idle). Camera: optical X right, Y down, Z forward.
@@ -19,12 +13,10 @@
   const LS = "2pybot.drive.camera.v1";
   const DEF = { hfov: 66, x: 0.045, y: -0.023, z: 0.195, tilt: 0, yaw: 0, roll: 0, lean: 1, useCalib: true, walls: false };
   const LIDAR_Z = 0.265;
-  const PPD = 8;                                     // panorama pixels per degree
   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
   // distance colour: near red -> amber -> green -> cyan far
   function distColor(r, a) {
@@ -44,15 +36,8 @@
       <video class="dv-video" muted playsinline autoplay></video>
       <canvas class="dv-canvas"></canvas>
       <div class="dv-bar">
-        <div class="seg dv-modes" role="tablist">
-          <button data-dmode="camera" aria-selected="true">Camera</button>
-          <button data-dmode="pano" aria-selected="false">Panorama</button>
-          <button data-dmode="world" aria-selected="false">World</button>
-        </div>
         <button class="btn small" data-act="video">Reconnect video</button>
         <button class="btn small" data-act="align">Align camera</button>
-        <button class="btn small" data-act="clear" title="Forget the stitched panorama and camera colours">Clear</button>
-        <button class="btn small" data-act="save" title="Download the 360° panorama">Save 360°</button>
         <span class="dv-note"></span>
       </div>
       <div class="dv-align" hidden></div>`;
@@ -60,19 +45,14 @@
     const note = root.querySelector(".dv-note"), alignBox = root.querySelector(".dv-align");
 
     // ------------------------------------------------------------------ state
-    let S = null, hud = null, shown = false, raf = 0, mode = "camera";
+    let S = null, hud = null, shown = false, raf = 0;
     let W = 1, H = 1, dpr = 1;
     let cfg = Object.assign({}, DEF);
     try { Object.assign(cfg, JSON.parse(localStorage.getItem(LS) || "{}")); } catch (e) { /* defaults */ }
     let calib = null;
     const hist = [];                                   // [t, x, y, heading] for speed / yaw rate
-    let walls = [], floor = [], sceneVersion = -1;
-    const wallColor = new Map(), floorColor = new Map();
-    let pano = null;
-    const frame = document.createElement("canvas"), fctx = frame.getContext("2d", { willReadFrequently: true });
-    const sample = document.createElement("canvas"), sctx = sample.getContext("2d", { willReadFrequently: true });
-    let videoState = "idle", lastCapture = 0;
-    const view = { yaw: 0, follow: true, hfov: 95, pitch: 0, wcam: { yaw: 0, dist: 1.6, height: 0.9 } };
+    let walls = [];
+    let videoState = "idle";
 
     fetch("/api/calibration/active").then((r) => r.json()).then((j) => {
       if (j && j.camera_matrix && j.image_size) calib = j;
@@ -188,105 +168,6 @@
     const scr = (M, p) => p && [M.ox + p[0] * M.scale, M.oy + p[1] * M.scale, p[2]];
     const ptS = (M, x, y, z) => scr(M, pix(M, x, y, z));
 
-    // ------------------------------------------------------------------ panorama + colour capture
-    function ensurePano(M) {
-      const half = M.vfov * R2D / 2 + Math.abs(cfg.tilt) + 8;
-      const e1 = Math.min(70, half), e0 = -Math.min(70, half);
-      if (pano && Math.abs(pano.e1 - e1) < 3) return pano;
-      const c = document.createElement("canvas");
-      c.width = 360 * PPD; c.height = Math.round((e1 - e0) * PPD);
-      pano = { cv: c, ctx: c.getContext("2d"), e0, e1, W: c.width, H: c.height, filled: new Uint8Array(360) };
-      return pano;
-    }
-    const azToX = (phi) => ((((-phi * R2D) % 360) + 360) % 360) * PPD;     // clockwise to the right
-    const xToAz = (x) => -(x / PPD) * D2R;
-    const eToY = (P, e) => (P.e1 - e * R2D) * PPD;
-
-    function capture(now) {
-      if (!videoReady() || !S || now - lastCapture < 180) return;
-      const P = robotPose(); if (!P) return;
-      const m = motion();
-      if (Math.abs(m.w) > 25 * D2R) return;                        // pose lags video: no stitching while spinning
-      lastCapture = now;
-      const M = camModel();
-      const FW = 640, FH = Math.round(640 * M.vh / M.vw);
-      if (frame.width !== FW || frame.height !== FH) { frame.width = FW; frame.height = FH; }
-      fctx.drawImage(video, 0, 0, FW, FH);
-      stitch(M, P, FW / M.vw);
-      colourise(M, P);
-    }
-
-    function stitch(M, P, k) {
-      const PN = ensurePano(M), c = PN.ctx;
-      const heading = P[2], camAz = heading + cfg.yaw * D2R, half = M.hfov / 2 * 0.92;
-      const x0 = Math.floor(azToX(camAz + half)), span = Math.ceil(2 * half * R2D * PPD);
-      const segs = 6, de = (PN.e1 - PN.e0) / segs;
-      for (let i = 0; i < span; i += 2) {
-        const x = (x0 + i) % PN.W;
-        const phi = xToAz(x + 1), beta = wrap(phi - heading), rel = Math.abs(wrap(phi - camAz));
-        if (rel > half) continue;
-        c.globalAlpha = 0.25 + 0.6 * Math.cos(rel / half * Math.PI / 2);
-        for (let s = 0; s < segs; s++) {
-          const eA = (PN.e1 - s * de) * D2R, eB = (PN.e1 - (s + 1) * de) * D2R;
-          const dA = [Math.cos(eA) * Math.cos(beta), Math.cos(eA) * Math.sin(beta), Math.sin(eA)];
-          const dB = [Math.cos(eB) * Math.cos(beta), Math.cos(eB) * Math.sin(beta), Math.sin(eB)];
-          const a = dirPix(M, dA), b = dirPix(M, dB);
-          if (!a || !b) continue;
-          let vA = a[1] * k, vB = b[1] * k, yA = eToY(PN, eA * R2D), yB = eToY(PN, eB * R2D);
-          const u = 0.5 * (a[0] + b[0]) * k;
-          if (u < 0 || u >= frame.width || vB <= 0 || vA >= frame.height || vB - vA < 0.5) continue;
-          if (vA < 0) { yA += (0 - vA) / (vB - vA) * (yB - yA); vA = 0; }
-          if (vB > frame.height) { yB -= (vB - frame.height) / (vB - vA) * (yB - yA); vB = frame.height; }
-          c.drawImage(frame, u, vA, 1, vB - vA, x, yA, 2, yB - yA);
-        }
-        PN.filled[Math.floor(x / PPD) % 360] = 1;
-      }
-      c.globalAlpha = 1;
-    }
-
-    function rangeByBearing(scan) {                                // min lidar range per 2 deg bucket (robot frame)
-      const r = new Float32Array(180).fill(99);
-      for (const p of scan || []) {
-        const b = Math.floor(((Math.atan2(p[1], p[0]) * R2D + 360) % 360) / 2);
-        const d = Math.hypot(p[0], p[1]);
-        if (d < r[b]) r[b] = d;
-      }
-      return r;
-    }
-    const rangeAt = (R, x, y) => R[Math.floor(((Math.atan2(y, x) * R2D + 360) % 360) / 2)];
-
-    function colourise(M, P) {
-      if (!walls.length && !floor.length) return;
-      const SW = 192, SH = Math.round(192 * M.vh / M.vw);
-      if (sample.width !== SW || sample.height !== SH) { sample.width = SW; sample.height = SH; }
-      sctx.drawImage(frame, 0, 0, SW, SH);
-      const img = sctx.getImageData(0, 0, SW, SH).data, k = SW / M.vw;
-      const R = rangeByBearing(S.scan);
-      const get = (p) => {
-        if (!p) return null;
-        const u = Math.round(p[0] * k), v = Math.round(p[1] * k);
-        if (u < 1 || v < 1 || u >= SW - 1 || v >= SH - 1) return null;
-        const i = (v * SW + u) * 4; return [img[i], img[i + 1], img[i + 2]];
-      };
-      const mixIn = (map, key, idx, n, rgb) => {
-        let e = map.get(key); if (!e) { e = new Float32Array(n * 4); map.set(key, e); }
-        const o = idx * 4, w = e[o + 3] ? 0.35 : 1;
-        e[o] += (rgb[0] - e[o]) * w; e[o + 1] += (rgb[1] - e[o + 1]) * w; e[o + 2] += (rgb[2] - e[o + 2]) * w; e[o + 3] = 1;
-      };
-      for (const [wx, wy] of walls) {
-        const [x, y] = toRobot(P, wx, wy), d = Math.hypot(x, y);
-        if (x < 0.15 || d > 4.5) continue;
-        if (d > rangeAt(R, x, y) + 0.25) continue;                    // hidden behind something nearer
-        [0.05, 0.15, 0.25, 0.42].forEach((z, i) => { const c = get(pix(M, x, y, z)); if (c) mixIn(wallColor, wx + "," + wy, i, 4, c); });
-      }
-      for (const [fx_, fy_] of floor) {
-        const [x, y] = toRobot(P, fx_, fy_), d = Math.hypot(x, y);
-        if (x < 0.12 || d > 3.2) continue;
-        if (d > rangeAt(R, x, y) - 0.05) continue;
-        const c = get(pix(M, x, y, 0)); if (c) mixIn(floorColor, fx_ + "," + fy_, 0, 1, c);
-      }
-    }
-
     // ------------------------------------------------------------------ shared overlay pieces
     function tag(x, y, text, color, sub) {
       ctx.font = "600 12px Inter, Segoe UI, sans-serif";
@@ -337,7 +218,7 @@
         const hz = ptS(M, 50, 0, cfg.z);
         if (hz) { ctx.strokeStyle = "rgba(148,163,184,0.15)"; ctx.beginPath(); ctx.moveTo(0, hz[1]); ctx.lineTo(W, hz[1]); ctx.stroke(); }
         ctx.fillStyle = "#94a3b8"; ctx.font = "13px Inter, sans-serif";
-        ctx.fillText(`Camera ${videoState}. Lidar overlay shown on a synthetic view.`, 16, H - 110);
+        ctx.fillText(`Camera ${videoState}. Lidar overlay shown on a synthetic view.`, 16, H - 40);
       } else {
         ctx.fillStyle = "rgba(0,0,0,0.12)"; ctx.fillRect(0, 0, W, H);   // slight dim so the overlay pops
       }
@@ -445,107 +326,6 @@
       }
       ctx.restore();
       drawHud(M, P);
-      drawStrip(M, P);
-    }
-
-    // ------------------------------------------------------------------ PANORAMA mode
-    function drawPano() {
-      const P = robotPose(), M = camModel();
-      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#0c121a"); g.addColorStop(1, "#05070a");
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-      if (!S || !P) return;
-      const PN = ensurePano(M);
-      const heading = P[2], f = (W / 2) / Math.tan(view.hfov * D2R / 2);
-      const psi = view.follow ? heading + cfg.yaw * D2R : view.yaw;
-      if (view.follow) view.yaw = psi;
-      const cy = H / 2 + view.pitch;
-      const yOf = (e, a) => cy - f * Math.tan(e) / Math.cos(a);
-      // horizon grid so unseen directions still read as space
-      ctx.strokeStyle = "rgba(148,163,184,0.10)"; ctx.lineWidth = 1;
-      for (let e = -30; e <= 30; e += 10) { ctx.beginPath(); for (let sx = 0; sx <= W; sx += 12) { const a = Math.atan((W / 2 - sx) / f); const y = yOf(e * D2R, a); sx ? ctx.lineTo(sx, y) : ctx.moveTo(sx, y); } ctx.stroke(); }
-      // cylinder columns
-      const segs = 4, de = (PN.e1 - PN.e0) / segs;
-      for (let sx = 0; sx < W; sx += 3) {
-        const a = Math.atan((W / 2 - (sx + 1.5)) / f), x = Math.floor(azToX(psi + a)) % PN.W;
-        for (let s = 0; s < segs; s++) {
-          const eA = PN.e1 - s * de, eB = eA - de, yA = yOf(eA * D2R, a), yB = yOf(eB * D2R, a);
-          ctx.drawImage(PN.cv, x, eToY(PN, eA), 1, de * PPD, sx, yA, 3, yB - yA);
-        }
-      }
-      // compass ticks
-      ctx.fillStyle = "rgba(226,232,240,0.7)"; ctx.font = "600 11px Inter, sans-serif"; ctx.textAlign = "center";
-      for (let d = 0; d < 360; d += 15) {
-        const a = wrap(-d * D2R - psi); if (Math.abs(a) > view.hfov * D2R / 2) continue;
-        const sx = W / 2 - f * Math.tan(a);
-        ctx.fillRect(sx, 46, 1, d % 45 ? 5 : 10);
-        if (d % 45 === 0) ctx.fillText(`${d}°`, sx, 70);
-      }
-      ctx.textAlign = "left";
-      // lidar in the panorama: posts + tags, all around
-      const items = [];
-      for (const p of S.scan || []) {
-        const dx = p[0] - cfg.x, dy = p[1] - cfg.y, h = Math.hypot(dx, dy);
-        if (h < 0.05) continue;
-        const a = wrap(heading + Math.atan2(dy, dx) - psi);
-        if (Math.abs(a) > view.hfov * D2R / 2 + 0.05 || Math.abs(a) > 1.45) continue;
-        const sx = W / 2 - f * Math.tan(a);
-        const yt = yOf(Math.atan2(LIDAR_Z - cfg.z, h), a), yb = yOf(Math.atan2(-cfg.z, h), a);
-        items.push({ sx, yt, yb, r: Math.hypot(p[0], p[1]), h });
-      }
-      items.sort((a, b) => b.h - a.h);
-      for (const it of items) {
-        const w = clamp(14 / it.h, 1, 6);
-        ctx.strokeStyle = distColor(it.r, 0.3); ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(it.sx, it.yb); ctx.lineTo(it.sx, it.yt); ctx.stroke();
-        ctx.fillStyle = distColor(it.r, 1); ctx.fillRect(it.sx - w / 2, it.yt - w / 2, w, w);
-      }
-      const chosen = [];
-      for (const it of items.slice().sort((a, b) => a.r - b.r)) {
-        if (it.r > 5 || chosen.some((c) => Math.abs(c.sx - it.sx) < 80)) continue;
-        chosen.push(it); if (chosen.length >= 9) break;
-      }
-      for (const it of chosen) tag(it.sx, it.yt - 6, `${it.r.toFixed(2)} m`, distColor(it.r, 1));
-      // labels
-      for (const l of S.labels || []) {
-        const [x, y] = toRobot(P, l.x, l.y), a = wrap(heading + Math.atan2(y - cfg.y, x - cfg.x) - psi);
-        if (Math.abs(a) > view.hfov * D2R / 2) continue;
-        const sx = W / 2 - f * Math.tan(a), h = Math.hypot(x, y);
-        tag(sx, yOf(Math.atan2(0.45 - cfg.z, h), a), l.name, "#f08a4b", `${h.toFixed(1)} m`);
-      }
-      // live camera window outline
-      const ca = wrap(heading + cfg.yaw * D2R - psi), hh = M.hfov / 2;
-      if (Math.abs(ca) < view.hfov * D2R) {
-        const l = W / 2 - f * Math.tan(clamp(ca + hh, -1.5, 1.5)), r = W / 2 - f * Math.tan(clamp(ca - hh, -1.5, 1.5));
-        ctx.strokeStyle = "rgba(56,189,248,0.6)"; ctx.setLineDash([6, 5]); ctx.strokeRect(l, yOf(M.vfov / 2, 0), r - l, yOf(-M.vfov / 2, 0) - yOf(M.vfov / 2, 0)); ctx.setLineDash([]);
-      }
-      const seen = PN.filled.reduce((a, b) => a + b, 0);
-      ctx.fillStyle = "#cbd5e1"; ctx.font = "12px Inter, sans-serif";
-      ctx.fillText(`Panorama ${seen}° of 360° captured · turn the robot slowly to fill it · drag to look around · double-click to follow`, 16, H - 104);
-      drawHud(M, P);
-      drawStrip(M, P);
-    }
-
-    // 360 strip: the whole panorama centred on the robot heading + lidar ring underneath
-    function drawStrip(M, P) {
-      const PN = pano; const x0 = 14, w = W - 28, h = Math.min(64, Math.max(34, w / 18)), y = H - h - 30;
-      ctx.fillStyle = "rgba(5,7,10,0.72)"; ctx.fillRect(x0 - 2, y - 2, w + 4, h + 22);
-      if (PN) {
-        const centre = azToX(P[2]), shift = ((centre - PN.W / 2) % PN.W + PN.W) % PN.W, k = w / PN.W;
-        ctx.drawImage(PN.cv, shift, 0, PN.W - shift, PN.H, x0, y, (PN.W - shift) * k, h);
-        if (shift > 0) ctx.drawImage(PN.cv, 0, 0, shift, PN.H, x0 + (PN.W - shift) * k, y, shift * k, h);
-      }
-      // lidar distance ring (robot-relative bearing, centre = straight ahead)
-      const R = rangeByBearing(S.scan);
-      for (let i = 0; i < 180; i++) {
-        const bearing = i * 2, rel = ((-bearing + 180) % 360 + 360) % 360;      // left of centre = left of robot
-        const sx = x0 + rel / 360 * w;
-        ctx.fillStyle = R[i] < 90 ? distColor(R[i], 0.95) : "rgba(71,85,105,0.5)";
-        ctx.fillRect(sx, y + h + 4, w / 180 + 0.6, 6);
-      }
-      const fw = M.hfov * R2D / 360 * w;
-      ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 1.5; ctx.strokeRect(x0 + w / 2 - fw / 2 - (cfg.yaw / 360) * w, y, fw, h);
-      ctx.fillStyle = "#f08a4b"; ctx.beginPath(); ctx.moveTo(x0 + w / 2, y + h + 2); ctx.lineTo(x0 + w / 2 - 5, y + h + 12); ctx.lineTo(x0 + w / 2 + 5, y + h + 12); ctx.fill();
-      ctx.fillStyle = "#94a3b8"; ctx.font = "10px Inter, sans-serif";
-      ctx.fillText("BEHIND", x0 + 4, y + h + 18); ctx.fillText("AHEAD", x0 + w / 2 + 8, y + h + 18);
     }
 
     // ------------------------------------------------------------------ HUD (car-autopilot style)
@@ -571,130 +351,8 @@
       ctx.textAlign = "left";
       if (!calib || !cfg.useCalib) {
         ctx.fillStyle = "rgba(240,184,75,0.85)"; ctx.font = "11px Inter, sans-serif";
-        ctx.fillText(`Uncalibrated camera (HFOV ${cfg.hfov}°): use Align camera so the posts sit on real walls`, 14, H - 112 - (mode === "pano" ? 12 : 0));
+        ctx.fillText(`Uncalibrated camera (HFOV ${cfg.hfov}°): use Align camera so the posts sit on real walls`, 14, H - 16);
       }
-    }
-
-    // ------------------------------------------------------------------ WORLD mode (camera-coloured map)
-    let C = null;
-    function wsetup(P) {
-      const th = P[2] + view.wcam.yaw, fx = Math.cos(th), fy = Math.sin(th);
-      const eye = [P[0] - fx * view.wcam.dist, P[1] - fy * view.wcam.dist, view.wcam.height];
-      const look = [P[0] + fx * 1.0, P[1] + fy * 1.0, 0.12];
-      let f = [look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]]; const n = Math.hypot(...f); f = f.map((v) => v / n);
-      let r = [f[1], -f[0], 0]; const rn = Math.hypot(...r) || 1; r = r.map((v) => v / rn);
-      C = { eye, f, r, u: cross(r, f), focal: (H / 2) / Math.tan(32 * D2R) };
-    }
-    function wp(x, y, z) {
-      const dx = x - C.eye[0], dy = y - C.eye[1], dz = z - C.eye[2], d = dx * C.f[0] + dy * C.f[1] + dz * C.f[2];
-      if (d < 0.08) return null;
-      return [W / 2 + C.focal * (dx * C.r[0] + dy * C.r[1] + dz * C.r[2]) / d, H / 2 - C.focal * (dx * C.u[0] + dy * C.u[1] + dz * C.u[2]) / d, d];
-    }
-    function wpoly(pts) {
-      const q = pts.map((p) => wp(p[0], p[1], p[2] || 0)); if (q.some((x) => !x)) return null;
-      ctx.beginPath(); q.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath(); return q;
-    }
-    let wpose = null;
-    function drawWorld() {
-      const P0 = robotPose();
-      const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#1a2433"); g.addColorStop(0.45, "#0b1018"); g.addColorStop(1, "#06080b");
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-      if (!S || !P0) return;
-      if (!wpose) wpose = P0.slice();
-      else { const k = 0.25; wpose = [wpose[0] + (P0[0] - wpose[0]) * k, wpose[1] + (P0[1] - wpose[1]) * k, wpose[2] + wrap(P0[2] - wpose[2]) * k]; }
-      const P = wpose; wsetup(P);
-      // floor: camera-coloured tiles (10 cm), unseen known floor dark slate
-      const half = 0.05;
-      for (const [x, y] of floor) {
-        const dx = x - P[0], dy = y - P[1]; if (dx * dx + dy * dy > 49) continue;
-        const c = floorColor.get(x + "," + y);
-        if (!wpoly([[x - half, y - half], [x + half, y - half], [x + half, y + half], [x - half, y + half]])) continue;
-        ctx.fillStyle = c ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` : "rgba(40,50,64,0.55)"; ctx.fill();
-      }
-      // grid
-      ctx.strokeStyle = "rgba(148,163,184,0.08)"; ctx.lineWidth = 1;
-      const gx = Math.round(P[0]), gy = Math.round(P[1]);
-      for (let i = -7; i <= 7; i++) {
-        let a = wp(gx + i, gy - 7, 0), b = wp(gx + i, gy + 7, 0); if (a && b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
-        a = wp(gx - 7, gy + i, 0); b = wp(gx + 7, gy + i, 0); if (a && b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
-      }
-      // path ribbon (blue)
-      const plan = S.plan || [];
-      if (plan.length > 1) {
-        const L = [], Rr = [];
-        for (let i = 0; i < plan.length; i++) {
-          const a = plan[Math.max(0, i - 1)], b = plan[Math.min(plan.length - 1, i + 1)];
-          let tx = b[0] - a[0], ty = b[1] - a[1]; const n = Math.hypot(tx, ty) || 1; tx /= n; ty /= n;
-          L.push([plan[i][0] - ty * 0.09, plan[i][1] + tx * 0.09, 0.01]); Rr.push([plan[i][0] + ty * 0.09, plan[i][1] - tx * 0.09, 0.01]);
-        }
-        if (wpoly(L.concat(Rr.reverse()))) { ctx.fillStyle = "rgba(56,189,248,0.55)"; ctx.fill(); }
-      }
-      // collect columns: walls (camera colours), live lidar
-      const items = [], c = Math.cos(P0[2]), s = Math.sin(P0[2]);
-      for (const [x, y] of walls) {
-        const dx = x - P[0], dy = y - P[1]; if (dx * dx + dy * dy > 64) continue;
-        const b = wp(x, y, 0); if (!b) continue;
-        items.push({ d: b[2], x, y, kind: 0 });
-      }
-      for (const p of S.scan || []) {
-        const x = P0[0] + c * p[0] - s * p[1], y = P0[1] + s * p[0] + c * p[1], b = wp(x, y, 0);
-        if (b) items.push({ d: b[2], x, y, kind: 1, r: Math.hypot(p[0], p[1]) });
-      }
-      const rd = wp(P[0], P[1], 0.1);
-      items.sort((a, b) => b.d - a.d);
-      let robotDrawn = false;
-      for (const it of items) {
-        if (!robotDrawn && rd && it.d < rd[2]) { drawRobot(P); robotDrawn = true; }
-        if (it.kind === 0) {
-          const col = wallColor.get(it.x + "," + it.y), zs = [0, 0.1, 0.2, 0.32, 0.5];
-          const w = clamp(60 / it.d, 1.5, 14);
-          for (let i = 0; i < 4; i++) {
-            const a = wp(it.x, it.y, zs[i]), b = wp(it.x, it.y, zs[i + 1]); if (!a || !b) continue;
-            const fade = clamp(1.3 - it.d / 7, 0.25, 1);
-            ctx.strokeStyle = col && col[i * 4 + 3] ? `rgba(${col[i * 4] | 0},${col[i * 4 + 1] | 0},${col[i * 4 + 2] | 0},${fade})` : `rgba(150,162,178,${0.45 * fade})`;
-            ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1] - 0.5); ctx.stroke();
-          }
-        } else {
-          const t = wp(it.x, it.y, LIDAR_Z); if (!t) continue;
-          const w = clamp(30 / it.d, 1.5, 7);
-          ctx.fillStyle = distColor(it.r, 1); ctx.shadowColor = distColor(it.r, 1); ctx.shadowBlur = 8;
-          ctx.fillRect(t[0] - w / 2, t[1] - w / 2, w, w); ctx.shadowBlur = 0;
-        }
-      }
-      if (!robotDrawn) drawRobot(P);
-      // bubble footprint
-      const B = S.bubble;
-      if (B && B.footprint) {
-        const [x0, x1, y0, y1] = B.footprint, mg = B.stop_margin || 0.06, cc = Math.cos(P[2]), ss = Math.sin(P[2]);
-        const T = (px, py) => [P[0] + cc * px - ss * py, P[1] + ss * px + cc * py, 0.004];
-        const col = { clear: "#34d399", limiting: "#f0b84b", stale: "#73695f" }[B.state] || "#ff4d6d";
-        if (wpoly([T(x1 + mg, y0 - 0.03), T(x1 + mg, y1 + 0.03), T(x0 - mg, y1 + 0.03), T(x0 - mg, y0 - 0.03)])) {
-          ctx.fillStyle = col + "33"; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
-        }
-      }
-      // goal + labels
-      if (S.goal) { const b = wp(S.goal.x, S.goal.y, 0), t = wp(S.goal.x, S.goal.y, 0.7); if (b && t) { ctx.strokeStyle = "#7dd3fc"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(b[0], b[1]); ctx.lineTo(t[0], t[1]); ctx.stroke(); } }
-      for (const l of S.labels || []) { const t = wp(l.x, l.y, 0.5); if (t && t[2] < 14) tag(t[0], t[1], l.name, "#f08a4b"); }
-      const M = camModel();
-      drawHud(M, P0);
-      ctx.fillStyle = "#94a3b8"; ctx.font = "12px Inter, sans-serif";
-      ctx.fillText(`World rebuilt from the lidar map, coloured by the camera: ${wallColor.size} wall / ${floorColor.size} floor patches seen · drag to orbit · wheel to zoom`, 16, H - 16);
-    }
-    function drawRobot(P) {
-      const c = Math.cos(P[2]), s = Math.sin(P[2]);
-      const T = (px, py, z) => [P[0] + c * px - s * py, P[1] + s * px + c * py, z];
-      const box = (xa, xb, ya, yb, za, zb, fill, edge) => {
-        const v = [[xa, ya], [xb, ya], [xb, yb], [xa, yb]];
-        const faces = [[0, 1], [1, 2], [2, 3], [3, 0]].map(([i, j]) => [T(v[i][0], v[i][1], za), T(v[j][0], v[j][1], za), T(v[j][0], v[j][1], zb), T(v[i][0], v[i][1], zb)]);
-        faces.push(v.map((p) => T(p[0], p[1], zb)));
-        faces.map((f) => { const q = f.map((p) => wp(...p)); return q.some((x) => !x) ? null : { f, d: q.reduce((a, x) => a + x[2], 0) / 4 }; })
-          .filter(Boolean).sort((a, b) => b.d - a.d)
-          .forEach((it) => { if (wpoly(it.f)) { ctx.fillStyle = fill; ctx.strokeStyle = edge; ctx.lineWidth = 1; ctx.fill(); ctx.stroke(); } });
-      };
-      box(-0.052, 0.052, -0.125, -0.095, 0, 0.104, "#1f2937", "#475569");
-      box(-0.052, 0.052, 0.095, 0.125, 0, 0.104, "#1f2937", "#475569");
-      box(-0.05, 0.05, -0.09, 0.09, 0.06, 0.25, "rgba(226,232,240,0.95)", "#64748b");
-      box(-0.035, 0.035, -0.066, 0.004, 0.25, 0.28, "#0f172a", "#38bdf8");
     }
 
     // ------------------------------------------------------------------ align panel
@@ -724,37 +382,8 @@
     function save() { try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch (e) { /* private mode */ } }
 
     // ------------------------------------------------------------------ input
-    root.querySelectorAll("[data-dmode]").forEach((b) => (b.onclick = () => setMode(b.dataset.dmode)));
     root.querySelector('[data-act="video"]').onclick = () => startVideo();
     root.querySelector('[data-act="align"]').onclick = () => { alignBox.hidden = !alignBox.hidden; };
-    root.querySelector('[data-act="clear"]').onclick = () => { pano = null; wallColor.clear(); floorColor.clear(); };
-    root.querySelector('[data-act="save"]').onclick = () => {
-      if (!pano) return;
-      const a = document.createElement("a"); a.download = `2pybot-panorama-${Date.now()}.png`; a.href = pano.cv.toDataURL("image/png"); a.click();
-    };
-    let drag = null;
-    cv.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); });
-    cv.addEventListener("pointermove", (e) => {
-      if (!drag) return;
-      const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
-      if (mode === "pano") { view.follow = false; view.yaw += dx * (view.hfov * D2R) / W; view.pitch = clamp(view.pitch + dy, -H / 2, H / 2); }
-      else if (mode === "world") { view.wcam.yaw -= dx * 0.006; view.wcam.height = clamp(view.wcam.height + dy * 0.005, 0.3, 4); }
-    });
-    cv.addEventListener("pointerup", () => { drag = null; });
-    cv.addEventListener("dblclick", () => { view.follow = true; view.pitch = 0; view.wcam = { yaw: 0, dist: 1.6, height: 0.9 }; });
-    cv.addEventListener("wheel", (e) => {
-      e.preventDefault();
-      if (mode === "pano") view.hfov = clamp(view.hfov * (e.deltaY < 0 ? 0.92 : 1.08), 35, 150);
-      else if (mode === "world") view.wcam.dist = clamp(view.wcam.dist * (e.deltaY < 0 ? 0.9 : 1.1), 0.5, 8);
-    }, { passive: false });
-
-    function setMode(m) {
-      mode = m;
-      root.querySelectorAll("[data-dmode]").forEach((b) => b.setAttribute("aria-selected", b.dataset.dmode === m));
-      video.style.visibility = m === "camera" ? "visible" : "hidden";          // keeps decoding for capture
-      note.textContent = m === "camera" ? "Live camera with lidar distances"
-        : m === "pano" ? "360° stitched from camera frames by heading" : "3D map coloured by the camera";
-    }
 
     // ------------------------------------------------------------------ loop
     function resize() {
@@ -766,14 +395,13 @@
     function frameLoop(now) {
       raf = 0; if (!shown) return;
       try {
-        capture(now);
-        if (mode === "camera") drawCamera(); else if (mode === "pano") drawPano(); else drawWorld();
+        drawCamera();
       } catch (e) { note.textContent = "Drive view error: " + e.message; }
       raf = requestAnimationFrame(frameLoop);
     }
     function show(on) {
       shown = !!on;
-      if (shown) { resize(); setMode(mode); if (!pc) startVideo(); if (!raf) raf = requestAnimationFrame(frameLoop); }
+      if (shown) { resize(); if (!pc) startVideo(); if (!raf) raf = requestAnimationFrame(frameLoop); }
       else stopVideo();
     }
     function update(state) {
@@ -790,7 +418,7 @@
         }
         return out;
       };
-      walls = pool(sc.walls); floor = pool(sc.floor); sceneVersion = sc.version; api.version = sc.version;
+      walls = pool(sc.walls); api.version = sc.version;
     }
     function setHud(h) { hud = h; }
     const api = { show, update, setScene, setHud, resize, version: -1 };
