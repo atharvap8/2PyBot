@@ -3,6 +3,14 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.3 — Cleaner ring motion
+
+- While the comets run, every other LED is off: no base glow, no centre marker.
+- Climb mode: a single violet LED hops one LED at a time toward the travel
+  direction, two hoppers into the front for forward and into the back for reverse,
+  one across the front half for turning. Faster with speed; all other LEDs off.
+  Stopped in climb: the front LED alone, slow pulse.
+
 ## 4.7.2 — Motion-based LED ring
 
 - **Colour = state:**

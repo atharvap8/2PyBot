@@ -21,12 +21,13 @@
  *     holding      soft breathing ring, bright front "eye" that blinks now and
  *                  then, glow leans toward the side the robot tilts to
  *     forward      two comets run from the left and right sides INTO the front LED
+ *                  (while comets run, every other LED is off)
  *     reverse      two comets run from the left and right sides INTO the rear LED
  *     turn right   a comet sweeps the front half from front-left to front-right
  *     turn left    the same sweep right -> left
  *     (forward/reverse and turning overlay; comet speed follows stick/command)
- *     climb mode   every other LED lit; the pattern marches toward the travel
- *                  direction (front, back, left or right), faster with speed
+ *     climb mode   one violet LED hops LED by LED toward the travel direction
+ *                  (front, back, left or right), faster with speed; others off
  *     pushed       amber fast blink on the side it was pushed toward
  *     bubble       magenta arc front/back while the safety bubble is limiting
  * ============================================================
@@ -158,19 +159,16 @@ static void drawTest(int mode, uint32_t now) {
 // (r,g,b) = mode colour. Comet speed grows with the command.
 static void motionAnim(float fwd, float steer, float dt, float r, float g, float b) {
     const float af = fminf(fabsf(fwd), 1.0f), as = fminf(fabsf(steer), 1.0f);
-    // dim mode-coloured base so the ring never goes dark while moving
-    fillAll(r * 0.06f, g * 0.06f, b * 0.06f);
+    // Only the comets are lit; every other LED stays OFF.
     if (af > 0.02f) {
         phaseDrive = fmodf(phaseDrive + dt * (0.6f + 3.4f * af), 1.0f);
         const float k = af * 0.7f + 0.3f;
         if (fwd > 0) {                                   // forward: both sides run INTO the front LED
             comet(-90.0f + 90.0f * phaseDrive, +1.0f, r * k, g * k, b * k);
             comet( 90.0f - 90.0f * phaseDrive, -1.0f, r * k, g * k, b * k);
-            arc(0.0f, 0.6f, r * 0.5f, g * 0.5f, b * 0.5f);
         } else {                                         // reverse: both sides run INTO the rear LED
             comet(-90.0f - 90.0f * phaseDrive, -1.0f, r * k, g * k, b * k);
             comet( 90.0f + 90.0f * phaseDrive, +1.0f, r * k, g * k, b * k);
-            arc(180.0f, 0.6f, r * 0.5f, g * 0.5f, b * 0.5f);
         }
     }
     if (as > 0.02f) {
@@ -182,22 +180,26 @@ static void motionAnim(float fwd, float steer, float dt, float r, float g, float
     }
 }
 
-// Climb mode: every other LED lit, the pattern marching toward the travel direction.
+// Climb mode: a single violet LED HOPS one LED at a time (no fade, all others
+// off) in the travel direction, faster with speed:
+//   forward  two hoppers step from the left/right sides into the front LED
+//   reverse  two hoppers step from the sides into the rear LED
+//   turning  one hopper steps across the front half (left->right = right turn)
+//   stopped  the front LED alone, slow pulse
+static inline void litAt(float deg, float v) { setF((int)lroundf(angToLed(deg)), 0.6f * v, 0.05f * v, 1.0f * v); }
 static void climbAnim(float fwd, float steer, float dt, float t) {
     const float af = fabsf(fwd), as = fabsf(steer);
     const float speed = fmaxf(af, as);
-    phaseClimb += dt * (speed > 0.02f ? (1.0f + 7.0f * speed) : 0.0f);   // LED steps per second
-    const float breath = 0.55f + 0.25f * sinf(t * 2.5f);
-    for (int i = 0; i < LED_RING_COUNT; i++) {
-        const float a = ledToAng(i);
-        float pos;
-        if (speed <= 0.02f)        pos = a / STEP_DEG;                         // static
-        else if (as > af)          pos = a / STEP_DEG + (steer < 0 ? -phaseClimb : phaseClimb);  // march right / left
-        else if (fwd > 0)          pos = fabsf(a) / STEP_DEG + phaseClimb;    // march toward the front
-        else                       pos = (180.0f - fabsf(a)) / STEP_DEG + phaseClimb;  // toward the back
-        const int slot = (int)floorf(pos + 0.5f);
-        if ((slot & 1) == 0) setF(i, 0.55f * breath, 0.05f * breath, 1.0f * breath);
-        else                 setF(i, 0.04f, 0.0f, 0.08f);
+    if (speed <= 0.02f) { litAt(0.0f, 0.45f + 0.35f * sinf(t * 2.5f)); return; }
+    phaseClimb += dt * (2.0f + 10.0f * speed);                 // hops per second
+    const int hop = (int)floorf(phaseClimb);
+    if (as > af) {
+        const int k = hop % 9;                                  // -90 .. +90 in 22.5 deg hops
+        litAt(steer < 0 ? -90.0f + k * STEP_DEG : 90.0f - k * STEP_DEG, 1.0f);
+    } else {
+        const int k = hop % 5;                                  // side -> centre in 4 hops
+        if (fwd > 0) { litAt(-90.0f + k * STEP_DEG, 1.0f); litAt(90.0f - k * STEP_DEG, 1.0f); }
+        else         { litAt(-90.0f - k * STEP_DEG, 1.0f); litAt(90.0f + k * STEP_DEG, 1.0f); }
     }
 }
 
