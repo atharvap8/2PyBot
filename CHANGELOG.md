@@ -3,6 +3,24 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.5.0 — Stable v1
+
+First stable release. Merges all work since 4.1.1: self-uprighting, lidar SLAM with
+pose fusion, ToF map layer, single web port, tilted map view, the redesigned Android
+app (portrait and landscape) and the user manual and technical Q&A PDFs.
+
+Safety fixes from the incident review (hang, one wheel at full speed, link loss, falls):
+
+- The M0601 drivers keep their last current setpoint while no frames arrive. The
+  controller now sends zero-current frames from the first milliseconds after any
+  reset (power-on, brownout, panic, watchdog) and throughout the host boot wait.
+- Independent loop stall guard (esp_timer task): zero both motors after 150 ms of loop
+  stall, restart the ESP32 after 800 ms. Blocking maintenance commands, allowed only
+  with motors off, suppress the restart for up to 5 s.
+- Reset reason printed at every boot (`[BOOT] Reset reason: ...`).
+- Controller log persisted on the Radxa (`/var/lib/2pybot/logs/controller.log`,
+  rotating), including telemetry LOST/restored edges, so incidents survive reboots.
+
 ## 4.4.0 — Sensing fusion and single web port
 
 - Lidar at 20 Hz (C1M1R2, 1200 rpm); per-beam floor clipping from the measured 0.265 m
