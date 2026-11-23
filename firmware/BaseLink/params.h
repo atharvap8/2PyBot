@@ -219,6 +219,7 @@ struct ParamMeta {
 extern Params            P;
 extern const ParamMeta   PARAM_META[];
 extern const size_t      PARAM_COUNT;
+constexpr size_t PARAM_TABLE_MAX = 256;   // blob capacity (records)
 
 // Implemented by the sketch: pushes changed values into hardware
 // (driver current, IMU filter, LED brightness...). See BaseLink.ino.
@@ -236,5 +237,6 @@ void   params_dump();
 void   params_service();
 bool   params_handleLine(char* line);
 void   params_begin();
+void   params_nvsReport();
 
 #endif // PARAMS_H

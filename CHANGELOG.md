@@ -3,6 +3,18 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.1 — Settings finally persist
+
+- Every boot logged `PL!,no NVS, using defaults` and every save failed. One NVS
+  entry per parameter (~150 blobs) filled the 20 KB partition together with the
+  Bluetooth bonds.
+- All parameters are now saved as one blob of (key hash, value) records. A save
+  clears the old per-key entries first. Legacy per-key data is still read once.
+- `PN` reports NVS usage per namespace. `PX,<ns>` erases an obsolete namespace;
+  it refuses Bluetooth, PHY and Wi-Fi namespaces.
+- Ring orientation confirmed by the owner: front LED 9, numbered clockwise.
+  This is now the compiled default.
+
 ## 4.7.0 — Bubble v2, readable LED ring, servo and wheel-speed fixes
 
 - **Bubble v2.**
