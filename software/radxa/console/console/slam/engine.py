@@ -288,6 +288,14 @@ class SlamEngine:
             self.scan_pts = pts_full                         # radar view shows raw scan
         if g not in ("tilt", "rate") and g is not None:
             self._update_bubble(scan, g)
+        else:
+            # diagnostic only (never used for limits): returns near the body, no floor clip
+            c = self.cfg
+            a = np.radians(-np.asarray(scan["angle_deg"], float)) + math.radians(c["lidar_yaw_deg"])
+            r = np.asarray(scan["dist_mm"], float) / 1000.0
+            q = np.asarray(scan["quality"], float)
+            k = (q >= c["min_quality"]) & (r >= 0.03) & (r <= 0.45)
+            self.bubble.diag_near(np.c_[c["lidar_x"] + r[k] * np.cos(a[k]), c["lidar_y"] + r[k] * np.sin(a[k])])
         if g in ("tilt", "rate"):
             self.message = ("The robot is leaning a lot, so I'm skipping this scan."
                             if g == "tilt" else "The robot is rocking fast, so I'm skipping this scan.")

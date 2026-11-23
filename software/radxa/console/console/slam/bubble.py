@@ -196,6 +196,16 @@ class Bubble:
             self.t = t
             self.result = res
 
+    def diag_near(self, pts):
+        """Returns within 25 cm of the body while scans are gated out (robot
+        tilted / resting). Diagnostic only: finds self-detection (fence, cables)."""
+        pts = np.asarray(pts, float).reshape(-1, 2)
+        if len(pts):
+            pts = pts[self._inside(pts, 0.25)]
+        with self.lock:
+            self.near_diag = [[round(float(x), 3), round(float(y), 3)] for x, y in pts[:80]]
+            self.near_diag_t = time.monotonic()
+
     # ---------------------------------------------------------------- output
     def status(self, now=None, decel=None, latency=None, margin=None):
         now = time.monotonic() if now is None else now
@@ -209,7 +219,11 @@ class Bubble:
         if stale:
             res = {"near": [], "front_m": 0.0, "back_m": 0.0, "nearest_m": None, "kappa": 0.0, "turn_left_ok": False,
                    "turn_right_ok": False, "free_by_heading": [], "points": 0, "rejected": 0}
-        out = dict(res, stale=stale, age_s=None if res is None or t == 0 else round(now - t, 3),
+        with self.lock:
+            nd = list(getattr(self, "near_diag", []))
+            ndt = getattr(self, "near_diag_t", 0.0)
+        out = dict(res, near_diag=nd if now - ndt < 1.0 else [],
+                   stale=stale, age_s=None if res is None or t == 0 else round(now - t, 3),
                    footprint=list(self.box), diagonals=diagonals(), stop_margin=margin)
         f, b = res["front_m"], res["back_m"]
         out["forward_cap"] = round(min(3.0, braking_cap(f, margin, decel, latency)) if math.isfinite(f) else 3.0, 3)

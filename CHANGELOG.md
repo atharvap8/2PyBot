@@ -3,6 +3,24 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.2 — Motion-based LED ring
+
+- **Colour = state:**
+  - red = errors only (n red LEDs = code n; whole ring = fatal);
+  - violet + white heartbeat = gamepad connected, waiting for START;
+  - green = manual, blue = autopilot;
+  - violet marquee = climb mode;
+  - magenta = safety bubble limiting;
+  - amber blink = pushed.
+- **Motion = direction, faster with the stick:**
+  - forward: comets from both sides run into the front LED;
+  - reverse: comets run into the rear LED;
+  - turning: a comet sweeps the front half (left to right for a right turn).
+- **Climb:** every other LED lit, marching toward the travel direction.
+- **Holding:** breathing ring, a blinking front "eye", and a glow toward the tilt.
+- **Bubble diagnostics:** returns near the body are reported (`near_diag`) even while
+  scans are gated out, to find self-detection.
+
 ## 4.7.1 — Settings finally persist
 
 - Every boot logged `PL!,no NVS, using defaults` and every save failed. One NVS
