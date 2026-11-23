@@ -3,6 +3,40 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.0 — Bubble v2, readable LED ring, servo and wheel-speed fixes
+
+- **Bubble v2.**
+  - The Radxa now sends free distances, `BG,en,front,back,flags,age_ms`, on every
+    scan (~20 Hz) instead of precomputed speed caps.
+  - The controller computes the braking limit every cycle and subtracts its own
+    wheel travel since the scan, so a fast approach is limited by the distance
+    actually left.
+  - Tunable: BUBDEC (0.5 m/s²), BUBLAT (0.30 s), BUBMRG (0.05 m), BUBSTALE (300 ms).
+  - Footprint +1 cm on every side. The corridor follows the current arc while turning.
+  - Isolated single returns are ignored. Commanded turns into an obstacle are blocked.
+  - New `BB` telemetry shows the controller-side clearance and caps.
+- **LED ring.** Each state has its own colour and motion:
+  - waiting to arm: white front LED, blue breathing;
+  - holding: steady green with a bright front;
+  - driving: green arc; autopilot: blue arc;
+  - pushed (external disturbance): amber fast blink;
+  - bubble limiting: red arc front or back;
+  - self-uprighting: orange chase.
+  - **Error codes:** the number of red LEDs that flash. 1 motor link, 2 motor fault,
+    3 motor mode, 4 IMU, 5 waiting for Radxa, 6 maintenance, 7 no gamepad,
+    8 fell, 9 self-uprighting aborted.
+  - Fatal: the whole ring flashes red continuously.
+  - `LT,1` and `LT,2` orientation tests; the new LEDDIR parameter sets the ring direction.
+- **Servo.** Both servo lines are driven low from the first line of `setup()`. They
+  used to float for seconds until the payload started. The camera stick now has to
+  read centred after the gamepad connects before it can move the servos.
+- **Wheel speed.** Measured against when the motor was asked (its sample time)
+  rather than when the reply arrived. The arrival jitter, scaled by wheel speed,
+  made velocity noisy at high speed.
+- **Diagnostics.** `HF,<s>` starts a 100 Hz HV wheel/current stream.
+  `POST /api/debug/record` records raw controller lines. Boot-ROM noise is no
+  longer written to the controller log.
+
 ## 4.6.1 — No more false motor faults from corrupt RS485 frames
 
 - The "LEFT fault 0xD1 OVERHEAT" trip was a corrupt reply, not a hot motor. 0xD1

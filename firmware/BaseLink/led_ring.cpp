@@ -1,81 +1,70 @@
 /*
  * ============================================================
- *  led_ring.cpp — personality engine for the WS2812 ring
+ *  led_ring.cpp — status ring (WS2812, 16 LEDs)
  * ============================================================
- *  Priority (highest wins each frame):
- *    1. event overlay      fall = red ouch, arm = green wake sweep
- *    2. party              any gesture -> spinning rainbow
- *    3. vision brake       Cubie override while still rolling ->
- *                          urgent red double-pulse (hazard lights)
- *    4. shy                pushed off its spot -> pink blush on the
- *                          "cheeks" that fades as it walks back
- *    5. driving            arc of light pointing where it's going;
- *                          brighter + wider with speed, orange when
- *                          reversing, arc leans into the turn
- *    6. stiff hold         determined amber breathing (fast)
- *    7. balancing idle     calm cyan breathing + a random twinkle,
- *                          warm tint grows with tilt "effort"
- *    8. waiting for pickup armRequested but lying down -> green
- *                          "help me up" pulse at the front
- *    9. sleeping           slow drifting warm ember + occasional
- *                          sleepy double-blink
+ *  Every state has its own colour AND motion so it can be read from across
+ *  the room. Priority (highest wins each frame):
+ *
+ *   test          LT,1 / LT,2 orientation test patterns
+ *   FATAL         whole ring flashes red continuously (latched error)
+ *   ERROR n       n red LEDs from the front flash (1 per error code)
+ *   fall / arm    one-shot events (red flash / green sweep)
+ *   self-righting orange dots chasing round
+ *   gesture       rainbow
+ *   disturbance   amber fast blink on the side it was pushed toward
+ *   driving       arc toward travel; green = manual, blue = autopilot
+ *   holding       steady dim green ring, bright green front LED
+ *   stiff / climb steady amber / violet ring
+ *   bubble        red arc front/back while the bubble is limiting (overlay)
+ *   lift me       idle, arm requested, lying down: green pulse at the front
+ *   ready         idle: white front LED, slow blue breathing
  * ============================================================
  */
 
 #include "led_ring.h"
 #include <NeoPixelBus.h>
 
-// Send each complete frame from I2S1 DMA. The RMT backend streams through
-// interrupt-refilled memory, making it sensitive to interrupt latency once
-// Bluetooth and the balancing/motor loops are active.
+// Send each complete frame from I2S1 DMA (see original note: RMT is sensitive
+// to interrupt latency once Bluetooth and the motor loops are active).
 static NeoPixelBus<NeoGrbFeature, NeoEsp32I2s1Ws2812xMethod>
     ring(LED_RING_COUNT, LED_RING_PIN);
 
 static uint32_t lastFrameMs = 0;
 static uint8_t  eventActive = 0;
 static uint32_t eventT0     = 0;
-static bool     padWasOn    = false;
-static uint32_t padBlinkT0  = 0;
+static int      testMode    = 0;
 
-// float pixel buffer so effects can blend before quantizing
 static float fr[LED_RING_COUNT], fg[LED_RING_COUNT], fb[LED_RING_COUNT];
 
-static inline void clearF() {
-    for (int i = 0; i < LED_RING_COUNT; i++) fr[i] = fg[i] = fb[i] = 0;
-}
-static inline void addF(int i, float r, float g, float b) {
-    i = ((i % LED_RING_COUNT) + LED_RING_COUNT) % LED_RING_COUNT;
-    fr[i] += r; fg[i] += g; fb[i] += b;
-}
+static inline void clearF() { for (int i = 0; i < LED_RING_COUNT; i++) fr[i] = fg[i] = fb[i] = 0; }
+static inline int wrapI(int i) { return ((i % LED_RING_COUNT) + LED_RING_COUNT) % LED_RING_COUNT; }
+static inline void addF(int i, float r, float g, float b) { i = wrapI(i); fr[i] += r; fg[i] += g; fb[i] += b; }
+static inline void setF(int i, float r, float g, float b) { i = wrapI(i); fr[i] = r; fg[i] = g; fb[i] = b; }
 // angle in degrees (0 = robot FRONT, +90 = right side) -> LED index (float)
 static inline float angToLed(float deg) {
-    float per = 360.0f / LED_RING_COUNT;
-    float ofs = deg / per;
-    return P.ledFront + (LED_DIR_CW ? ofs : -ofs);
+    const float ofs = deg / (360.0f / LED_RING_COUNT);
+    return P.ledFront + (P.ledDir >= 0.0f ? ofs : -ofs);
 }
-// gaussian-ish arc centered on 'centerDeg', half-width in LEDs
+static inline int frontLed() { return wrapI((int)lroundf(angToLed(0))); }
+// the k-th LED clockwise (seen from above) from the front
+static inline int cwFromFront(int k) { return wrapI(frontLed() + (P.ledDir >= 0.0f ? k : -k)); }
 static void arc(float centerDeg, float halfLeds, float r, float g, float b) {
-    float c = angToLed(centerDeg);
+    const float c = angToLed(centerDeg);
     for (int i = 0; i < LED_RING_COUNT; i++) {
-        float d = fabsf(i - c);
-        d = fminf(d, LED_RING_COUNT - d);           // wraparound distance
+        float d = fabsf(i - fmodf(c + LED_RING_COUNT * 4.0f, (float)LED_RING_COUNT));
+        d = fminf(d, LED_RING_COUNT - d);
         if (d < halfLeds * 2.0f) {
-            float w = expf(-(d * d) / (halfLeds * halfLeds * 0.7f));
+            const float w = expf(-(d * d) / (halfLeds * halfLeds * 0.7f));
             addF(i, r * w, g * w, b * w);
         }
     }
 }
-static void fillAll(float r, float g, float b) {
-    for (int i = 0; i < LED_RING_COUNT; i++) addF(i, r, g, b);
-}
-static void showF() {
-    float cap = P.ledBright;
-    for (int i = 0; i < LED_RING_COUNT; i++) {
-        ring.SetPixelColor(i, RgbColor(
-            (uint8_t)fminf(fr[i] * cap, cap),
-            (uint8_t)fminf(fg[i] * cap, cap),
-            (uint8_t)fminf(fb[i] * cap, cap)));
-    }
+static void fillAll(float r, float g, float b) { for (int i = 0; i < LED_RING_COUNT; i++) addF(i, r, g, b); }
+static void showF(float capScale = 1.0f) {
+    const float cap = P.ledBright * capScale;
+    for (int i = 0; i < LED_RING_COUNT; i++)
+        ring.SetPixelColor(i, RgbColor((uint8_t)fminf(fr[i] * cap, cap), (uint8_t)fminf(fg[i] * cap, cap),
+                                       (uint8_t)fminf(fb[i] * cap, cap)));
     ring.Show();
 }
 static void hsv(float h, float s, float v, float& r, float& g, float& b) {
@@ -94,17 +83,16 @@ static void hsv(float h, float s, float v, float& r, float& g, float& b) {
 void leds_begin() {
     digitalWrite(LED_RING_PIN, LOW);
     pinMode(LED_RING_PIN, OUTPUT);
-    delay(1); // reset/latch any partial frame left by the previous application
+    delay(1);
     ring.Begin();
     clearF(); showF();
-    delay(1); // finish the complete black frame before the original boot swirl
-    // boot swirl: one rainbow lap, ~0.5 s, blocking is fine in setup()
-    for (int t = 0; t < LED_RING_COUNT * 2; t++) {
+    delay(1);
+    for (int t = 0; t < LED_RING_COUNT * 2; t++) {          // boot swirl, ~0.5 s
         clearF();
         for (int i = 0; i < LED_RING_COUNT; i++) {
             float r, g, b;
             hsv((i * 360.0f / LED_RING_COUNT) + t * 20.0f, 1.0f, 0.5f, r, g, b);
-            float fade = 0.15f + 0.85f * ((i + t) % LED_RING_COUNT) / (float)LED_RING_COUNT;
+            const float fade = 0.15f + 0.85f * ((i + t) % LED_RING_COUNT) / (float)LED_RING_COUNT;
             addF(i, r * fade, g * fade, b * fade);
         }
         showF();
@@ -114,153 +102,147 @@ void leds_begin() {
 }
 
 void leds_event(uint8_t ev) { eventActive = ev; eventT0 = millis(); }
+void leds_test(int mode) { testMode = mode; }
+
+void leds_fatalFlash() {
+    if (!ring.CanShow()) return;
+    clearF();
+    if ((millis() / 150) % 2 == 0) fillAll(1.0f, 0.0f, 0.0f);
+    showF();
+}
+
+// ---- test patterns (physical LED indices, independent of LEDFRONT/LEDDIR) ----
+static void drawTest(int mode, uint32_t now) {
+    clearF();
+    if (mode == 1) {
+        // Colour compass: LED 0 white, LED 1 dim yellow (shows counting direction),
+        // LED 4 red, LED 8 green, LED 12 blue.
+        setF(0, 1.0f, 1.0f, 1.0f);
+        setF(1, 0.35f, 0.30f, 0.0f);
+        setF(LED_RING_COUNT / 4, 1.0f, 0.0f, 0.0f);
+        setF(LED_RING_COUNT / 2, 0.0f, 1.0f, 0.0f);
+        setF(3 * LED_RING_COUNT / 4, 0.0f, 0.0f, 1.0f);
+    } else if (mode == 2) {
+        // Configured orientation: front white (blinking), right side green, back red.
+        if ((now / 400) % 2 == 0) arc(0.0f, 0.6f, 1.0f, 1.0f, 1.0f);
+        arc(90.0f, 0.6f, 0.0f, 1.0f, 0.0f);
+        arc(180.0f, 0.6f, 1.0f, 0.0f, 0.0f);
+    }
+    showF();
+}
 
 void leds_update(const LedInputs& in) {
-    uint32_t now = millis();
+    const uint32_t now = millis();
     if (now - lastFrameMs < (uint32_t)(1000.0f / (P.ledFps < 1 ? 1 : P.ledFps))) return;
-    if (!ring.CanShow()) return; // skip a busy frame rather than stall control
+    if (!ring.CanShow()) return;                     // skip a busy frame rather than stall control
     lastFrameMs = now;
-    float t = now / 1000.0f;
+    const float t = now / 1000.0f;
+
+    if (testMode) { drawTest(testMode, now); return; }
     clearF();
 
-    // pad connect greeting: two quick green winks (overlay, non-exclusive)
-    if (in.padConnected && !padWasOn) padBlinkT0 = now;
-    padWasOn = in.padConnected;
-    bool greeting = (now - padBlinkT0) < 600 && padBlinkT0 != 0;
-
-    // ---------- 1. one-shot events ----------
-    if (eventActive) {
-        float e = (now - eventT0) / 1000.0f;
-        if (eventActive == LED_EV_FALL) {
-            if (e < 1.4f) {
-                float flash = (e < 0.25f) ? 1.0f : expf(-(e - 0.25f) * 3.0f);
-                float wobble = 0.75f + 0.25f * sinf(t * 40.0f);
-                fillAll(flash * wobble, 0.02f * flash, 0.0f);
-                showF(); return;
-            }
-            eventActive = 0;
-        } else if (eventActive == LED_EV_ARM) {
-            if (e < 0.6f) {
-                float sweep = e / 0.6f * 360.0f;
-                arc(sweep, 2.5f, 0.1f, 1.0f, 0.25f);
-                arc(-sweep, 2.5f, 0.1f, 1.0f, 0.25f);
-                showF(); return;
-            }
-            eventActive = 0;
-        } else if (eventActive == LED_EV_SPEED_HI) {
-            if (e < 0.45f) {
-                // two fast blue laps racing forward — "sport mode"
-                float sweep = e / 0.45f * 720.0f;
-                arc(sweep, 2.0f, 0.15f, 0.45f, 1.0f);
-                showF(); return;
-            }
-            eventActive = 0;
-        } else if (eventActive == LED_EV_SPEED_LO) {
-            if (e < 0.45f) {
-                // wide green arc calmly contracting to the front — "easy mode"
-                float k = 1.0f - e / 0.45f;
-                arc(0.0f, 1.5f + 6.0f * k, 0.05f + 0.10f * k, 0.60f, 0.15f);
-                showF(); return;
-            }
-            eventActive = 0;
-        } else eventActive = 0;
+    // ---------- FATAL: continuous whole-ring red flash ----------
+    if (in.fatal) {
+        if ((now / 150) % 2 == 0) fillAll(1.0f, 0.0f, 0.0f);
+        showF(); return;
     }
 
-    // ---------- 2. party (any gesture) ----------
+    // ---------- one-shot events ----------
+    if (eventActive) {
+        const float e = (now - eventT0) / 1000.0f;
+        if (eventActive == LED_EV_FALL && e < 1.0f) {
+            fillAll((e < 0.2f || (e > 0.4f && e < 0.6f)) ? 1.0f : 0.0f, 0.0f, 0.0f);
+            showF(); return;
+        } else if (eventActive == LED_EV_ARM && e < 0.6f) {
+            const float sweep = e / 0.6f * 180.0f;
+            arc(sweep, 1.5f, 0.0f, 1.0f, 0.1f); arc(-sweep, 1.5f, 0.0f, 1.0f, 0.1f);
+            showF(); return;
+        } else if (eventActive == LED_EV_SPEED_HI && e < 0.45f) {
+            arc(e / 0.45f * 720.0f, 2.0f, 0.15f, 0.45f, 1.0f);
+            showF(); return;
+        } else if (eventActive == LED_EV_SPEED_LO && e < 0.45f) {
+            const float k = 1.0f - e / 0.45f;
+            arc(0.0f, 1.5f + 6.0f * k, 0.05f + 0.10f * k, 0.60f, 0.15f);
+            showF(); return;
+        } else if ((eventActive == LED_EV_FALL && e >= 1.0f) || (eventActive != LED_EV_FALL && e >= 0.6f)) {
+            eventActive = 0;
+        }
+    }
+
+    // ---------- ERROR n: n red LEDs from the front, flashing ----------
+    // Not shown while balancing: a robot that is holding itself up shows that instead.
+    if (in.errorCode && !in.balancing && !in.selfRighting) {
+        const bool on = (now % 1400) < 700;                       // 0.7 s on / 0.7 s off
+        for (int k = 0; k < in.errorCode && k < LED_RING_COUNT; k++)
+            if (on) setF(cwFromFront(k), 1.0f, 0.0f, 0.0f);
+        if (!on) setF(frontLed(), 0.06f, 0.06f, 0.06f);           // keep the front visible
+        showF(); return;
+    }
+
+    // ---------- self-uprighting: orange chase ----------
+    if (in.selfRighting) {
+        const float a = fmodf(t * 540.0f, 360.0f);
+        arc(a, 1.0f, 1.0f, 0.35f, 0.0f); arc(a + 180.0f, 1.0f, 1.0f, 0.35f, 0.0f);
+        showF(); return;
+    }
+
+    // ---------- gesture: rainbow ----------
     if (in.gestActive) {
         for (int i = 0; i < LED_RING_COUNT; i++) {
-            float r, g, b;
-            hsv(i * 360.0f / LED_RING_COUNT + t * 240.0f, 1.0f, 0.9f, r, g, b);
-            addF(i, r, g, b);
+            float r, g, b; hsv(i * 360.0f / LED_RING_COUNT + t * 240.0f, 1.0f, 0.9f, r, g, b); addF(i, r, g, b);
         }
         showF(); return;
     }
 
-    bool driving = fabsf(in.fwd) > P.driveDb || fabsf(in.steer) > P.steerDb;
+    const bool driving = fabsf(in.fwd) > P.driveDb || fabsf(in.steer) > P.steerDb || in.autopilot;
 
-    // ---------- 3. vision brake (Cubie override while rolling) ----------
-    if (in.radxaFresh && in.balancing && !driving && fabsf(in.velF) > 0.10f) {
-        float pulse = (sinf(t * 18.0f) > 0.2f) ? 1.0f : 0.15f;
-        fillAll(pulse, pulse * 0.12f, 0.0f);
-        showF(); return;
-    }
-
-    // ---------- 3c. climb mode: violet breathing + grip dots ----------
-    // Must sit above "shy": climb-mode tracking lag routinely exceeds
-    // the blush threshold and that's effort, not embarrassment.
-    if (in.balancing && in.climbMode) {
-        float b = 0.30f + 0.25f * sinf(t * 4.0f);
-        fillAll(b * 0.45f, b * 0.08f, b * 0.80f);          // violet base
-        // grip dots crawl the way the ramp reference moves:
-        // back->front climbing forward, front->back descending
-        float m = fmodf(t * 150.0f, 180.0f);
-        float crawl = (in.fwd < -0.02f) ? m : 180.0f - m;
-        arc( crawl, 1.2f, 0.50f, 0.15f, 0.90f);            // mirrored grip
-        arc(-crawl, 1.2f, 0.50f, 0.15f, 0.90f);            // dots "pulling"
-        if (greeting) fillAll(0.0f, 0.15f, 0.03f);
-        showF(); return;
-    }
-
-    // ---------- 4. shy (pushed off the hold point) ----------
-    if (in.balancing && !driving && fabsf(in.ex) > 0.045f) {
-        float howFar = fminf(fabsf(in.ex) / P.exClamp, 1.0f);
-        float blush = 0.35f + 0.65f * (0.5f + 0.5f * sinf(t * 9.0f));
-        float wiggle = sinf(t * 5.0f) * 25.0f;                 // averted "eyes"
-        arc( 90.0f + wiggle, 2.2f, blush * howFar, blush * 0.18f * howFar, blush * 0.28f * howFar);
-        arc(-90.0f - wiggle, 2.2f, blush * howFar, blush * 0.18f * howFar, blush * 0.28f * howFar);
-        // faint white "looking away" dot opposite the displacement
-        arc(in.ex > 0 ? 180.0f : 0.0f, 1.0f, 0.12f, 0.12f, 0.12f);
-        showF(); return;
-    }
-
-    // ---------- 5. driving: heading arc ----------
-    if (in.balancing && driving) {
-        float mag = fminf(sqrtf(in.fwd * in.fwd + in.steer * in.steer), 1.0f);
-        float headDeg = atan2f(in.steer, in.fwd) * 180.0f / PI;  // 0 front, +90 right
-        float width = 1.6f + 3.0f * mag;
-        bool reversing = in.fwd < -P.driveDb;
-        float bri = 0.25f + 0.75f * mag;
-        if (reversing) arc(headDeg, width, bri, bri * 0.25f, 0.0f);        // amber tail
-        else           arc(headDeg, width, bri * 0.15f, bri * 0.75f, bri); // cyan-white beam
-        // speed sparkles trailing the arc
-        if (fabsf(in.velF) > 0.25f && (now / 90) % 3 == 0)
-            arc(headDeg + 180.0f, 0.8f, 0.10f, 0.10f, 0.12f);
-        if (greeting) fillAll(0.0f, 0.15f, 0.03f);
-        showF(); return;
-    }
-
-    // ---------- 6. stiff hold: determined amber ----------
-    if (in.balancing && in.stiffHold) {
-        float b = 0.45f + 0.35f * sinf(t * 6.0f);
-        fillAll(b, b * 0.45f, 0.0f);
-        showF(); return;
-    }
-
-    // ---------- 7. balancing idle: calm breathing + twinkle ----------
     if (in.balancing) {
-        float breath = 0.10f + 0.14f * (0.5f + 0.5f * sinf(t * 1.6f));
-        float effort = fminf(fabsf(in.pitchF) / 8.0f, 1.0f);   // warm tint with tilt
-        fillAll(breath * (0.15f + 0.85f * effort),
-                breath * (0.55f + 0.15f * (1 - effort)),
-                breath * (0.85f * (1 - effort)));
-        if ((now / 130) % 23 == (uint32_t)(LED_RING_COUNT * 1.3f) % 23)   // rare twinkle
-            addF(now / 130 % LED_RING_COUNT, 0.5f, 0.5f, 0.6f);
-        if (greeting) { arc(0, 2.0f, 0.0f, 0.8f, 0.15f); }
+        // ---------- external disturbance: amber fast blink toward the push ----------
+        const bool pushed = !driving && (fabsf(in.ex) > 0.05f || fabsf(in.rateF) > 60.0f);
+        if (pushed) {
+            const bool on = (now % 250) < 125;
+            if (on) {
+                // ex = pos - hold point: > 0 means pushed forward
+                arc(in.ex >= 0 ? 0.0f : 180.0f, 3.0f, 1.0f, 0.45f, 0.0f);
+            }
+            showF(); return;
+        }
+        if (driving) {
+            // ---------- driving: arc toward travel, green manual / blue autopilot ----------
+            const float mag = fminf(sqrtf(in.fwd * in.fwd + in.steer * in.steer), 1.0f);
+            // steer > 0 turns left (CCW): arc leans left = negative angle
+            const float headDeg = in.fwd < -P.driveDb ? 180.0f - atan2f(-in.steer, -in.fwd) * 57.2958f
+                                                     : -atan2f(in.steer, fmaxf(in.fwd, 0.05f)) * 57.2958f;
+            const float bri = 0.35f + 0.65f * mag;
+            if (in.autopilot) { fillAll(0.0f, 0.0f, 0.06f); arc(headDeg, 1.8f + 2.0f * mag, 0.05f * bri, 0.35f * bri, bri); }
+            else              { fillAll(0.0f, 0.05f, 0.0f); arc(headDeg, 1.8f + 2.0f * mag, 0.10f * bri, bri, 0.25f * bri); }
+        } else if (in.climbMode) {
+            fillAll(0.30f, 0.0f, 0.55f);                           // steady violet
+            setF(frontLed(), 0.7f, 0.2f, 1.0f);
+        } else if (in.stiffHold) {
+            fillAll(0.45f, 0.18f, 0.0f);                           // steady amber
+            setF(frontLed(), 1.0f, 0.5f, 0.0f);
+        } else {
+            // ---------- holding pose: steady green, bright front ----------
+            fillAll(0.0f, 0.10f, 0.0f);
+            setF(frontLed(), 0.0f, 1.0f, 0.1f);
+        }
+        // ---------- bubble overlay: red arc where it is limiting ----------
+        if (in.bubbleFront) arc(0.0f, 1.6f, 1.0f, 0.0f, 0.0f);
+        if (in.bubbleBack)  arc(180.0f, 1.6f, 1.0f, 0.0f, 0.0f);
         showF(); return;
     }
 
-    // ---------- 8. waiting to be stood up ----------
+    // ---------- idle, arm requested but lying down: "lift me" ----------
     if (in.armRequested) {
-        float p = 0.15f + 0.5f * (0.5f + 0.5f * sinf(t * 3.5f));
-        arc(0.0f, 2.5f, 0.05f * p, p, 0.2f * p);   // green "lift me!" at the front
+        const float p = 0.15f + 0.85f * (0.5f + 0.5f * sinf(t * 5.0f));
+        arc(0.0f, 2.0f, 0.0f, p, 0.15f * p);
         showF(); return;
     }
 
-    // ---------- 9. sleeping ----------
-    float drift = fmodf(t * 18.0f, 360.0f);        // slow wandering ember
-    arc(drift, 1.4f, 0.10f, 0.045f, 0.0f);
-    float zz = fmodf(t, 6.0f);                      // sleepy double-blink
-    if (zz < 0.12f || (zz > 0.25f && zz < 0.37f)) fillAll(0.05f, 0.03f, 0.0f);
-    if (greeting) fillAll(0.0f, 0.10f, 0.02f);
+    // ---------- idle and ready: waiting for arm ----------
+    const float breath = 0.04f + 0.08f * (0.5f + 0.5f * sinf(t * 1.6f));
+    fillAll(0.0f, breath * 0.3f, breath);
+    setF(frontLed(), 0.6f, 0.6f, 0.6f);
     showF();
 }

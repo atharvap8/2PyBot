@@ -84,6 +84,8 @@ class SerialLink:
         }
         self.debug = {}                       # latest D-line fields
         self.hub = {}                         # HM: raw motor feedback + forward-frame commands
+        self.bubble = {}                      # BB: controller-side safety bubble
+        self._rec = None; self._rec_until = 0.0; self._rec_path = None
         self.path = collections.deque(maxlen=3000)   # (x, y) for the map
         self._pose = [0.0, 0.0, 0.0]          # x, y, theta (rad)
         self._prev_enc = None
@@ -295,6 +297,12 @@ class SerialLink:
 
     # ---------------- inbound ----------------
     def _log(self, text):
+        if text.count("\ufffd") > 4:
+            # ESP32 boot ROM output at 115200 read at our baud: keep only the
+            # real message that follows the garbage (e.g. "[BOOT] Reset reason").
+            tail = text[text.rfind("\ufffd") + 1:]
+            start = tail.find("[")
+            text = tail[start:] if start >= 0 else "[console] (boot ROM noise dropped)"
         self.log.append({"t": time.time(), "text": text})
         if not text.startswith("[PAD] btn="):          # button-state chatter is not worth keeping
             CONTROLLER_LOG.info(text)
@@ -364,9 +372,47 @@ class SerialLink:
                 fn(line,t)
             except Exception:
                 pass
+    # ---------------- raw recorder (diagnostics) ----------------
+    def record_start(self, seconds, label="rec"):
+        """Write every raw controller line with a host timestamp for `seconds`."""
+        seconds = max(1.0, min(120.0, float(seconds)))
+        directory = os.environ.get("BOT_LOG_DIR", "/var/lib/2pybot/logs")
+        os.makedirs(directory, exist_ok=True)
+        safe = "".join(ch for ch in str(label) if ch.isalnum() or ch in "-_")[:40] or "rec"
+        path = os.path.join(directory, time.strftime(f"{safe}-%Y%m%d-%H%M%S.log"))
+        self.record_stop()
+        self._rec = open(path, "w", buffering=1 << 16)
+        self._rec_until = time.monotonic() + seconds
+        self._rec_path = path
+        self._log(f"[console] recording raw controller lines for {seconds:.0f} s -> {path}")
+        return path
+
+    def record_stop(self):
+        rec = getattr(self, "_rec", None)
+        self._rec = None
+        if rec:
+            try:rec.close()
+            except OSError:pass
+
+    def record_status(self):
+        active = getattr(self, "_rec", None) is not None
+        return {"active": active, "path": getattr(self, "_rec_path", None),
+                "remaining_s": round(max(0.0, self._rec_until - time.monotonic()), 1) if active else 0}
+
+    def _record(self, line):
+        rec = getattr(self, "_rec", None)
+        if rec is None:
+            return
+        if time.monotonic() > self._rec_until:
+            self.record_stop()
+            return
+        try:rec.write(f"{time.monotonic():.4f} {line}\n")
+        except OSError:self.record_stop()
+
     def _handle(self, line: str):
         if not line:
             return
+        self._record(line)
         self._mirror(line)
         try:
             if line.startswith("AN!,") or line.startswith("AN?,"):
@@ -442,6 +488,17 @@ class SerialLink:
                 self._publish({"type":"self_righting","status":status})
                 return
 
+            if line.startswith("BB,"):
+                # controller-side bubble: clearance dead-reckoned between scans, live caps
+                fields=line.split(",")[1:]
+                if len(fields)!=9:return
+                try:values=[float(v) for v in fields]
+                except ValueError:return
+                self.bubble=dict(zip(("ms","front_m","back_m","fwd_cap","rev_cap","limiting","flags","velocity","bg_age_ms"),values))
+                self.bubble["received_monotonic"]=time.monotonic()
+                return
+            if line.startswith("HV,"):
+                return                                    # fast diagnostic stream: recorder/listeners only
             if line.startswith("HM,"):
                 fields=line.split(",")[1:]
                 if len(fields) not in (14,16):return

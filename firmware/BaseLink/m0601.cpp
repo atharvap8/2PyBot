@@ -81,6 +81,10 @@ void M0601Port::decode(const uint8_t* f) {
     else if (pending == DRIVE) {
         feedback.pos16 = (uint16_t)((f[6] << 8) | f[7]);
         feedback.posValid = true; ++feedback.posFrames;
+        // The driver samples position when it handles the request, so the
+        // request send time is the sample time. Reply arrival jitters with
+        // UART/loop timing and, scaled by wheel speed, made velocity noisy.
+        feedback.sampleUs = sentUs;
     } // AMBIGUOUS: DRIVE/QUERY layout unknown, keep common fields only
     const uint8_t raw = f[8];
     feedback.rawFault = raw;

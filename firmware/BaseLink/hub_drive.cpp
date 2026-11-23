@@ -43,7 +43,7 @@ void HubDrive::serviceWheel(HubWheel& w) {
     const auto& fb = w.port->fb();
     w.modeOk = fb.frames && fb.mode == wantedMode() && millis() - fb.rxMs < HUB_LINK_TIMEOUT_MS;
     if (fb.posFrames == w.positionFrames) return;
-    const uint32_t now = micros();
+    const uint32_t now = fb.sampleUs ? fb.sampleUs : micros();   // position sample time
     if (!w.initialized) { w.previousPosition = fb.pos16; w.initialized = true; w.lastPositionUs = now; }
     int32_t delta = (int32_t)fb.pos16 - w.previousPosition;
     if (delta > 16383) delta -= 32767;

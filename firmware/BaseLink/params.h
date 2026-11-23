@@ -184,7 +184,14 @@
   X(dropG,     "DROPG",   0.55f,               0.10f,  0.95f,"TERRAIN", "free-fall threshold (g)")   \
   X(dropMs,    "DROPMS",  35.0f,               5.0f,  300.0f,"TERRAIN", "airborne confirm time (ms)")\
   X(landMs,    "LANDMS",  350.0f,             50.0f, 2000.0f,"TERRAIN", "soft-gain hold after landing (ms)")\
-  X(airFreeze, "AIRFRZ",  1.0f,                0.0f,   1.0f, "TERRAIN", "freeze integrator while airborne")
+  X(airFreeze, "AIRFRZ",  1.0f,                0.0f,   1.0f, "TERRAIN", "freeze integrator while airborne")\
+  /* ---------- lidar safety bubble (BG) ---------- */                         \
+  X(bubDecel,  "BUBDEC",  0.50f,               0.10f,  3.0f, "BUBBLE",  "braking decel assumed (m/s^2)")\
+  X(bubLat,    "BUBLAT",  0.30f,               0.0f,   1.0f, "BUBBLE",  "balance braking delay (s)")\
+  X(bubMargin, "BUBMRG",  0.05f,               0.0f,   0.30f,"BUBBLE",  "stop this far from the body (m)")\
+  X(bubStale,  "BUBSTALE",300.0f,             60.0f, 1000.0f,"BUBBLE",  "fail closed after no BG (ms)")\
+  /* ---------- ring orientation ---------- */                               \
+  X(ledDir,    "LEDDIR",  LED_DIR_CW ? 1.0f : -1.0f, -1.0f, 1.0f, "LED", "+1: index grows clockwise seen from above")
 
 // ============================================================
 //  Struct, defaults, metadata

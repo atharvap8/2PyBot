@@ -238,6 +238,33 @@ async def autonomy_mission_status():
             "bubble":bubble_guard.status()}
 
 
+class RecordInput(BaseModel):
+    seconds: float = 20
+    label: str = "rec"
+    fast: bool = True               # also ask the controller for the 100 Hz HV stream
+
+
+@app.post("/api/debug/record")
+def debug_record(body: RecordInput):
+    path=link.record_start(body.seconds,body.label)
+    if body.fast:link.send(f"HF,{int(min(60,max(1,body.seconds)))}")
+    return {"ok":True,"path":path}
+
+
+@app.get("/api/debug/record")
+def debug_record_status():return link.record_status()
+
+
+class LedTestInput(BaseModel):
+    mode: int                       # 0 off, 1 colour compass, 2 configured front
+
+
+@app.post("/api/led/test")
+def led_test(body: LedTestInput):
+    if body.mode not in (0,1,2):raise HTTPException(400,"mode must be 0, 1 or 2")
+    return {"ok":bool(link.send(f"LT,{body.mode}"))}
+
+
 class BubbleInput(BaseModel):
     enabled: bool
 

@@ -41,6 +41,7 @@ struct M0601Feedback {
     uint16_t pos16 = 0;
     bool posValid = false;
     uint32_t rxMs = 0, frames = 0, posFrames = 0, crcErrors = 0, dropped = 0, timeouts = 0;
+    uint32_t sampleUs = 0;                // send time of the request that produced pos16
     uint32_t implausible = 0;             // CRC passed but content impossible (rejected)
     uint32_t transientFaults = 0;         // fault byte seen but not confirmed (ignored)
     uint8_t lastFrame[10] = {};           // last decoded reply, printed with fault reports

@@ -263,7 +263,17 @@ class SlamEngine:
         near = r <= self._floor_limit(a, tilt, spread)
         a, r = a[near], r[near]
         pts = np.c_[c["lidar_x"] + r * np.cos(a), c["lidar_y"] + r * np.sin(a)]
-        self.bubble.update(pts, scan["t1"])
+        # current speed / yaw rate from wheel+gyro odometry (last ~0.2 s) for the arc corridor
+        v = w = 0.0
+        with self.lock:
+            h = list(self.odom_hist)[-12:]
+        if len(h) >= 2 and h[-1][0] - h[0][0] > 0.05:
+            dt = h[-1][0] - h[0][0]
+            dth = math.atan2(math.sin(h[-1][3] - h[0][3]), math.cos(h[-1][3] - h[0][3]))
+            fwd = (h[-1][1] - h[0][1]) * math.cos(h[-1][3]) + (h[-1][2] - h[0][2]) * math.sin(h[-1][3])
+            v, w = fwd / dt, dth / dt
+        # t0 = oldest point in the sweep: the controller subtracts travel since then (conservative)
+        self.bubble.update(pts, scan["t0"], v, w)
         with self.lock:
             self.bubble_pts = pts
 

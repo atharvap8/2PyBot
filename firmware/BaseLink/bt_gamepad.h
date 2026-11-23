@@ -106,17 +106,21 @@ static float        _cx = 0.0f, _cy = 0.0f;    // left-stick centre offsets
 static float        _crx = 0.0f, _cry = 0.0f;  // right-stick centre offsets
 static bool         _calDone     = false;
 static bool         _freshConnect = true;      // swallow edges on frame 1
+static bool         _camArmed     = false;     // camera stick accepted only after reading centred
+static uint32_t     _camNeutralSince = 0;
 
 
 
 static void _onPadConnect(ControllerPtr ctl) {
     _pad = ctl;
     _freshConnect = true;
+    _camArmed = false; _camNeutralSince = 0;
     Serial.printf("[PAD] Connected: %s\n", ctl->getModelName().c_str());
 }
 static void _onPadDisconnect(ControllerPtr ctl) {
     _calDone = false;
     _freshConnect = true;
+    _camArmed = false; _camNeutralSince = 0;
     if (_pad == ctl) _pad = nullptr;
     Serial.println("[PAD] Disconnected — inputs zeroed, balance continues");
 }
@@ -263,6 +267,16 @@ inline void btgamepad_update() {
     _shapeStick(rawX, rawY, false, &fwdNorm, &steerNorm); // direct steering: no cardinal-snap suppression
     // RIGHT stick is the camera; snap keeps a pure pan from creeping the zoom
     _shapeStick(rawRX, rawRY, true, &zoomNorm, &panNorm, P.camExpo);
+    // Camera stick is rate control: a bogus first report (or a pad that comes
+    // up in another axis mode) would run the yaw servo to its end stop. Only
+    // accept it after it has read centred for 300 ms since this connection.
+    if (!_camArmed) {
+        if (panNorm == 0.0f && zoomNorm == 0.0f) {
+            if (!_camNeutralSince) _camNeutralSince = millis();
+            else if (millis() - _camNeutralSince > 300) { _camArmed = true; Serial.println("[PAD] camera stick live"); }
+        } else _camNeutralSince = 0;
+        panNorm = zoomNorm = 0.0f;
+    }
     joyPanX  = panNorm  * P.padYawSgn;
     joyZoomY = zoomNorm * P.padZoomSgn;
 #else
