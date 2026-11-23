@@ -212,7 +212,7 @@ let scene3dKey = "", scene3dAt = 0, scene3dBusy = false;
 async function update3d(force) {
   if (view !== "3d" || !s3d || !S) return;
   s3d.setPose(S.pose);
-  const key = `${S.map_version}/${(S.tof || {}).voxel_version}`;
+  const key = `${S.map_version}`;
   const now = Date.now();
   if (scene3dBusy || (!force && (key === scene3dKey || now - scene3dAt < 2500))) return;
   scene3dBusy = true; scene3dAt = now;
@@ -220,7 +220,7 @@ async function update3d(force) {
     const sc = await (await fetch(base + "api/scene3d")).json();
     s3d.setScene(sc); scene3dKey = key;
     const st = s3d.stats();
-    $("stat3d").textContent = `${st.walls} wall cells · ${st.voxels} ToF voxels`;
+    $("stat3d").textContent = `${st.walls} wall · ${st.floor} floor cells`;
   } catch (e) { /* the next state message retries */ }
   scene3dBusy = false;
 }
@@ -232,7 +232,7 @@ function setView(v) {
   if (s3d) s3d.show(v === "3d");
   $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
     : v === "radar" ? "Live scan around the robot (top = front)"
-    : "Drag to orbit · two fingers or right-drag to pan · pinch or scroll to zoom";
+    : "45° corner view · drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
   if (v === "3d") update3d(true); else resize();
 }
 $("v-map").onclick = () => setView("map");

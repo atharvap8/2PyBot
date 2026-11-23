@@ -1,4 +1,5 @@
-// 3D map view: lidar walls (extruded to the scan-plane height) + ToF voxels.
+// Tilted map view: the 2D lidar map seen from a top corner at 45 degrees,
+// walls raised slightly, floor tiles flat.
 // Self-contained WebGL1 + ANGLE_instanced_arrays; renders only when something
 // changes, so an idle page costs no GPU time. Exposes window.Slam3D.
 (function () {
@@ -36,8 +37,8 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
   const hex = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
-  const C_WALL = hex("#aba196"), C_FLOOR = hex("#3a322b"), C_DROP = hex("#ff4d6d"),
-        C_LOW = hex("#f08a4b"), C_HIGH = hex("#f0d24b"), C_BOT = hex("#f08a4b");
+  const C_WALL = hex("#efe9e3"), C_FLOOR = hex("#2e2823"), C_BOT = hex("#f08a4b");
+  const WALL_H = 0.175;                  // visual wall height (3.5 map cells)
 
   function create(canvas) {
     const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
@@ -54,35 +55,32 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
     const u = { mvp: gl.getUniformLocation(P, "uMVP"), size: gl.getUniformLocation(P, "uSize"),
       lmvp: gl.getUniformLocation(L, "uMVP"), lcol: gl.getUniformLocation(L, "uCol") };
     const cube = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, cube); gl.bufferData(gl.ARRAY_BUFFER, cubeGeometry(), gl.STATIC_DRAW);
-    const sets = { walls: { buf: gl.createBuffer(), n: 0, size: 0.05 }, vox: { buf: gl.createBuffer(), n: 0, size: 0.05 },
+    const sets = { floor: { buf: gl.createBuffer(), n: 0, size: 0.05 }, walls: { buf: gl.createBuffer(), n: 0, size: 0.05 },
       bot: { buf: gl.createBuffer(), n: 0, size: 0.16 } };
     const lines = { grid: { buf: gl.createBuffer(), n: 0 }, path: { buf: gl.createBuffer(), n: 0 } };
-    const cam = { yaw: -0.9, pitch: 0.75, dist: 6, tx: 0, ty: 0, follow: true };
+    const cam = { yaw: -2.356, pitch: 0.785, dist: 7, tx: 0, ty: 0, follow: true };   // 45 deg, low-x/low-y corner
     let pose = [0, 0, 0], dirty = true, raf = 0, visible = false;
 
     function upload(set, data) { gl.bindBuffer(gl.ARRAY_BUFFER, set.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); set.n = data.length / 7; }
     function uploadLine(l, data) { gl.bindBuffer(gl.ARRAY_BUFFER, l.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); l.n = data.length / 3; }
 
     function setScene(sc) {
-      const r = sc.grid_res, o = sc.grid_origin, h = sc.wall_height, w = new Float32Array(sc.walls.length * 7);
-      sc.walls.forEach((c, i) => w.set([o + c[0] * r, o + c[1] * r, 0, h, ...C_WALL], i * 7));
+      const r = sc.grid_res, o = sc.grid_origin;
+      const f = new Float32Array(sc.floor.length * 7);
+      sc.floor.forEach((c, i) => f.set([o + c[0] * r, o + c[1] * r, 0, 0.004, ...C_FLOOR], i * 7));
+      sets.floor.size = r; upload(sets.floor, f);
+      const w = new Float32Array(sc.walls.length * 7);
+      sc.walls.forEach((c, i) => w.set([o + c[0] * r, o + c[1] * r, 0, WALL_H, ...C_WALL], i * 7));
       sets.walls.size = r; upload(sets.walls, w);
-      const vr = sc.voxel_res, v = new Float32Array(sc.voxels.length * 7);
-      sc.voxels.forEach((q, i) => {
-        const z = q[2] * vr, col = z < -0.06 ? C_DROP : Math.abs(z + vr / 2) <= 0.04 ? C_FLOOR
-          : C_LOW.map((x, k) => x + (C_HIGH[k] - x) * Math.min(1, Math.max(0, z / 0.6)));
-        v.set([q[0] * vr, q[1] * vr, z, vr, ...col], i * 7); });
-      sets.vox.size = vr; upload(sets.vox, v);
-      uploadLine(lines.path, new Float32Array(sc.path.flatMap((p) => [p[0], p[1], 0.01])));
-      if (!lines.grid.n) { const g = []; for (let i = -20; i <= 20; i++) g.push(i, -20, 0, i, 20, 0, -20, i, 0, 20, i, 0);
+      uploadLine(lines.path, new Float32Array(sc.path.flatMap((p) => [p[0], p[1], 0.012])));
+      if (!lines.grid.n) { const g = []; for (let i = -20; i <= 20; i++) g.push(i, -20, -0.001, i, 20, -0.001, -20, i, -0.001, 20, i, -0.001);
         uploadLine(lines.grid, new Float32Array(g)); }
       setPose(sc.pose);
-    }
-    function setPose(p) {
+    }    function setPose(p) {
       if (!p) return; pose = p;
       const s = sets.bot.size, c = Math.cos(p[2]), sn = Math.sin(p[2]);
-      upload(sets.bot, new Float32Array([p[0] - s / 2, p[1] - s / 2, 0, 0.35, ...C_BOT,
-        p[0] + c * 0.12 - 0.03, p[1] + sn * 0.12 - 0.03, 0.2, 0.06, 0.94, 0.94, 0.92]));
+      upload(sets.bot, new Float32Array([p[0] - s / 2, p[1] - s / 2, 0.005, 0.12, ...C_BOT,
+        p[0] + c * 0.13 - s / 2, p[1] + sn * 0.13 - s / 2, 0.005, 0.06, ...C_BOT]));
       if (cam.follow) { cam.tx = p[0]; cam.ty = p[1]; }
       request();
     }
@@ -104,7 +102,7 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
       gl.bindBuffer(gl.ARRAY_BUFFER, cube);
       gl.enableVertexAttribArray(a.pos); gl.vertexAttribPointer(a.pos, 3, gl.FLOAT, false, 24, 0);
       gl.enableVertexAttribArray(a.nrm); gl.vertexAttribPointer(a.nrm, 3, gl.FLOAT, false, 24, 12);
-      for (const set of [sets.walls, sets.vox, sets.bot]) {
+      for (const set of [sets.floor, sets.walls, sets.bot]) {
         if (!set.n) continue; gl.uniform1f(u.size, set.size); gl.bindBuffer(gl.ARRAY_BUFFER, set.buf);
         gl.enableVertexAttribArray(a.inst); gl.vertexAttribPointer(a.inst, 4, gl.FLOAT, false, 28, 0); inst.vertexAttribDivisorANGLE(a.inst, 1);
         gl.enableVertexAttribArray(a.col); gl.vertexAttribPointer(a.col, 3, gl.FLOAT, false, 28, 16); inst.vertexAttribDivisorANGLE(a.col, 1);
@@ -133,7 +131,7 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
     return { setScene, setPose, resize,
       show(v) { visible = v; if (v) resize(); },
       center() { cam.follow = true; setPose(pose); },
-      stats: () => ({ walls: sets.walls.n, voxels: sets.vox.n }) };
+      stats: () => ({ walls: sets.walls.n, floor: sets.floor.n }) };
   }
   window.Slam3D = { create };
 })();

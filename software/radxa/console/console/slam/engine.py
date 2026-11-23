@@ -477,25 +477,23 @@ class SlamEngine:
             "settings": self.cfg,
         }
 
-    def scene3d(self, max_walls=20000):
-        """Compact 3D scene: lidar wall cells (extruded in the viewer), ToF voxels,
-        robot pose and path. Integer cell indices keep the payload small."""
+    def scene3d(self, max_cells=40000):
+        """Tilted-map scene: the same 2D occupancy grid as wall and floor cells
+        (integer indices), robot pose and path. The viewer raises walls a little
+        and shows it from a 45-degree corner camera."""
         with self.lock:
             g = self.grid
-            occ = np.argwhere(g.logodds > 0.6)               # (row=y, col=x)
+            walls = np.argwhere(g.logodds > 0.6)                      # (row=y, col=x)
+            floor = np.argwhere((g.logodds < -0.4) & g.touched)
             pose = self.pose.tolist()
             path = list(self.path)[-1500:]
-        if len(occ) > max_walls:
-            occ = occ[np.linspace(0, len(occ) - 1, max_walls).astype(int)]
-        vox = self.tof_layer.voxel_array(min_hits=2)
-        if len(vox) > 30000:
-            vox = vox[np.argsort(-vox[:, 3])[:30000]]       # keep the best-confirmed voxels
-        return {"grid_res": g.res, "grid_origin": g.origin, "walls": occ[:, ::-1].tolist(),
-                "wall_height": self.cfg["lidar_height"], "voxel_res": self.tof_layer.vres,
-                "voxels": vox.tolist(), "pose": pose, "path": path,
-                "version": [g.version, self.tof_layer.voxel_version],
-                "tof_height": self.cfg["tof_height"], "lidar_height": self.cfg["lidar_height"]}
-
+        if len(walls) > max_cells:
+            walls = walls[np.linspace(0, len(walls) - 1, max_cells).astype(int)]
+        if len(floor) > max_cells:
+            floor = floor[np.linspace(0, len(floor) - 1, max_cells).astype(int)]
+        return {"grid_res": g.res, "grid_origin": g.origin,
+                "walls": walls[:, ::-1].tolist(), "floor": floor[:, ::-1].tolist(),
+                "pose": pose, "path": path, "version": g.version}
     def map_png(self):
         with self.lock:                          # copy only; encode off the lock (see save())
             g = self.grid.copy()
