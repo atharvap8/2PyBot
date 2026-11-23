@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>2PyBot Technical Q&amp;A</title>
+<link rel="stylesheet" href="manual.css"></head><body>
+<span class="doccode">AN-2PB-002 Rev 4.4</span>
+
+<section class="cover">
+  <div class="band"></div>
+  <div class="brand"><svg width="34" height="34" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="#f08a4b" stroke-width="2.5"/><circle cx="16" cy="16" r="5" fill="#f08a4b"/><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke="#f08a4b" stroke-width="2.5" stroke-linecap="round"/></svg>2PyBot platform</div>
+  <div class="title">2PyBot</div>
+  <div class="kind">Technical questions and answers</div>
+  <div class="sub">Design decisions, control theory, interfaces and software architecture, answered for engineers reviewing the robot in person.</div>
+  <img class="art" src="img/maps_tilted.png" alt="">
+  <div class="meta"><b>AN-2PB-002</b> · Revision 4.4 · November 2026<br>Applies to firmware BaseLink 4.4.0 and host software 4.4.0</div>
+</section>
+
+<h1 id="toc">Contents</h1>
+<div class="toc">
+  <a href="#hw">Part 1 · Hardware</a>
+  <a class="l2" href="#h-arch">Architecture and compute</a>
+  <a class="l2" href="#h-mot">Motors and power</a>
+  <a class="l2" href="#h-sens">Sensors</a>
+  <a class="l2" href="#h-mech">Mechanics and safety</a>
+  <a href="#sw">Part 2 · Software</a>
+  <a class="l2" href="#s-ctl">Balance control</a>
+  <a class="l2" href="#s-fw">Firmware structure</a>
+  <a class="l2" href="#s-host">Host software</a>
+  <a class="l2" href="#s-slam">Mapping and localization</a>
+  <a class="l2" href="#s-ops">Deployment, applications and quality</a>
+</div>
+
+<div class="part" id="hw"><h1>Part 1 · Hardware</h1><p>Compute, actuation, sensing, power and mechanics.</p></div>
+
+<h2 id="h-arch">Architecture and compute</h2>
+<div class="qa"><div class="q"><i>H1</i>Why are there two computers, an ESP32 and a Radxa?</div><div class="a">
+<p>They have different timing requirements. Balancing needs a deterministic 200 Hz loop with bounded latency from IMU sample to motor command. A Linux board cannot guarantee that while it also encodes video and runs SLAM. The ESP32 therefore owns every actuator and the gamepad; the Radxa owns perception, the user interface and updates.</p>
+<p>The split also defines the failure behaviour. If the Radxa crashes, Wi-Fi drops or the console restarts, the robot keeps balancing and the operator keeps the gamepad stop. The host can stop the robot but can never arm it.</p></div></div>
+<div class="qa"><div class="q"><i>H2</i>How are the two boards connected and synchronised?</div><div class="a">
+<p>Over USB serial at 460800 baud with line-based ASCII records. The ESP32 sends odometry and IMU data at 50 Hz, controller state at 50 Hz and motor feedback at 10 Hz. The host sends drive input, parameter commands and stop requests.</p>
+<p>Clocks are not shared. Host consumers map the ESP32 millisecond counter onto host time using the minimum observed offset over a sliding window, which removes USB and scheduling delay because transport only ever adds latency.</p></div></div>
+<div class="qa"><div class="q"><i>H3</i>What prevents the ESP32 from starting before the host is ready?</div><div class="a">
+<p>A boot gate on the host holds the ESP32 in reset through the USB adapter's RTS line until the host services are up. After release, the firmware waits for an explicit <code>BR,1</code> acknowledgement before it calibrates the IMU and starts the motors' communication. Arming stays closed until that sequence completes, so a USB reset during deployment cannot produce a powered, uncalibrated controller.</p></div></div>
+<div class="qa"><div class="q"><i>H4</i>Why the Radxa Cubie A7A?</div><div class="a">
+<p>It provides a MIPI CSI camera input with a hardware H.264 encoder, enough CPU for numpy-based SLAM, onboard Wi-Fi for a hotspot plus a client connection, and free UART and I2C on the 40-pin header for the lidar and depth sensor. The hardware encoder keeps camera streaming at a few percent of CPU, which leaves headroom for mapping.</p></div></div>
+
+<h2 id="h-mot">Motors and power</h2>
+<div class="qa"><div class="q"><i>H5</i>Why BLDC hub motors in current mode instead of steppers or velocity mode?</div><div class="a">
+<p>An inverted pendulum is controlled through wheel torque, because torque produces the acceleration that rotates the body back. Current mode gives the controller direct torque authority (torque ≈ K<sub>t</sub> × current, K<sub>t</sub> = 0.75 N·m/A) with no inner velocity loop inside the driver that would add lag or fight the balance loop.</p>
+<p>Velocity mode was evaluated and removed: the drivers' internal speed loop and position-derived feedback delay produced oscillation under load. Steppers were used in earlier revisions and replaced because they lose steps under shock loads and cannot report torque.</p></div></div>
+<div class="qa"><div class="q"><i>H6</i>How is the RS485 link scheduled, and what happens if a reply is lost?</div><div class="a">
+<p>Each motor has its own RS485 bus. Every 5 ms control cycle sends exactly one frame to each motor, regardless of whether the previous reply arrived. A missed reply costs one feedback sample, not a torque update. Earlier revisions waited for replies and froze a wheel's torque for up to 25 ms after a single late frame.</p>
+<p>Every reply carries the motor's actual mode byte and fault byte. If a motor reports the wrong mode, a fault, or no reply for 60 ms, the controller disarms.</p></div></div>
+<div class="qa"><div class="q"><i>H7</i>How is wheel speed measured?</div><div class="a">
+<p>From the unwrapped 16-bit absolute position in every drive reply, differentiated against the reply timestamp and low-pass filtered at 30 Hz. The motors' reported RPM is coarse and delayed, so it is kept only as a fallback source selectable with <code>HUBVSRC</code>. Positions are converted to 4096 counts per revolution and per-wheel forward signs before any control code sees them.</p></div></div>
+<div class="qa"><div class="q"><i>H8</i>What limits the motor current, and why 2.7 A?</div><div class="a">
+<p>A per-motor software limit (<code>CURRENT</code>, default 2700 mA, maximum 4400 mA) is applied before the command is quantised to the driver's ±8 A scale. 2.7 A gives about 2 N·m per wheel, which recovers the 2.6 kg robot from the tilts it meets in normal driving while staying well inside the drivers' thermal and overcurrent limits on a 5S supply.</p>
+<p>Balance current is allocated first; steering only receives the remaining headroom per wheel. A sharp turn therefore cannot steal the torque needed to catch a fall.</p></div></div>
+<div class="qa"><div class="q"><i>H9</i>Does the robot measure battery voltage?</div><div class="a">
+<p>No. The 18 V supply value is configuration only and is used for the informational no-load speed estimate. It is not used to scale commands, and there is no hidden voltage-based speed derating.</p></div></div>
+
+<h2 id="h-sens">Sensors</h2>
+<div class="qa"><div class="q"><i>H10</i>Which IMU is used and how is pitch computed?</div><div class="a">
+<p>An ST ISM6HG256X accelerometer and gyroscope at 960 Hz, ±4 g and ±2000 dps. Gyro bias is calibrated at rest on every start. A six-axis Mahony filter fuses gyro and accelerometer; its accelerometer trust drops automatically when the acceleration magnitude departs from 1 g by more than 0.2 g, so driving acceleration does not tilt the estimate. A second-order 50 Hz filter smooths pitch, and the pitch rate comes directly from the calibrated gyro axis.</p></div></div>
+<div class="qa"><div class="q"><i>H11</i>What does the lidar contribute, and what are its limits?</div><div class="a">
+<p>The Slamtec RPLIDAR C1M1R2 gives a 360° range scan at 20 Hz in a horizontal plane 265 mm above the floor. It is the primary localization sensor. Its limits are geometric: it sees a single slice, so objects lower than 265 mm or overhangs above it are invisible to it, and any forward body lean tilts the slice towards the floor.</p>
+<p>The C1 needs 460800 baud. The A733 UARTs normally run from a 24 MHz clock, which cannot divide to that rate, so a device-tree overlay moves them to a 96 MHz clock. The motor speed command is accepted only after scanning has started, which is how the 20 Hz rate is applied.</p></div></div>
+<div class="qa"><div class="q"><i>H12</i>Why add a VL53L5CX if there is a lidar?</div><div class="a">
+<p>It covers what the lidar plane misses. The VL53L5CX returns an 8×8 grid of distances over a 45° field of view at 10 Hz, from 210 mm height, 40 mm left of centre. Its points are projected into 3D: returns 4 cm to 50 cm above the floor are low obstacles; returns more than 6 cm below the floor indicate a drop-off. Its down-tilt is estimated from floor returns in the lower rows while the robot balances.</p>
+<p>It is too narrow for scan matching, so it feeds a separate map layer and the optional forward speed guard, not localization.</p></div></div>
+<div class="qa"><div class="q"><i>H13</i>Is the compass used for heading?</div><div class="a">
+<p>No. Hub motors and steel structure make the magnetometer unreliable indoors. Heading comes from wheel odometry and the gyro vertical axis, corrected by lidar scan matching. The compass value is reported for diagnostics only.</p></div></div>
+<div class="qa"><div class="q"><i>H14</i>How is the camera streamed with low latency?</div><div class="a">
+<p>The IMX708 frames go through the Allwinner ISP into the hardware H.264 encoder and are published by MediaMTX. Clients receive them over WebRTC using WHEP on port 8889, which avoids the multi-second buffering of HLS. The pipeline reports capture-to-publish time, typically around 33 ms.</p></div></div>
+
+<h2 id="h-mech">Mechanics and safety</h2>
+<div class="qa"><div class="q"><i>H15</i>Why is the lidar offset from the centreline, and does it matter?</div><div class="a">
+<p>It is placed 31 mm right of centre on the axle line for packaging. The offset is part of the sensor transform, so every scan point is expressed in the robot frame before matching. Placing it on the axle line keeps it from translating when the body pitches.</p></div></div>
+<div class="qa"><div class="q"><i>H16</i>What happens when the robot falls?</div><div class="a">
+<p>Beyond 55° tilt or 450°/s pitch rate the controller commands zero torque and disarms; brakes are never applied, so the motors coast. The robot comes to rest on its front bumper at about 60°. From that posture a local START can trigger the self-uprighting routine.</p></div></div>
+<div class="qa"><div class="q"><i>H17</i>Which pins needed special care on the ESP32?</div><div class="a">
+<p>GPIO0 (zoom servo) and GPIO2 (torch) are boot strapping pins. They are reset to plain GPIO and driven low before the PWM peripheral takes them, and GPIO0 has a pull-down so the chip boots normally. The status LED uses its own PWM channel and timer so its animation continues during blocking calibration.</p></div></div>
+<div class="qa"><div class="q"><i>H18</i>Why do the camera servos detach?</div><div class="a">
+<p>Holding position draws current and makes hobby servos buzz and heat. Each servo detaches its PWM output 2 s after its own last command and drives the pin low. Both axes use the same rule, so one cannot be kept powered by movement of the other.</p></div></div>
+
+<div class="part" id="sw"><h1>Part 2 · Software</h1><p>Control, firmware, host services, SLAM, deployment and applications.</p></div>
+
+<h2 id="s-ctl">Balance control</h2>
+<div class="qa"><div class="q"><i>S1</i>What control law balances the robot?</div><div class="a">
+<p>A full-state LQR with integral action (LQI) on the linearised wheeled inverted pendulum. The state is wheel position error, wheel velocity, body pitch, pitch rate and the integral of position error. The output is a wheel acceleration command:</p>
+<pre>u = −(K1·e_x + K2·v + K3·θ + K4·ω + K5·∫e_x)</pre>
+<p>Default gains are K1 −7.32, K2 −7.45, K3 −42.95, K4 −6.69 and K5 −2.11. The acceleration is integrated into a wheel velocity reference for the inner current loop.</p></div></div>
+<div class="qa"><div class="q"><i>S2</i>How does driving differ from holding position?</div><div class="a">
+<p>With the stick centred, the full LQI vector holds a position reference. When the operator drives, the position and integral terms are removed and the controller tracks the commanded velocity with K2 to K4. The hold point is dragged ahead by a braking lookahead of 0.3 s, so releasing the stick stops the robot smoothly where it naturally comes to rest. Position error fed to the LQR is clamped to 0.15 m so a large displacement causes a gentle walk back.</p></div></div>
+<div class="qa"><div class="q"><i>S3</i>How is the acceleration command turned into motor current?</div><div class="a">
+<p>An inner loop runs per control cycle in common and differential coordinates. The common channel combines mass feed-forward (current = mass × radius × acceleration ÷ 2K<sub>t</sub>) with a velocity PI correction. The differential channel tracks the steering target with its own PI. Common current is clamped first; differential current only uses the headroom left on each wheel.</p>
+<p>During a recovery, when the velocity correction would oppose the balance acceleration, the correction is dropped so the loop cannot brake against a catch.</p></div></div>
+<div class="qa"><div class="q"><i>S4</i>What happens when the actuators saturate?</div><div class="a">
+<p>Balance takes priority over position. When the velocity reference or current saturates, the hold point bleeds towards the robot and the position integral decays, so the tilt terms regain authority. The robot parks a little away from its original spot instead of falling. Integrators use conditional anti-windup throughout.</p></div></div>
+<div class="qa"><div class="q"><i>S5</i>How does steering and heading hold work?</div><div class="a">
+<p>Steering is direct: the stick maps linearly to a wheel speed difference with a fixed authority of 4000 counts/s, without slew limiting. On release the controller first brakes the turn to zero, then latches the final heading and holds it with a PD on the encoder difference.</p>
+<p>The differential current integral is cleared during heading hold and on every reversal of turn direction. An older design that kept integrating there stored an opposing torque that pulled the robot back after a turn, felt as spring-back.</p></div></div>
+<div class="qa"><div class="q"><i>S6</i>How does self-uprighting work?</div><div class="a">
+<p>It is a separate controller state, entered only by a local START from the front-bumper rest (control pitch 60° ± 10°). After a 200 ms zero-torque check that the robot is resting, it applies equal forward current on both wheels from an attitude PD, <code>I = clamp(SRKP·θ + SRKD·ω)</code>, slew-limited at 30 A/s and capped at 2.7 A. A negative pitch rate during the rise reduces or reverses the current, so the same law lifts and then catches.</p>
+<p>Near vertical it hands over to the balance controller, seeding the velocity reference with the measured wheel speed to avoid a step. Timeouts, travel, speed, angle, rate and progress checks end a failed attempt with zero torque.</p></div></div>
+
+<h2 id="s-fw">Firmware structure</h2>
+<div class="qa"><div class="q"><i>S7</i>How is the 200 Hz loop kept deterministic?</div><div class="a">
+<p>The loop runs on a fixed 5 ms period on core 1; the Bluetooth stack runs on core 0. Each cycle reads the IMU, services the motor UARTs, runs the controller and transmits both motor frames immediately after. Serial parsing has a per-cycle byte budget, and the parameter dump writes one line per cycle only if it fits the transmit buffer. A loop interval above 20 ms disarms the robot, and the worst interval is reported in telemetry.</p></div></div>
+<div class="qa"><div class="q"><i>S8</i>How are parameters stored and protected?</div><div class="a">
+<p>All tunables are defined once in an X-macro table with key, default, bounds, group and description. The same table generates the RAM structure, bounds checks, the protocol dump and NVS storage. Every write is bounds-checked; mode, direction and radius changes are refused while motors are active.</p>
+<p>A save writes every value, closes, reopens read-only and compares every stored value before it reports success. Values that must never drift, such as <code>TRIM</code> and <code>MAXSTR</code>, have equal minimum and maximum and are re-imposed on every recompute.</p></div></div>
+<div class="qa"><div class="q"><i>S9</i>How does the gamepad connect, and why not through Wi-Fi?</div><div class="a">
+<p>The EVOFOX gamepad pairs directly with the ESP32 through Bluepad32. Driving and stopping then work without the host and without Wi-Fi, with a single radio hop and no network queuing. A stale gamepad (200 ms) zeroes its inputs while balance continues. Button actions are edge-detected so a button held during connection cannot arm the robot.</p></div></div>
+
+<h2 id="s-host">Host software</h2>
+<div class="qa"><div class="q"><i>S10</i>What runs on the Radxa?</div><div class="a">
+<p>A Python FastAPI console started by systemd. It owns the ESP32 serial port and serves the web pages, the REST and WebSocket API and the Android application endpoints on port 8080. Separate tasks run the camera supervisor, the ToF worker, the lidar driver and SLAM, the system map and the firmware update monitor. A separate firmware worker service performs flashing so the API stays responsive.</p></div></div>
+<div class="qa"><div class="q"><i>S11</i>Why does the VL53L5CX run in its own process?</div><div class="a">
+<p>The sensor driver is ST's ultra-lite C driver loaded through ctypes, and it uploads about 84 kB of firmware to the sensor at start. Running it in an isolated process keeps a driver hang or I2C fault from blocking the console. The worker retries the first transfer, reports plain-language hints and backs off while the sensor is absent instead of polling the bus every few seconds.</p></div></div>
+<div class="qa"><div class="q"><i>S12</i>How are parameter changes confirmed end to end?</div><div class="a">
+<p>The host serialises parameter operations. A write waits for the controller's matching acknowledgement with the applied value. A save waits for preceding writes, requires the controller's verified save reply, then re-reads the full parameter table. The API returns success only after that, and the application shows success only when the API confirms it.</p></div></div>
+<div class="qa"><div class="q"><i>S13</i>How does the system map find the root cause of a fault?</div><div class="a">
+<p>Every block is evaluated from its own evidence: freshness, fault bytes, rates and errors. A second pass marks every block observed through a failed parent as blocked rather than failed. If the USB serial link drops, only the serial link turns red; the IMU, motors and gamepad behind it are greyed out as unknown.</p></div></div>
+
+<h2 id="s-slam">Mapping and localization</h2>
+<div class="qa"><div class="q"><i>S14</i>Which SLAM approach is used, and why not ROS?</div><div class="a">
+<p>A compact 2D SLAM in numpy inside the console: a 5 cm log-odds occupancy grid and a correlative scan matcher on a blurred likelihood field, searched coarse to fine. It runs comfortably at 20 Hz on the A733, starts with the console and has no ROS installation, launch files or middleware to maintain on the robot.</p></div></div>
+<div class="qa"><div class="q"><i>S15</i>How are wheels, gyro and lidar fused?</div><div class="a">
+<p>An extended Kalman filter tracks x, y and yaw with a covariance. Wheel distance and gyro yaw predict motion between scans, with noise that grows with distance, rotation and detected slip. Each scan match provides a pose with a covariance estimated from the shape of the matcher's score surface. A match corrects the filter only if its score passes a threshold and it passes a 99 % Mahalanobis gate against the prediction. Otherwise the scan is carried by odometry alone.</p></div></div>
+<div class="qa"><div class="q"><i>S16</i>How is wheel slip detected?</div><div class="a">
+<p>The gyro measures true body yaw rate; the wheels report what yaw rate they would produce. Their difference, scaled by the measured scrub ratio of the chassis, is integrated between scans and inflates the process noise of the next prediction. Slip therefore lowers trust in odometry exactly when it happens.</p></div></div>
+<div class="qa"><div class="q"><i>S17</i>How does the robot avoid mapping the floor when it leans?</div><div class="a">
+<p>A forward pitch θ lowers a beam at azimuth φ by atan(tan θ · cos φ). Forward beams dip, side beams stay level and rearward beams rise. Each beam is cut at the distance where it would reach the floor from 265 mm height, with a margin for pitch variation during the sweep. Whole scans are rejected only above 12° lean or 60°/s pitch rate. The previous design cut every beam to the forward worst case and skipped entire scans above 3°.</p></div></div>
+<div class="qa"><div class="q"><i>S18</i>What is scan de-skew and why is it needed?</div><div class="a">
+<p>One sweep takes 50 ms at 20 Hz. While turning at 90°/s the robot rotates 4.5° during that time, which smears straight walls. Each point's capture time is interpolated across the sweep, its robot pose is taken from odometry, and the point is moved into the robot frame at mid-sweep before matching.</p></div></div>
+<div class="qa"><div class="q"><i>S19</i>How does the robot find itself on a saved map?</div><div class="a">
+<p>On load, and automatically after about 2 s of failed matching, it runs a global search: candidate positions on a 0.25 m lattice over confidently free cells at 36 headings are scored with a subset of scan points in bounded batches, and the best eight are refined locally. The searches are serialised so the button and the automatic retry never run at the same time.</p></div></div>
+
+<h2 id="s-ops">Deployment, applications and quality</h2>
+<div class="qa"><div class="q"><i>S20</i>How is software deployed to the robot?</div><div class="a">
+<p>Each push builds a commit-bound bundle in CI containing the controller firmware compiled with a locked toolchain and the Android application. On the robot, a managed pull fetches the configured branch and the deployment service downloads the bundle for that exact commit. It stages an immutable host release, takes the controller maintenance lock and flashes the firmware through the worker. It then verifies that the controller reconnects READY and records the result.</p></div></div>
+<div class="qa"><div class="q"><i>S21</i>What protects the controller during a firmware update?</div><div class="a">
+<p>The worker backs up the boot and NVS region and verifies the installed image as a rollback copy. It writes only the application partition at 0x10000 and verifies the written image. It then reads the boot and NVS region again and requires it to be byte-identical. Live tuning is captured before and restored after, with keys the new firmware does not know set aside rather than causing a failure. Any error writes back the previous image. Arming stays locked for the whole operation.</p></div></div>
+<div class="qa"><div class="q"><i>S22</i>How is the Android application built and kept responsive?</div><div class="a">
+<p>It is a Kotlin Jetpack Compose application built in CI and signed with a stable key so updates install over previous versions. Telemetry arrives over one WebSocket. High-rate values are collected only by the composables that display them, so the navigation shell does not recompose at the telemetry rate. The 3D drive view renders on demand: after new data or a touch, then idles. Only the selected workspace is composed, so video, OpenGL and web views never run together.</p></div></div>
+<div class="qa"><div class="q"><i>S23</i>How is behaviour verified without risking the robot?</div><div class="a">
+<p>Every change is compiled for the exact board and partition layout, and the Python host code is checked for the robot's Python version. Unit and simulation tests exist for the control and protocol logic and run when explicitly enabled in CI. Physical motion tests are always operator-initiated: no build or deployment arms or drives the robot.</p></div></div>
+<div class="qa"><div class="q"><i>S24</i>What are the main known limitations?</div><div class="a">
+<p>The lidar sees one plane, so mapping is 2D; the tilted view raises walls visually, not from measured height. Supply voltage is not measured, so torque headroom at low charge is not compensated. The ToF layer covers only what the sensor has looked at. Self-uprighting is validated only from the front-bumper rest. Loop closure relies on scan matching against the existing map rather than a pose-graph optimiser.</p></div></div>
+
+<h2>Revision history</h2>
+<table><thead><tr><th style="width:18%">Date</th><th style="width:14%">Revision</th><th>Changes</th></tr></thead><tbody>
+<tr><td>November 2026</td><td>4.4</td><td>Initial release for firmware and host 4.4.0.</td></tr>
+</tbody></table>
+</body></html>
