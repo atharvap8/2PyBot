@@ -194,16 +194,17 @@ private fun StopButton(vm: BotViewModel) {
 @Composable
 private fun SideRail(vm: BotViewModel, selected: String, onSelect: (String) -> Unit, onMore: () -> Unit) {
     val (_, linkColor) = rememberLink(vm)
+    val compact = isCompactHeight()
     Row {
         Column(Modifier.width(76.dp).fillMaxHeight().background(Ink).padding(horizontal = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.padding(vertical = 12.dp)) { BrandMark() }
+            Box(Modifier.padding(vertical = if (compact) 8.dp else 12.dp)) { BrandMark() }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 (primary + moreItem).forEach { d ->
                     val active = if (d.id == "more") selected !in primary.map { it.id } else selected == d.id
-                    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(10.dp))
+                    Column(Modifier.fillMaxWidth().heightIn(min = if (compact) 48.dp else 56.dp).clip(RoundedCornerShape(10.dp))
                         .background(if (active) AccentBg else Color.Transparent)
-                        .clickable { if (d.id == "more") onMore() else onSelect(d.id) }.padding(vertical = 7.dp),
+                        .clickable { if (d.id == "more") onMore() else onSelect(d.id) }.padding(vertical = if (compact) 4.dp else 7.dp),
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Icon(d.icon, d.title, Modifier.size(21.dp), tint = if (active) Accent else TextDim)
                         Text(d.title, fontSize = 10.5.sp, color = if (active) Accent else TextDim)
@@ -212,7 +213,7 @@ private fun SideRail(vm: BotViewModel, selected: String, onSelect: (String) -> U
             }
             Box(Modifier.size(8.dp).clip(CircleShape).background(linkColor))
             Spacer(Modifier.height(8.dp))
-            Column(Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(6.dp))
+            Column(Modifier.fillMaxWidth().height(if (compact) 44.dp else 52.dp).clip(RoundedCornerShape(6.dp))
                 .background(Red).clickable { vm.estop() },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Text("STOP", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)

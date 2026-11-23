@@ -13,14 +13,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import `in`.twopybot.app.ui.isCompactHeight
 import `in`.twopybot.app.ui.theme.*
 
 /** Bound the tool pane; give the remaining width to the active workspace. */
 @Composable
 fun AdaptiveWorkspace(modifier:Modifier=Modifier,portraitRatio:Float=16f/10f,primary:@Composable (Modifier)->Unit,tools:@Composable ColumnScope.()->Unit) {
+    val compact=isCompactHeight()
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val toolWidth=(maxWidth*.29f).coerceIn(200.dp,300.dp)
-        if(maxWidth>=520.dp) Row(Modifier.fillMaxSize().padding(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        // Sideways phone: a wider, independently scrolling tool column next to a
+        // full-height primary view; tighter gaps so nothing is wasted vertically.
+        val toolWidth=(maxWidth*(if(compact) .34f else .29f)).coerceIn(230.dp,340.dp)
+        val gap=if(compact) 8.dp else 12.dp
+        if(maxWidth>=520.dp) Row(Modifier.fillMaxSize().padding(gap),horizontalArrangement=Arrangement.spacedBy(gap)) {
             primary(Modifier.weight(1f).fillMaxHeight())
             Column(Modifier.width(toolWidth).fillMaxHeight()
                 .verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp),content=tools)
@@ -36,7 +41,7 @@ fun AdaptiveWorkspace(modifier:Modifier=Modifier,portraitRatio:Float=16f/10f,pri
 @Composable
 fun WorkspaceColumns(first:@Composable ColumnScope.()->Unit,second:@Composable ColumnScope.()->Unit) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        if(maxWidth>=560.dp) Row(Modifier.fillMaxSize().padding(horizontal=14.dp),horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+        if(maxWidth>=560.dp) Row(Modifier.fillMaxSize().padding(horizontal=12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),content=first)
             Column(Modifier.weight(1.25f).fillMaxHeight().verticalScroll(rememberScrollState()),content=second)
         } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal=14.dp)) {
@@ -47,9 +52,10 @@ fun WorkspaceColumns(first:@Composable ColumnScope.()->Unit,second:@Composable C
 
 @Composable
 fun WorkspaceTitle(title:String,subtitle:String?=null,modifier:Modifier=Modifier) {
-    Column(modifier.padding(top=14.dp,bottom=10.dp)) {
-        Text(title,fontSize=21.sp,fontWeight=FontWeight.SemiBold,color=TextHi)
-        if(subtitle!=null) Text(subtitle,fontSize=12.sp,color=TextDim,modifier=Modifier.padding(top=3.dp))
+    val compact=isCompactHeight()
+    Column(modifier.padding(top=if(compact) 6.dp else 14.dp,bottom=if(compact) 6.dp else 10.dp)) {
+        Text(title,fontSize=if(compact) 17.sp else 21.sp,fontWeight=FontWeight.SemiBold,color=TextHi)
+        if(subtitle!=null && !compact) Text(subtitle,fontSize=12.sp,color=TextDim,modifier=Modifier.padding(top=3.dp))
     }
 }
 
