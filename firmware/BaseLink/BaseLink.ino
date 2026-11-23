@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.7.3
+ *  BaseLink.ino — 2PyBot v4.7.4
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -344,7 +344,7 @@ void handleLine(char* line) {
         hostBootReady = true;
         startupGate.acknowledge(true);
         Serial.println("BR!,1");
-        if (startupGate.initialized) Serial.println("BS,READY");
+        if (startupGate.initialized) { Serial.println("BS,READY"); leds_event(LED_EV_READY); }
         return;
     }
     if (!strcmp(line, "BR,0")) {
@@ -749,7 +749,10 @@ void waitForHostStartup() {
     Serial.println("BS,WAIT_HOST");
     Serial.println("[BOOT] Waiting for Radxa ACK; IMU calibration and device startup are on HOLD");
     uint32_t lastRequest = millis();
+    const uint32_t waitStart = millis();
     while (!startupGate.mayInitialize(P.bootWait > 0.5f)) {
+        // progress: creeps toward 60 % while the Radxa boots (~60-90 s)
+        leds_loading(0.6f * (1.0f - expf(-(millis() - waitStart) / 45000.0f)));
         pollSerial();
         params_service();
         if (millis() - lastRequest >= 1000) {
@@ -771,7 +774,6 @@ uint8_t ledErrorCode() {
     if (hub.faultBits()) return LED_ERR_MOTOR_FAULT;
     if (!hub.modeOk()) return LED_ERR_MOTOR_MODE;
     if (!imu.sampleFresh()) return LED_ERR_IMU;
-    if (P.bootWait > 0.5f && !hostBootReady) return LED_ERR_HOST;
     if (ledLatchedErr && millis() - ledLatchedMs < 10000) return ledLatchedErr;
     if (!btgamepad_connected()) return LED_ERR_PAD;
     return LED_ERR_NONE;
@@ -801,15 +803,15 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.7.3");
+    Serial.println("     2PyBot BaseLink v4.7.4");
     Serial.println("==================================================");
 
     params_begin();
+    leds_begin();   // ring off; the loader below runs until start-up is complete
     Serial.println("BR?,0");
     params_dump(); // capability/readback only; does not access IMU or drivers
     waitForHostStartup();
     joySpeedHigh = (P.bootHigh > 0.5f) ? 1 : 0;     // NVS or compiled defaults, before any consumer
-    leds_begin();   // boot swirl plays while sensors settle below
 
     if (!imu.begin()) {
         status_led::setMode(status_led::ERROR);
@@ -823,7 +825,11 @@ void setup() {
 
     Serial.printf("[MAIN] Settling sensors %d ms — keep robot still\n", STARTUP_SETTLE_MS);
     Serial.println("BS,CALIBRATING");
-    delay(STARTUP_SETTLE_MS);
+    for (uint32_t t0 = millis(); millis() - t0 < STARTUP_SETTLE_MS; ) {
+        leds_loading(0.6f + 0.3f * (millis() - t0) / (float)STARTUP_SETTLE_MS);
+        delay(5);
+    }
+    leds_loading(0.95f);
     if (!imu.calibrateGyro()) {
         status_led::setMode(status_led::ERROR);
         Serial.println("BS,ERROR");
@@ -846,6 +852,7 @@ void setup() {
                   P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.aMax);
     Serial.println("BS,READY");
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
+    leds_event(LED_EV_READY);
 
     lastLoopUs = micros();
     loopBeatMs = millis();
@@ -1104,6 +1111,7 @@ void loop() {
         li.bubbleBack   = bubbleLive && bubbleGuard.revCapNow < 0.15f;
         li.errorCode    = ledErrorCode();
         li.fatal        = false;
+        li.loading      = P.bootWait > 0.5f && !hostBootReady;
         if (ledTestMode && (int32_t)(millis() - ledTestUntilMs) >= 0) { ledTestMode = 0; leds_test(0); }
         leds_update(li);
     }

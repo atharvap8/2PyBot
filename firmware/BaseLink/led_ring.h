@@ -25,6 +25,7 @@
 #define LED_EV_FALL      2   // red flash + fade ("ouch")
 #define LED_EV_SPEED_HI  3   // RB: fast blue double-lap ("sport")
 #define LED_EV_SPEED_LO  4   // LB: green arc settling at the front ("easy")
+#define LED_EV_READY     5   // start-up complete: green fill from the front, then fade
 
 // Error codes: the NUMBER of red LEDs that flash (counted clockwise from the front).
 #define LED_ERR_NONE        0
@@ -58,9 +59,11 @@ struct LedInputs {
     bool  bubbleBack;    // bubble is limiting reverse motion
     uint8_t errorCode;   // LED_ERR_*
     bool  fatal;         // latched error: whole ring flashes red continuously
+    bool  loading;       // Radxa not ready (BR,0): start-up loader
 };
 
-void leds_begin();                       // boot swirl
+void leds_begin();                       // ring off (no swirl)
+void leds_loading(float progress);       // one loader frame (blocking start-up code calls this); <0 = no progress bar
 void leds_update(const LedInputs& in);   // call every loop, self rate-limited
 void leds_event(uint8_t ev);             // LED_EV_ARM / LED_EV_FALL
 void leds_test(int mode);                // 0 off, 1 colour compass, 2 configured front

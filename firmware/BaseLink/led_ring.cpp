@@ -113,18 +113,29 @@ void leds_begin() {
     ring.Begin();
     clearF(); showF();
     delay(1);
-    for (int t = 0; t < LED_RING_COUNT * 2; t++) {          // boot swirl, ~0.5 s
-        clearF();
-        for (int i = 0; i < LED_RING_COUNT; i++) {
-            float r, g, b;
-            hsv((i * 360.0f / LED_RING_COUNT) + t * 20.0f, 1.0f, 0.5f, r, g, b);
-            const float fade = 0.15f + 0.85f * ((i + t) % LED_RING_COUNT) / (float)LED_RING_COUNT;
-            addF(i, r * fade, g * fade, b * fade);
+}
+
+// Start-up loader: a white comet spinning clockwise, and a dim cyan progress
+// bar filling clockwise from the front. Runs from power-on until the Radxa has
+// finished its start-up (BR,1) and the controller has calibrated.
+static void drawLoader(float progress, float t) {
+    clearF();
+    if (progress >= 0.0f) {
+        const float n = fminf(1.0f, progress) * LED_RING_COUNT;
+        for (int k = 0; k < LED_RING_COUNT; k++) {
+            const float f = fminf(1.0f, fmaxf(0.0f, n - k));
+            if (f > 0) setF(cwFromFront(k), 0.0f, 0.10f * f, 0.16f * f);
         }
-        showF();
-        delay(16);
     }
-    clearF(); showF();
+    comet(fmodf(t * 300.0f, 360.0f), +1.0f, 0.85f, 0.85f, 0.85f);
+    showF();
+}
+void leds_loading(float progress) {
+    static uint32_t last = 0;
+    const uint32_t now = millis();
+    if (now - last < 20 || !ring.CanShow()) return;
+    last = now;
+    drawLoader(progress, now / 1000.0f);
 }
 
 void leds_event(uint8_t ev) { eventActive = ev; eventT0 = millis(); }
@@ -223,8 +234,13 @@ void leds_update(const LedInputs& in) {
     // ---------- one-shot events ----------
     if (eventActive) {
         const float e = (now - eventT0) / 1000.0f;
-        if (eventActive == LED_EV_FALL && e < 1.0f) {
-            fillAll((e < 0.2f || (e > 0.4f && e < 0.6f)) ? 1.0f : 0.0f, 0.0f, 0.0f);
+        if (eventActive == LED_EV_FALL && e < 0.35f) {
+            fillAll(1.0f - e / 0.35f, 0.0f, 0.0f);              // one short red flash, then the "fell" pattern
+            showF(); return;
+        } else if (eventActive == LED_EV_READY && e < 1.2f) {
+            // ready: green fills both ways from the front, holds, fades
+            const float fill = fminf(1.0f, e / 0.5f) * 180.0f, fade = e < 0.7f ? 1.0f : 1.0f - (e - 0.7f) / 0.5f;
+            for (int i = 0; i < LED_RING_COUNT; i++) if (fabsf(ledToAng(i)) <= fill + 0.1f) setF(i, 0.0f, 0.8f * fade, 0.2f * fade);
             showF(); return;
         } else if (eventActive == LED_EV_ARM && e < 0.6f) {
             const float sweep = e / 0.6f * 180.0f;
@@ -237,17 +253,28 @@ void leds_update(const LedInputs& in) {
             const float k = 1.0f - e / 0.45f;
             arc(0.0f, 1.5f + 6.0f * k, 0.05f + 0.10f * k, 0.60f, 0.15f);
             showF(); return;
-        } else if ((eventActive == LED_EV_FALL && e >= 1.0f) || (eventActive != LED_EV_FALL && e >= 0.6f)) {
+        } else if ((eventActive == LED_EV_FALL && e >= 0.35f) || (eventActive == LED_EV_READY && e >= 1.2f) ||
+                   (eventActive != LED_EV_FALL && eventActive != LED_EV_READY && e >= 0.6f)) {
             eventActive = 0;
         }
     }
 
-    // ---------- ERROR n: n red LEDs from the front flash together ----------
+    // ---------- start-up / Radxa not ready: loader ----------
+    if (in.loading && !in.balancing && !in.selfRighting && !(in.errorCode && in.errorCode != LED_ERR_PAD)) {
+        drawLoader(-1.0f, t); return;
+    }
+
+    // ---------- fell: red glow on the side that hit the ground, breathing ----------
+    if (in.errorCode == LED_ERR_FELL && !in.balancing && !in.selfRighting) {
+        const float b = 0.25f + 0.75f * (0.5f + 0.5f * sinf(t * 3.0f));
+        arc(in.pitchF >= 0.0f ? 0.0f : 180.0f, 2.6f, b, 0.0f, 0.0f);
+        showF(); return;
+    }
+
+    // ---------- ERROR n: n red LEDs, counted clockwise from the front, flash together ----------
     if (in.errorCode && !in.balancing && !in.selfRighting) {
-        const bool on = (now % 1200) < 600;
-        for (int k = 0; k < in.errorCode && k < LED_RING_COUNT; k++)
-            if (on) setF(cwFromFront(k), 1.0f, 0.0f, 0.0f);
-        if (!on || in.errorCode == 0) setF(frontLed(), 0.08f, 0.08f, 0.08f);  // counting starts here
+        if ((now % 1200) < 600)
+            for (int k = 0; k < in.errorCode && k < LED_RING_COUNT; k++) setF(cwFromFront(k), 1.0f, 0.0f, 0.0f);
         showF(); return;
     }
 

@@ -3,6 +3,18 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.4 — Start-up loader, new fall pattern
+
+- **Start-up loader:** the boot rainbow is gone. From power-on, a white comet spins
+  clockwise while a dim cyan bar fills from the front, until the Radxa reports ready
+  (`BR,1`) and the controller has calibrated. A green fill from the front then
+  confirms ready. The loader returns whenever the Radxa drops out (`BR,0`). It
+  replaces error code 5.
+- **Fall:** one short red flash, then a slow red glow on the side that hit the
+  ground. The 8-LED code with the white marker is gone.
+- **Error codes:** no white front marker. The n red LEDs (counted clockwise from
+  the front) flash on their own.
+
 ## 4.7.3 — Cleaner ring motion
 
 - While the comets run, every other LED is off: no base glow, no centre marker.
