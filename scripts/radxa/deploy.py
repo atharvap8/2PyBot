@@ -129,7 +129,8 @@ class Deployment:
         self.system_root = Path(system_root)
         self.commit = ""
         self.environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        self.config=read_json(config or self.system_root/"etc/2pybot-deploy.json",{})
+        self.config_path=Path(config or self.system_root/"etc/2pybot-deploy.json")
+        self.config=read_json(self.config_path,{})
         self.progress=Progress(self.state_dir)
         self.current=self.state_dir/"current"
         self.source=self.repo
@@ -550,19 +551,72 @@ class Deployment:
 
     def verify_bundle(self,directory):
         bundle=read_json(Path(directory)/"bundle.json",{})
-        if bundle.get("schema")!=1 or bundle.get("source_commit")!=self.commit:
+        if bundle.get("schema") not in (1,2) or bundle.get("source_commit")!=self.commit:
             raise RuntimeError("CI bundle identity does not match the requested commit")
-        allowed={"firmware/application.bin","firmware/manifest.json","android/app.apk","android/manifest.json"}
+        # schema 1 carried the APK inside (37 MB); schema 2 publishes it as a separate
+        # release asset so a deployment only downloads the ~1 MB firmware bundle.
+        allowed={"firmware/application.bin","firmware/manifest.json","android/manifest.json"}
+        if bundle["schema"]==1:allowed.add("android/app.apk")
         if set(bundle.get("sha256",{}))!=allowed:raise RuntimeError("Incomplete deployment bundle")
         for name,digest in bundle["sha256"].items():
             path=Path(directory)/name
             if not path.is_file() or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest()!=digest:
                 raise RuntimeError("CI bundle checksum mismatch: "+name)
 
-    def publish_android(self):
+    def fetch_android(self):
+        """Download the APK published next to a schema-2 bundle and verify it."""
         source=self.state_dir/"incoming"/self.commit/"android"
         manifest=read_json(source/"manifest.json",{})
         apk=source/"app.apk"
+        if apk.is_file() and hashlib.sha256(apk.read_bytes()).hexdigest()==manifest.get("sha256"):return apk
+        name=f"2pybot-android-{self.commit}.apk"
+        headers={}
+        token=os.environ.get("BOT_DEPLOY_TOKEN")
+        if token:headers["Authorization"]="Bearer "+token
+        opener=build_opener(BundleRedirect())
+        template=self.config.get("bundle_url")
+        if not template:raise RuntimeError("No bundle_url configured for the Android download")
+        url=template.format(commit=self.commit).rsplit("/",1)[0]+"/"+name
+        if token and self.config.get("bundle_api"):
+            with opener.open(Request(self.config["bundle_api"].format(commit=self.commit),headers=dict(headers,Accept="application/vnd.github+json")),timeout=15) as response:
+                release=json.load(response)
+            matches=[asset for asset in release.get("assets",[]) if asset.get("name")==name]
+            if len(matches)!=1:raise RuntimeError("Android asset is not in the CI release")
+            url=matches[0]["url"]
+            headers["Accept"]="application/octet-stream"
+        if not url.startswith("https://"):raise RuntimeError("Android download must use HTTPS")
+        temporary=source/"app.apk.part"
+        with opener.open(Request(url,headers=headers),timeout=60) as response,temporary.open("wb") as file:
+            size=0
+            while True:
+                block=response.read(1024*1024)
+                if not block:break
+                size+=len(block)
+                if size>150*1024*1024:raise RuntimeError("Android download exceeds size limit")
+                file.write(block)
+        if hashlib.sha256(temporary.read_bytes()).hexdigest()!=manifest.get("sha256"):
+            temporary.unlink();raise RuntimeError("Android download checksum mismatch")
+        os.replace(temporary,apk)
+        return apk
+
+    def spawn_android(self):
+        """Publish the APK after the deployment, outside the deploy lock and service.
+        A slow uplink then never delays or blocks a deployment."""
+        command=[sys.executable,str(Path(__file__).resolve()),"--publish-android",self.commit,"--config",str(self.config_path),
+                 "--state-dir",str(self.state_dir),"--repo",str(self.repo),"--user",self.user]
+        try:
+            if shutil.which("systemd-run"):
+                subprocess.run(["systemd-run","--no-block","--quiet","--collect","--unit","2pybot-apk-"+self.commit[:8],
+                                "--setenv=BOT_DEPLOY_TOKEN="+os.environ.get("BOT_DEPLOY_TOKEN",""),*command],check=False,timeout=15)
+            else:
+                subprocess.Popen(command,start_new_session=True)
+        except (OSError,subprocess.SubprocessError) as error:
+            print("Android publish not started: "+str(error),flush=True)
+
+    def publish_android(self):
+        source=self.state_dir/"incoming"/self.commit/"android"
+        manifest=read_json(source/"manifest.json",{})
+        apk=self.fetch_android()
         if manifest.get("source_commit")!=self.commit or not apk.is_file() or hashlib.sha256(apk.read_bytes()).hexdigest()!=manifest.get("sha256"):
             raise RuntimeError("Android artifact is not the requested checked build")
         from console.versioning import validate_version
@@ -749,9 +803,6 @@ class Deployment:
                         if job.get("deployment_token")!=token or job.get("status") not in {"queued","running","recovering"}:
                             job=self.api("/api/internal/deployment/firmware",{"token":token,"build_id":firmware["build_id"]})
                         self.wait_firmware(job["id"])
-                if plan.android:
-                    self.progress.update('deploying','Publishing the checked Android download',progress=95)
-                    self.publish_android()
                 if plan.monitor:self.install_monitor()
                 if hotspot:
                     hotspot_attempted=hotspot['changed']
@@ -760,7 +811,7 @@ class Deployment:
                 self.wait_controller()
             if self.stable_head()!=self.commit:raise GitBusy("Repository changed before deployment completion")
             if plan.android and not (needs_runtime or plan.firmware or plan.hotspot):
-                self.fetch_bundle();self.publish_android()
+                self.fetch_bundle()
             if plan.monitor and not (needs_runtime or plan.firmware or plan.hotspot):self.install_monitor()
             record={"commit":self.commit,"previous":state.get("commit"),"repo":str(self.repo),
                 "release":str(self.release) if activated else previous,"venv":str(self.venv),
@@ -769,6 +820,7 @@ class Deployment:
                 "actions":asdict(plan),"applied_at":datetime.now(timezone.utc).isoformat()}
             atomic(self.state_file,record)
             self.progress.update("success","Deployment verified; local START remains required",progress=100,applied_commit=self.commit)
+            if plan.android:self.spawn_android()      # app download refreshes in the background
             return True
         except (DeploymentDeferred,GitBusy) as error:
             if hotspot_attempted and not released:
@@ -879,8 +931,18 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--install-monitor", action="store_true")
     parser.add_argument("--config",type=Path,default=Path("/etc/2pybot-deploy.json"))
+    parser.add_argument("--publish-android",metavar="COMMIT",help="Download and publish the checked APK for COMMIT (background step)")
     options = parser.parse_args()
     deployment = Deployment(options.repo, options.user, options.state_dir, options.health_url,config=options.config)
+    if options.publish_android:
+        deployment.commit=options.publish_android
+        try:
+            deployment.publish_android()
+            print("Android download published for "+options.publish_android[:8],flush=True)
+            return 0
+        except Exception as error:
+            print("Android publish failed (previous app download kept): "+str(error),file=sys.stderr,flush=True)
+            return 1
     if options.dry_run:
         deployment.deploy(force=options.force, dry_run=True)
         return 0

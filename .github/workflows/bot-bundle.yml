@@ -67,8 +67,9 @@ jobs:
         run: |
           tag="bot-${GITHUB_SHA}"
           asset="build/deployment/2pybot-deploy-${GITHUB_SHA}.tar.gz"
+          apk="build/deployment/2pybot-android-${GITHUB_SHA}.apk"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Commit bundle already published; leaving immutable release intact"
           else
-            gh release create "$tag" "$asset" --target "$GITHUB_SHA" --title "Bot bundle ${GITHUB_SHA:0:8}" --notes "Commit-bound deployment artifact. Build success is not physical validation." --prerelease
+            gh release create "$tag" "$asset" "$apk" --target "$GITHUB_SHA" --title "Bot bundle ${GITHUB_SHA:0:8}" --notes "Commit-bound deployment artifact. Build success is not physical validation." --prerelease
           fi
