@@ -3,6 +3,29 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 5.0.0: SLAM console refresh, in-browser terminal, visual re-pair
+
+- **Maps page** rebuilt as a single clean panel (Mapping, Saved maps, Edit, Autopilot,
+  Status). The guided check-lidar / check-wheels steps, tips, glossary and advanced
+  panels are gone. The 3D view is the default and shows a simple assembled model of
+  the robot instead of two cubes. Drive view removed.
+- **Maps download, import and 3D export.** Download a map as a portable zip, import a
+  map zip, and export the map as a binary STL for viewing or printing.
+- **In-browser terminal.** A Terminal page runs the full 2pybot TUI over a PTY
+  websocket with a vendored xterm.js.
+- **Deploy page** reworked from a read-only dead end into /deploy/ with live status, a
+  working firmware reflash control and a copyable operator deploy command.
+- **Console navigation** is consistent across Console, System, Maps, Deploy, Terminal
+  and App; the dead-end Autopilot page was dropped.
+- **System map**: the lidar block no longer sits under the inspector; the centre image
+  is the background-removed front photo, tilt corrected.
+- **Visual re-pair (gamepad detection).** Showing the gamepad to the camera for a few
+  seconds, while disarmed and with no pad connected, clears the Bluetooth pairings and
+  restarts into pairing mode. Uses the on-board detector; adds onnxruntime.
+- **Sleep state LEDs** breathe brighter: the status LED and the front ring LED use
+  higher minimum and maximum brightness while powered down.
+- Manual sources moved to docs/manual/src/; the built PDFs stay in docs/manual/.
+
 ## 4.7.8: Gamepad re-pair actually clears the pairing
 
 - **Re-pair fixed.** 4.7.7 tried to create a new NVS namespace (`2pb_bt`) to hold a

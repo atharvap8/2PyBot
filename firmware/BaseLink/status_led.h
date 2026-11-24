@@ -43,10 +43,10 @@ static void tick(void*) {
             break;
         }
         case SLEEP: {
-            // Powered down: slow, dim 6-second breath.
+            // Powered down: slow 6-second breath, brighter min and max than before.
             const uint32_t phase = now%6000;
             const uint32_t ramp = phase <= 3000 ? phase : 6000-phase;
-            brightness = 1 + ramp*ramp*39/(3000UL*3000UL);
+            brightness = 8 + ramp*ramp*142/(3000UL*3000UL);
             break;
         }
         case BALANCING: {

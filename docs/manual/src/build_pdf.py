@@ -27,7 +27,7 @@ from PIL import Image, ImageOps
 from ring_svg import svg as ring_svg
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
+REPO = HERE.parents[2]   # docs/manual/src -> repo root
 EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 REV = "Rev 4.7"
 DOCS = {
@@ -147,7 +147,7 @@ def build(name, pdf_name, footer):
     src = expand((HERE / (name + ".html")).read_text(encoding="utf-8"))
     src = src.replace("</head>", '<style>@page { @bottom-left { content: "%s"; font: 8pt "Segoe UI", sans-serif; color: #857a6f; } }'
                                  "@page cover { @bottom-left { content: none } }</style></head>" % footer)
-    out = HERE / pdf_name
+    out = HERE.parent / pdf_name   # PDFs live in docs/manual/, sources in docs/manual/src/
     render(src, out)
     entries = re.findall(r'<a(?: class="l2")? href="#([^"]+)">([^<]+)</a>', src)
     doc = pymupdf.open(out)
