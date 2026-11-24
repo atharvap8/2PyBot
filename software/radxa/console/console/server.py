@@ -770,6 +770,21 @@ def deploy_page():
     return FileResponse(os.path.join(UI_DIR, "deployment.html"))
 
 
+@app.get("/terminal")
+def terminal_redirect():
+    return RedirectResponse("/terminal/")
+
+
+@app.get("/terminal/")
+def terminal_page():
+    return FileResponse(os.path.join(UI_DIR, "terminal.html"))
+
+
+from . import webterm  # noqa: E402
+
+webterm.register(app, enabled=os.environ.get("BOT_TERMINAL", "1") != "0")
+
+
 @app.get("/")
 def index():
     return FileResponse(os.path.join(UI_DIR, "index.html"))
