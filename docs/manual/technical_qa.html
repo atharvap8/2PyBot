@@ -4,13 +4,14 @@
 <span class="doccode">AN-2PB-002 Rev 4.7</span>
 
 <section class="cover">
-  <div class="band"></div>
-  <div class="brand"><svg width="34" height="34" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="#f08a4b" stroke-width="2.5"/><circle cx="16" cy="16" r="5" fill="#f08a4b"/><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke="#f08a4b" stroke-width="2.5" stroke-linecap="round"/></svg>2PyBot platform</div>
+  <div class="brand">{{logo}}</div>
+  <div class="code">AN-2PB-002</div>
+  <div class="hero">{{hero:photo_quarter_left}}</div>
+  <div class="floor"></div>
   <div class="title">2PyBot</div>
   <div class="kind">Technical questions and answers</div>
   <div class="sub">Design decisions, control theory, interfaces and software architecture, answered for engineers reviewing the robot in person.</div>
-  <div class="hero">{{photo:photo_cover|Cover photo|same as the user manual cover}}</div>
-  <div class="meta"><b>AN-2PB-002</b> · Revision 4.7 · November 2026<br>Applies to firmware BaseLink 4.7.4 and host software 4.7.4</div>
+  <div class="meta"><div><b>AN-2PB-002</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.6 · Host software 4.7.6</div></div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -50,9 +51,9 @@
 <div class="qa"><div class="q"><i>H6</i>How is the RS485 link scheduled, and what happens if a reply is lost?</div><div class="a">
 <p>Each motor has its own RS485 bus. Every 5 ms control cycle sends exactly one frame to each motor, regardless of whether the previous reply arrived. A missed reply costs one feedback sample, not a torque update. Earlier revisions waited for replies and froze a wheel's torque for up to 25 ms after a single late frame.</p>
 <p>Every reply carries the motor's actual mode byte and fault byte. If a motor reports the wrong mode, a fault, or no reply for 60 ms, the controller disarms.</p>
-<p>The frame check is an 8-bit CRC, so on a noisy link a misaligned 10-byte window passes it about once in 256 tries. Replies that pass the CRC but are impossible (fault bits outside the documented 0x1F, more than 900 rpm) are rejected and the parser resynchronises. A fault must repeat in three consecutive replies (about 7.5 ms) and a mode change in two before they count. This removed false "overheat" trips caused by a single corrupt frame; ignored frames are logged.</p></div></div>
+<p>The frame check is an 8-bit CRC, so on a noisy link a misaligned 10-byte window passes it about once in 256 tries. Replies that pass the CRC but are impossible (fault bits outside the documented 0x1F, more than 900 rpm) are rejected and the parser resynchronises. A fault must repeat in three consecutive replies (about 15 ms) and a mode change in two before they count. This removed false "overheat" trips caused by a single corrupt frame; ignored frames are logged.</p></div></div>
 <div class="qa"><div class="q"><i>H7</i>How is wheel speed measured?</div><div class="a">
-<p>From the unwrapped 16-bit absolute position in every drive reply, differentiated against the time the request was sent (when the driver sampled the position) and low-pass filtered at 30 Hz. Using the reply arrival time instead adds UART and loop jitter that, multiplied by wheel speed, becomes velocity noise at high speed. The motors' reported RPM is coarse and delayed, so it is kept only as a fallback source selectable with <code>HUBVSRC</code>. Positions are converted to 4096 counts per revolution and per-wheel forward signs before any control code sees them.</p></div></div>
+<p>From the unwrapped 16-bit absolute position in every drive reply, differentiated against the time the request was sent (when the driver sampled the position) and low-pass filtered at 30 Hz. Using the reply arrival time instead adds UART and loop jitter that, multiplied by wheel speed, becomes velocity noise at high speed. Since 4.7.5 the balance controller also takes its speed from these per-wheel estimates (setting <code>VELSRC</code>); before, it differenced the averaged position every loop, which aliased reply jitter into noise that grew from 0.02 to 0.07 m/s rms with speed and drove a 22 Hz oscillation in climb mode. The motors' reported RPM is coarse and delayed, so it is kept only as a fallback source selectable with <code>HUBVSRC</code>. Positions are converted to 4096 counts per revolution and per-wheel forward signs before any control code sees them.</p></div></div>
 <div class="qa"><div class="q"><i>H8</i>What limits the motor current, and why 2.7 A?</div><div class="a">
 <p>A per-motor software limit (<code>CURRENT</code>, default 2700 mA, maximum 4400 mA) is applied before the command is quantised to the driver's ±8 A scale. 2.7 A gives about 2 N·m per wheel, which recovers the 2.6 kg robot from the tilts it meets in normal driving while staying well inside the drivers' thermal and overcurrent limits on a 5S supply.</p>
 <p>Balance current is allocated first; steering only receives the remaining headroom per wheel. A sharp turn therefore cannot steal the torque needed to catch a fall.</p></div></div>
@@ -150,6 +151,14 @@
 <div class="qa"><div class="q"><i>S28</i>How are the LED ring states chosen?</div><div class="a">
 <p>The ring follows a fixed priority: test patterns, fatal error, start-up loader (until the host sends <code>BR,1</code> and calibration completes), fall, numbered error codes, self-uprighting, gestures, pushed, then the armed motion animations and the ready heartbeat. Red is reserved for errors. Error n lights n LEDs clockwise from the front LED (<code>LEDFRONT</code>, numbered in the <code>LEDDIR</code> direction), which is set once with the <code>LT</code> test patterns. Animations are rate-limited and skip a frame rather than stall the control loop.</p></div></div>
 
+<div class="qa"><div class="q"><i>S29</i>How does the robot stop when the stick is released, and why did 4.7.6 change it?</div><div class="a">
+<p>While driving, the controller tracks the stick speed with the velocity, pitch and pitch-rate terms and drags its hold point along at <code>BRAKELK</code> (0.3 s) ahead. On release the speed target drops to zero, the robot leans back and brakes, and position hold takes over once it is nearly still.</p>
+<p>A recorded fall showed the limit of that scheme: reversing at 1.17 m/s, the velocity term alone asked for 8.7 m/s², the acceleration command and the 2.7 A current limit saturated for 0.6 s, and the attitude terms lost their authority. Version 4.7.5 rate-limited the speed target, which prevented the saturation but made every stop coast about 0.35 m. Version 4.7.6 removes that ramp and instead clamps the speed error to <code>VERRMAX</code> (0.7 m/s): braking starts at once and is strong, but the velocity term can take at most about 5 m/s², leaving headroom for balance.</p></div></div>
+<div class="qa"><div class="q"><i>S30</i>Why did deployments become faster?</div><div class="a">
+<p>The commit bundle used to carry the Android APK (37 MB) next to a firmware image of under 1 MB, and the robot downloads GitHub release files at a few tens of kB/s. The APK is now a separate release asset: a deployment downloads only the 0.5 MB bundle, and a transient systemd unit publishes the app afterwards, outside the deployment lock, so a slow link never delays or blocks the next update.</p></div></div>
+<div class="qa"><div class="q"><i>S31</i>How is a gamepad re-paired?</div><div class="a">
+<p>The controller accepts <code>BT,FORGET</code> only while disarmed. It disconnects the current pad, erases every Bluetooth bond with Bluepad32 and keeps accepting new connections. The console exposes it as <code>POST /api/gamepad/repair</code>, the terminal as <code>2pybot gamepad repair</code>, which then waits up to a minute for the pad to connect.</p></div></div>
+
 <h2 id="s-ops">Deployment, applications and quality</h2>
 <div class="qa"><div class="q"><i>S20</i>How is software deployed to the robot?</div><div class="a">
 <p>Each push builds a commit-bound bundle in CI containing the controller firmware compiled with a locked toolchain and the Android application. On the robot, a managed pull fetches the configured branch and the deployment service downloads the bundle for that exact commit. It stages an immutable host release, takes the controller maintenance lock and flashes the firmware through the worker. It then verifies that the controller reconnects READY and records the result.</p></div></div>
@@ -165,6 +174,6 @@
 <h2>Revision history</h2>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:14%">Revision</th><th>Changes</th></tr></thead><tbody>
 <tr><td>November 2026</td><td>4.4</td><td>Initial release for firmware and host 4.4.0.</td></tr>
-<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.4: corrupt-frame rejection, stall guard, settings blob, sample-time wheel speed, safety bubble, autonomy, Drive view and LED ring states.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.6: corrupt-frame rejection, stall guard, settings blob, sample-time wheel speed, safety bubble, autonomy, Drive view, LED ring states, braking update, faster deployment and gamepad re-pair; dark layout.</td></tr>
 </tbody></table>
 </body></html>

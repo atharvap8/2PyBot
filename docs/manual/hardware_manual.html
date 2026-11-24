@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>2PyBot Hardware Manual</title>
+<link rel="stylesheet" href="manual.css"></head><body>
+<span class="doccode">HW-2PB-004 Rev 4.7</span>
+
+<section class="cover">
+  <div class="brand">{{logo}}</div>
+  <div class="code">HW-2PB-004</div>
+  <div class="hero">{{hero:photo_side}}</div>
+  <div class="floor"></div>
+  <div class="title">2PyBot</div>
+  <div class="kind">Hardware manual</div>
+  <div class="sub">Mechanical construction, drive system, controller and host electronics, sensors, LED ring, camera head, pin assignments, assembly, inspection and hardware fault finding.</div>
+  <div class="meta"><div><b>HW-2PB-004</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.6 · Host software 4.7.6</div></div>
+</section>
+
+<h1 id="toc">Contents</h1>
+<div class="toc">
+  <a href="#s1">1 About this manual</a>
+  <a href="#s2">2 Overview and specifications</a>
+  <a href="#s3">3 Mechanical construction</a>
+  <a href="#s4">4 Drive system</a>
+  <a href="#s5">5 Controller (ESP32)</a>
+  <a href="#s6">6 Motor links (RS485)</a>
+  <a href="#s7">7 Sensors</a>
+  <a href="#s8">8 Host computer</a>
+  <a href="#s9">9 LED ring and status light</a>
+  <a href="#s10">10 Camera head and torch</a>
+  <a href="#s11">11 Power</a>
+  <a href="#s12">12 Gamepad</a>
+  <a href="#s13">13 Assembly and disassembly</a>
+  <a href="#s14">14 Inspection and maintenance</a>
+  <a href="#s15">15 Hardware fault finding</a>
+  <a href="#sA">Appendix A Pin and interface reference</a>
+  <a href="#sB">Appendix B Fasteners and printed parts</a>
+  <a href="#sR">Revision history</a>
+</div>
+
+<h1 id="s1"><span class="no">1</span>About this manual</h1>
+<p class="lead">This manual describes the physical robot: what it is made of, how the parts are connected, how to take it apart and put it back together, and how to find hardware faults. It is written for the person building, repairing or modifying 2PyBot.</p>
+<p>Values come from the firmware configuration (<code>firmware/BaseLink/config.h</code>), the CAD sources in <code>hardware/cad/</code> and the motor manufacturer's drawing. Where a value is an estimate in the source it is marked as such here. Software is covered in the software manual (SW-2PB-003) and operation in the user manual (UM-2PB-001).</p>
+<div class="box warn"><b class="t">Caution</b>Disconnect the battery before opening the robot, unplugging a motor or working on wiring. A hub motor driver keeps its last current command while powered; a robot on the bench with the battery connected can spin a wheel unexpectedly.</div>
+
+<h1 id="s2"><span class="no">2</span>Overview and specifications</h1>
+<div class="pair">
+<figure>{{photo:photo_quarter_left|Front left quarter|three-quarter view from the front left}}</figure>
+<figure>{{photo:photo_quarter_right|Front right quarter|three-quarter view from the front right}}</figure>
+</div>
+<p class="cap"><b>Figure 1.</b> 2PyBot. Lidar and LED ring on top, camera and torch in the face, a hub motor inside each wheel.</p>
+<div class="kpi">
+  <div><u>Model mass</u><b>2.6 kg</b></div>
+  <div><u>Supply</u><b>5S Li-ion</b></div>
+  <div><u>Wheel radius</u><b>52 mm</b></div>
+  <div><u>Track width</u><b>155 mm</b></div>
+</div>
+<table><thead><tr><th style="width:36%">Item</th><th>Value</th></tr></thead><tbody>
+<tr><td>Configuration</td><td>Two-wheel inverted pendulum, wheels on a common axle</td></tr>
+<tr><td>Mass used by the controller</td><td>2.6 kg (<code>HUB_MASS_KG</code>)</td></tr>
+<tr><td>Wheel radius, track width</td><td>52 mm loaded (<code>WHEELR</code>), 155 mm (<code>TRACKW</code>)</td></tr>
+<tr><td>Supply</td><td>5S Li-ion, 16.0 V to 21.0 V, 18 V nominal</td></tr>
+<tr><td>Hub motors</td><td>2 × DDT M0601, integrated FOC driver, RS485, torque mode</td></tr>
+<tr><td>Controller</td><td>ESP32-WROOM module (dual core, Bluetooth Classic and BLE)</td></tr>
+<tr><td>Host computer</td><td>Radxa Cubie A7A (Allwinner A733)</td></tr>
+<tr><td>Inertial sensor</td><td>ST ISM6HG256X accelerometer and gyroscope, QMC5883L compass</td></tr>
+<tr><td>Lidar</td><td>Slamtec RPLIDAR C1, 360°, 20 Hz, 265 mm above the floor</td></tr>
+<tr><td>Depth sensor</td><td>ST VL53L5CX, 8 × 8 zones, 45° field of view, 210 mm above the floor</td></tr>
+<tr><td>Camera</td><td>Sony IMX708 wide, on pan and zoom servos, with a dimmable torch</td></tr>
+<tr><td>Indicators</td><td>16 LED WS2812 ring, blue status LED in the power button</td></tr>
+<tr><td>Wireless</td><td>Wi-Fi on the host (hotspot and client), Bluetooth on the controller (gamepad)</td></tr>
+</tbody></table>
+
+<h2>2.1 Block diagram</h2>
+<svg class="diagram" viewBox="0 0 700 300" font-family="Segoe UI, sans-serif" font-size="11">
+  <defs><marker id="b1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a7f74"/></marker></defs>
+  <rect x="260" y="20" width="180" height="70" rx="8" fill="#221e1a" stroke="#f08a4b"/><text x="350" y="48" text-anchor="middle" fill="#fff4ea" font-size="13" font-weight="600">Radxa Cubie A7A</text><text x="350" y="68" text-anchor="middle" fill="#b3a99e">host computer</text>
+  <rect x="260" y="170" width="180" height="70" rx="8" fill="#221e1a" stroke="#f08a4b"/><text x="350" y="198" text-anchor="middle" fill="#fff4ea" font-size="13" font-weight="600">ESP32-WROOM</text><text x="350" y="218" text-anchor="middle" fill="#b3a99e">controller</text>
+  <line x1="350" y1="90" x2="350" y2="170" stroke="#f08a4b" stroke-width="2.5"/><text x="358" y="128" fill="#b3a99e">USB (CP2102 bridge)</text><text x="358" y="143" fill="#b3a99e">serial + reset line</text>
+  <g fill="#1b1815" stroke="#3a332d"><rect x="20" y="10" width="180" height="28" rx="5"/><rect x="20" y="45" width="180" height="28" rx="5"/><rect x="20" y="80" width="180" height="28" rx="5"/>
+  <rect x="500" y="30" width="180" height="28" rx="5"/><rect x="500" y="70" width="180" height="28" rx="5"/>
+  <rect x="20" y="150" width="180" height="28" rx="5"/><rect x="20" y="185" width="180" height="28" rx="5"/><rect x="20" y="220" width="180" height="28" rx="5"/><rect x="20" y="255" width="180" height="28" rx="5"/>
+  <rect x="500" y="150" width="180" height="28" rx="5"/><rect x="500" y="185" width="180" height="28" rx="5"/><rect x="500" y="220" width="180" height="28" rx="5"/><rect x="500" y="255" width="180" height="28" rx="5"/></g>
+  <g fill="#ece5dd"><text x="110" y="28" text-anchor="middle">IMX708 camera · CSI</text><text x="110" y="63" text-anchor="middle">RPLIDAR C1 · UART4</text><text x="110" y="98" text-anchor="middle">VL53L5CX · I2C bus 7</text>
+  <text x="590" y="48" text-anchor="middle">Wi-Fi · hotspot + client</text><text x="590" y="88" text-anchor="middle">SSH · browsers · app</text>
+  <text x="110" y="168" text-anchor="middle">IMU + compass · I2C</text><text x="110" y="203" text-anchor="middle">LED ring · GPIO 15</text><text x="110" y="238" text-anchor="middle">Status LED · GPIO 32</text><text x="110" y="273" text-anchor="middle">Pan, zoom servos · torch</text>
+  <text x="590" y="168" text-anchor="middle">Left M0601 · RS485 id 1</text><text x="590" y="203" text-anchor="middle">Right M0601 · RS485 id 2</text><text x="590" y="238" text-anchor="middle">Gamepad · Bluetooth</text><text x="590" y="273" text-anchor="middle">5S Li-ion battery</text></g>
+  <g stroke="#8a7f74" stroke-width="1.3" fill="none" marker-end="url(#b1)"><path d="M200 24 H260"/><path d="M200 59 H260"/><path d="M200 94 H260"/><path d="M500 44 H440"/><path d="M500 84 H440"/>
+  <path d="M200 164 H260"/><path d="M260 199 H200"/><path d="M260 222 H200"/><path d="M260 236 L200 269"/><path d="M440 178 L500 164"/><path d="M440 199 H500"/><path d="M500 234 H440"/></g>
+</svg>
+<p class="cap"><b>Figure 2.</b> Electronic blocks and their interfaces. Power distribution is described in section 11.</p>
+
+<h1 id="s3"><span class="no">3</span>Mechanical construction</h1>
+<div class="pair">
+<figure>{{photo:photo_front|Front|straight on from the front}}</figure>
+<figure>{{photo:photo_rear|Rear|straight on from behind}}</figure>
+</div>
+<p class="cap"><b>Figure 3.</b> Front and rear views.</p>
+<h2>3.1 Structure</h2>
+<p>The robot is built around a stack of three decks of 150 mm × 90 mm, 1.6 mm thick, joined by M3 standoffs at the corners. The hub motors hang below the bottom deck on printed mounts; the controller, battery and camera head sit in the body above; the lidar sits on top.</p>
+<table><thead><tr><th style="width:44%">Dimension</th><th>Value</th></tr></thead><tbody>
+<tr><td>Deck width × depth × thickness</td><td>150 × 90 × 1.6 mm</td></tr>
+<tr><td>Clear gap bottom to middle deck</td><td>60 mm</td></tr>
+<tr><td>Clear gap middle to top deck</td><td>40 mm</td></tr>
+<tr><td>Corner holes</td><td>M3, inset about 3.5 mm (estimated in the CAD)</td></tr>
+<tr><td>Motor anchor pattern</td><td>Four M3 holes on 30 × 30 mm centres per side (estimated in the CAD)</td></tr>
+<tr><td>Lidar position</td><td>On the axle line, 31 mm right of centre, scan plane 265 mm above the floor</td></tr>
+<tr><td>Depth sensor position</td><td>In the face, 40 mm left of centre, 210 mm above the floor</td></tr>
+</tbody></table>
+<p>The CAD coordinate frame has its origin at the front left corner of the bottom deck, on its underside. X runs left to right seen from the front, Y from front to back and Z upward.</p>
+<h2>3.2 Printed covers</h2>
+<p>The covers are 3D printed and slide over the deck stack. The live robot uses the parts in <code>models/</code>; a parametric revision 5 enclosure in <code>hardware/cad/enclosure/rev5/</code> is designed but not yet printed or fit-tested.</p>
+<table><thead><tr><th style="width:36%">Part</th><th style="width:22%">Estimated mass</th><th>Function</th></tr></thead><tbody>
+<tr><td>Base, front and back halves</td><td>24 g + 25 g</td><td>Bottom tray under the lower deck</td></tr>
+<tr><td>Shell</td><td>212 g</td><td>Main cover, top plate, ring channel, camera and cable openings</td></tr>
+<tr><td>Face</td><td>17 g</td><td>Camera and depth sensor plate with logo</td></tr>
+<tr><td>Motor covers, left and right</td><td>41 g each</td><td>Covers over the motor mounts</td></tr>
+<tr><td>Camera beam</td><td>6 g</td><td>Front beam carrying the camera head</td></tr>
+</tbody></table>
+<p class="small">Masses are slicer estimates (0.20 mm layers, 15% infill, two walls, PLA+ at 1.25 g/cm³) from <code>hardware/dynamics/README.md</code>, about 366 g in total.</p>
+<h2>3.3 Rest position and bumper</h2>
+<p>When disarmed the robot tips forward and rests on its front bumper at about 60° from vertical. The bumper takes every fall and every self-uprighting start, so it is a wear part (section 14).</p>
+<figure>{{photo:photo_rest|At rest on the bumper|from the side, robot leaning on its bumper}}</figure>
+<p class="cap"><b>Figure 4.</b> Rest position on the front bumper.</p>
+
+<h1 id="s4"><span class="no">4</span>Drive system</h1>
+<h2>4.1 M0601 hub motors</h2>
+<p>Each wheel is a DDT M0601 direct-drive hub motor with an integrated field-oriented control driver, a 4096 count position sensor and an RS485 interface. The motors are handed: the left and right versions differ, so fit each on its own side.</p>
+<table><thead><tr><th style="width:44%">Property</th><th>Value</th></tr></thead><tbody>
+<tr><td>Supply</td><td>18 V nominal (battery voltage)</td></tr>
+<tr><td>Torque constant</td><td>0.75 N·m/A</td></tr>
+<tr><td>Speed constant</td><td>11.1 rpm/V</td></tr>
+<tr><td>Position resolution</td><td>4096 counts per revolution</td></tr>
+<tr><td>Current command scale</td><td>±32767 = ±8 A</td></tr>
+<tr><td>Current limit in firmware</td><td>2.7 A default, 4.4 A maximum (<code>CURRENT</code>)</td></tr>
+<tr><td>Rated and no-load speed</td><td>115 rpm and 200 rpm at 18 V (about 0.61 and 1.05 m/s)</td></tr>
+<tr><td>Wheel diameter (drawing)</td><td>100.7 mm ±1.5 mm; firmware uses a 52 mm loaded radius</td></tr>
+<tr><td>Overall width (drawing)</td><td>65.5 mm ±0.5 mm</td></tr>
+<tr><td>Stator mounting</td><td>19 mm keyed stator with three flats; three M2.5 threaded holes on a 15.2 mm circle, 5 mm deep</td></tr>
+</tbody></table>
+<p>At the 2.7 A limit each wheel produces about 2 N·m. Torque mode is the only drive mode used: velocity mode added an internal speed loop that oscillated against the balance controller.</p>
+<h2>4.2 Motor mounts</h2>
+<p>Each motor stator is held in a printed fork that bolts to the four motor anchors under the bottom deck. The revision 1 mount in <code>hardware/cad/m0601_mount/rev1/</code> is the reference design:</p>
+<ul>
+<li>A keyed 19.45 mm socket, 13 mm deep, matches the stator flats so the stator cannot turn under torque.</li>
+<li>A 6 mm end plate carries three M2.5 × 10 mm screws into the stator, giving about 3.5 mm thread engagement with 0.5 mm washers.</li>
+<li>Four captive M3 nuts in side pockets take the M3 × 10 mm screws from the deck anchors.</li>
+<li>A slot in the web takes a cable tie for strain relief of the motor cable.</li>
+</ul>
+<p>The mount is a prototype printed in PETG or ASA with six walls and 50% to 60% infill. It is not load rated; inspect it for cracks around the socket after hard falls.</p>
+<h2>4.3 Directions and signs</h2>
+<table><thead><tr><th style="width:44%">Setting</th><th>Value</th></tr></thead><tbody>
+<tr><td>Left motor</td><td>RS485 id 1, direction −1 (<code>LDIR</code>)</td></tr>
+<tr><td>Right motor</td><td>RS485 id 2, direction +1 (<code>RDIR</code>)</td></tr>
+<tr><td>Current and rpm sign</td><td>−1 each (<code>ISGN</code>, <code>RPMSGN</code>)</td></tr>
+</tbody></table>
+<p>These values are confirmed on the robot. Change them only after replacing a motor with a different version, and only with the robot lifted and disarmed.</p>
+
+<h1 id="s5"><span class="no">5</span>Controller (ESP32)</h1>
+<p>The controller is an ESP32-WROOM module on a perforated board in the middle of the robot. It runs the balance loop, talks to both motors over separate RS485 transceivers, reads the inertial sensors, drives the LED ring, servos and torch, and pairs with the gamepad over Bluetooth. A WROOM module is required: on WROVER modules GPIO 16 and 17 are used by the PSRAM.</p>
+<figure>{{photo:photo_internals|Inside the body|through the face opening}}</figure>
+<p class="cap"><b>Figure 5.</b> Inside the body, seen through the face: the controller board with its blue status LED, the battery behind it, the USB cable to the host and the torch.</p>
+<h2>5.1 Pin assignment</h2>
+<table><thead><tr><th style="width:32%">Function</th><th style="width:18%">GPIO</th><th>Notes</th></tr></thead><tbody>
+<tr><td>Left RS485 TX / RX / DE</td><td>17 / 16 / 4</td><td>UART1, motor id 1</td></tr>
+<tr><td>Right RS485 TX / RX / DE</td><td>19 / 18 / 23</td><td>UART2, motor id 2</td></tr>
+<tr><td>I2C SDA / SCL</td><td>21 / 22</td><td>400 kHz, IMU and compass</td></tr>
+<tr><td>LED ring data</td><td>15</td><td>WS2812, I2S1 DMA</td></tr>
+<tr><td>Status LED</td><td>32</td><td>GPIO to LED anode, cathode to ground; PWM channel 0</td></tr>
+<tr><td>Camera pan servo</td><td>26</td><td>PWM channel 4, 50 Hz</td></tr>
+<tr><td>Camera zoom servo</td><td>0</td><td>PWM channel 5, 50 Hz; boot strapping pin</td></tr>
+<tr><td>Torch MOSFET gate</td><td>2</td><td>PWM channel 6, 20 kHz; boot strapping pin</td></tr>
+<tr><td>USB serial</td><td>1 / 3</td><td>Through the on-board CP2102 bridge, 460800 baud</td></tr>
+</tbody></table>
+<h2>5.2 Strapping pins</h2>
+<p>GPIO 0 and GPIO 2 decide the boot mode of the ESP32. Both must be low or floating low at reset for a normal boot, and GPIO 0 has a pull-down. The firmware resets both to plain outputs and drives them low before the PWM peripheral takes them over, so the zoom servo and torch do not twitch at power-on. Do not add pull-ups or loads that hold these pins high.</p>
+<h2>5.3 Reset and boot control</h2>
+<p>The host holds the ESP32 in reset through the USB bridge's control line until its services are running (boot gate). After release the firmware sends zero current to both motors at once and waits for the host's ready message before calibrating. Flashing also uses the bridge's control lines, so the controller is always programmed from the host; no buttons need to be pressed.</p>
+
+<h1 id="s6"><span class="no">6</span>Motor links (RS485)</h1>
+<p>Each motor has its own half-duplex RS485 bus with its own transceiver, so a fault on one cable cannot block the other wheel.</p>
+<table><thead><tr><th style="width:44%">Property</th><th>Value</th></tr></thead><tbody>
+<tr><td>Signalling</td><td>RS485 half duplex, 115200 baud, 8N1</td></tr>
+<tr><td>Direction control</td><td>Transceiver DE and /RE tied together, driven by the UART RTS signal</td></tr>
+<tr><td>Frame</td><td>10 bytes, CRC-8, one request per motor every 5 ms</td></tr>
+<tr><td>Link timeout</td><td>60 ms without a valid reply disarms the robot</td></tr>
+</tbody></table>
+<h2>6.1 Wiring practice</h2>
+<ul>
+<li>Use a twisted pair for A and B, and keep the ground reference between transceiver and motor connected.</li>
+<li>Keep the RS485 pairs away from the motor phase area and the torch supply.</li>
+<li>Secure the connectors with strain relief: the wheels and body move relative to each other at every fall.</li>
+<li>The firmware counts lost replies per wheel. A healthy link loses well under one reply per second; repeated losses on one side point to a cable, connector or termination problem on that side.</li>
+</ul>
+<div class="box"><b class="t">Note</b>As of 4.7.6 the left link loses about three replies per second while the right loses well under one. The firmware tolerates this, but the left cable and connector should be checked.</div>
+
+<h1 id="s7"><span class="no">7</span>Sensors</h1>
+<h2>7.1 Inertial sensor</h2>
+<p>The ST ISM6HG256X provides acceleration and rotation rate at 960 Hz with ranges of ±4 g and ±2000 dps. It sits on the controller board; pitch uses accelerometer axes Y and Z and gyro axis X. The board must be mounted rigidly: any flex or vibration between the board and the body appears directly as pitch noise. The QMC5883L compass on the same bus is used for diagnostics only, because the hub motors disturb it indoors.</p>
+<p>The pitch trim (−1.26° in the compiled defaults) compensates the sensor's mounting angle. If the controller board is remounted, the trim must be measured again.</p>
+<h2>7.2 Lidar</h2>
+<p>The Slamtec RPLIDAR C1 is mounted on top, on the axle line and 31 mm right of centre, so its scan plane does not move forward and back when the body pitches. It connects to UART4 of the host at 460800 baud. Keep the optical window clean and free of tape or cables; anything inside the window is seen as an obstacle at a fixed distance. The lidar cannot see objects lower than its 265 mm scan plane, glass or mirrors.</p>
+<h2>7.3 Depth sensor</h2>
+<p>The ST VL53L5CX in the face measures an 8 × 8 grid of distances over 45° at 10 Hz. It is on I2C bus 7 of the host at address 0x29, 210 mm above the floor and 40 mm left of centre, tilted down. It covers low obstacles and drop-offs below the lidar plane.</p>
+<h2>7.4 Camera</h2>
+<p>The Sony IMX708 wide camera module connects to the host's MIPI CSI port. It is mounted on the pan and zoom servos in the face. The CSI ribbon must move freely through the full pan range without being pinched; route it with a service loop.</p>
+
+<h1 id="s8"><span class="no">8</span>Host computer</h1>
+<p>The Radxa Cubie A7A (Allwinner A733) runs Linux and all host software.</p>
+<table><thead><tr><th style="width:36%">Interface</th><th>Use</th></tr></thead><tbody>
+<tr><td>USB</td><td>Controller (CP2102 serial bridge, <code>/dev/ttyUSB0</code>); also powers the controller</td></tr>
+<tr><td>MIPI CSI</td><td>IMX708 camera</td></tr>
+<tr><td>UART4 (40-pin header)</td><td>Lidar, <code>/dev/ttyAS4</code>, 460800 baud</td></tr>
+<tr><td>I2C bus 7 (40-pin header)</td><td>Depth sensor, address 0x29</td></tr>
+<tr><td>Wi-Fi</td><td>Hotspot <b>2PyBot</b> at 10.42.0.1, plus a client connection to a home network</td></tr>
+</tbody></table>
+<p>The lidar needs 460800 baud, which the A733 UARTs cannot generate from their normal 24 MHz clock. A device-tree overlay moves the UARTs to a 96 MHz clock; if the lidar stops working after an operating system update, check that overlay first.</p>
+
+<h1 id="s9"><span class="no">9</span>LED ring and status light</h1>
+<p>The ring is 16 WS2812 LEDs in a channel around the lidar, driven from GPIO 15. LED 9 faces forward and the numbering runs clockwise seen from above (settings <code>LEDFRONT</code> 9 and <code>LEDDIR</code> 1). Brightness is limited to 200 of 255 and the ring is refreshed at 50 frames per second.</p>
+<div class="pair">
+<figure><svg class="diagram" viewBox="0 0 220 236" font-family="Segoe UI, sans-serif" style="max-width:62mm"><circle cx="110" cy="114" r="92" fill="#1b1815" stroke="#3a332d"/><circle cx="110" cy="114" r="62" fill="#141210" stroke="#3a332d"/><path d="M110 4 l-7 12 h14 z" fill="#f08a4b"/><text x="128" y="14" fill="#f08a4b" font-size="10">front</text><text x="110" y="232" text-anchor="middle" fill="#b3a99e" font-size="10">rear</text><circle cx="139.8" cy="186.1" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="139.8" y="189.6" text-anchor="middle" font-size="10" fill="#fff4ea">0</text><circle cx="110.0" cy="192.0" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="110.0" y="195.5" text-anchor="middle" font-size="10" fill="#fff4ea">1</text><circle cx="80.2" cy="186.1" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="80.2" y="189.6" text-anchor="middle" font-size="10" fill="#fff4ea">2</text><circle cx="54.8" cy="169.2" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="54.8" y="172.7" text-anchor="middle" font-size="10" fill="#fff4ea">3</text><circle cx="37.9" cy="143.8" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="37.9" y="147.3" text-anchor="middle" font-size="10" fill="#fff4ea">4</text><circle cx="32.0" cy="114.0" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="32.0" y="117.5" text-anchor="middle" font-size="10" fill="#fff4ea">5</text><circle cx="37.9" cy="84.2" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="37.9" y="87.7" text-anchor="middle" font-size="10" fill="#fff4ea">6</text><circle cx="54.8" cy="58.8" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="54.8" y="62.3" text-anchor="middle" font-size="10" fill="#fff4ea">7</text><circle cx="80.2" cy="41.9" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="80.2" y="45.4" text-anchor="middle" font-size="10" fill="#fff4ea">8</text><circle cx="110.0" cy="36.0" r="10" fill="#f08a4b" stroke="#8a7f74"/><text x="110.0" y="39.5" text-anchor="middle" font-size="10" fill="#fff4ea">9</text><circle cx="139.8" cy="41.9" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="139.8" y="45.4" text-anchor="middle" font-size="10" fill="#fff4ea">10</text><circle cx="165.2" cy="58.8" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="165.2" y="62.3" text-anchor="middle" font-size="10" fill="#fff4ea">11</text><circle cx="182.1" cy="84.2" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="182.1" y="87.7" text-anchor="middle" font-size="10" fill="#fff4ea">12</text><circle cx="188.0" cy="114.0" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="188.0" y="117.5" text-anchor="middle" font-size="10" fill="#fff4ea">13</text><circle cx="182.1" cy="143.8" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="182.1" y="147.3" text-anchor="middle" font-size="10" fill="#fff4ea">14</text><circle cx="165.2" cy="169.2" r="10" fill="#2a221c" stroke="#8a7f74"/><text x="165.2" y="172.7" text-anchor="middle" font-size="10" fill="#fff4ea">15</text><text x="110" y="111" text-anchor="middle" fill="#ece5dd" font-size="11">lidar</text><text x="110" y="126" text-anchor="middle" fill="#8a7f74" font-size="9">seen from above</text></svg></figure>
+<figure>{{photo:photo_ring|LED ring|close-up of the ring around the lidar}}</figure>
+</div>
+<p class="cap"><b>Figure 6.</b> LED numbering seen from above, and the ring on the robot.</p>
+<p>If the ring is remounted or replaced, run the front check (<b>LED test</b> in the console, or <code>LT,2</code>): only the front LED should light. If another LED lights, set <code>LEDFRONT</code> to its number; if a turn animation runs the wrong way, change <code>LEDDIR</code>.</p>
+<p>The blue status LED in the power button is driven from GPIO 32 on its own PWM channel and timer, so it keeps animating during blocking calibration.</p>
+<p>The ring and servos are supplied from the 5 V rail and must share ground with the ESP32.</p>
+
+<h1 id="s10"><span class="no">10</span>Camera head and torch</h1>
+<table><thead><tr><th style="width:24%">Output</th><th style="width:30%">Signal</th><th>Range</th></tr></thead><tbody>
+<tr><td>Pan servo</td><td>GPIO 26, 50 Hz, 500 to 2400 µs</td><td>120° to 190° requested, home 165°, 70°/s; output clamped to 180°</td></tr>
+<tr><td>Zoom servo</td><td>GPIO 0, 50 Hz, 500 to 2400 µs</td><td>80° to 140°, home 120°, 45°/s</td></tr>
+<tr><td>Torch</td><td>GPIO 2, 20 kHz, 10 bit, MOSFET gate</td><td>5% to 90% duty, start value 25%</td></tr>
+</tbody></table>
+<ul>
+<li>Each servo releases its PWM output 2 s after its last command (<code>SVIDLE</code>) so it does not buzz or heat while holding.</li>
+<li>The torch duty has a hard cap of 90% in firmware, whatever the setting.</li>
+<li>Servo end stops are set in software. After replacing a servo or its horn, check the full range slowly before driving the camera to the limits.</li>
+</ul>
+
+<h1 id="s11"><span class="no">11</span>Power</h1>
+<p>2PyBot runs from a protected 5S Li-ion battery, 16.0 V to 21.0 V (18 V nominal). The robot does not measure battery voltage; the 18 V value in the firmware is a configuration estimate only.</p>
+<table><thead><tr><th style="width:36%">Consumer</th><th>Supply</th></tr></thead><tbody>
+<tr><td>Hub motors</td><td>Battery voltage</td></tr>
+<tr><td>Host computer</td><td>5 V from a step-down converter on the battery</td></tr>
+<tr><td>Controller</td><td>Through the USB cable from the host</td></tr>
+<tr><td>LED ring and servos</td><td>5 V rail, common ground with the controller</td></tr>
+</tbody></table>
+<div class="box"><b class="t">Note</b>Wire gauges, fuse and converter part numbers are not recorded in the repository. Measure and record them before modifying the power wiring rather than relying on assumptions.</div>
+<ul>
+<li>Charge the battery outside the robot with a balance charger, to 4.2 V per cell.</li>
+<li>Stop driving at about 3.3 V per cell; motor torque drops with voltage and balance margins shrink.</li>
+<li>Shut the host down cleanly before switching the battery off, so maps and settings being written are not corrupted.</li>
+</ul>
+
+<h1 id="s12"><span class="no">12</span>Gamepad</h1>
+<figure>{{photo:photo_gamepad|Gamepad|from above}}</figure>
+<p class="cap"><b>Figure 7.</b> The EVOFOX One S gamepad.</p>
+<p>The gamepad (EVOFOX One S) pairs directly with the controller's Bluetooth through Bluepad32, so driving and stopping do not depend on the host or Wi-Fi. Put it in pairing mode by holding <b>HOME + A</b>; in this mode it identifies itself as EVOFOX One S, which is the mode the controller accepts. The controller raises its Bluetooth transmit power to the ESP32 maximum (+9 dBm) for range. To pair a different gamepad, use <b>Re-pair gamepad</b> in the control centre or <code>2pybot gamepad repair</code> with the robot disarmed.</p>
+
+<h1 id="s13"><span class="no">13</span>Assembly and disassembly</h1>
+<div class="box warn"><b class="t">Caution</b>Switch the battery off and wait for all LEDs to go dark before opening the robot. Shut the host down first if it is running.</div>
+<h2>13.1 Opening the body</h2>
+<ol>
+<li>Shut the host down, switch the battery off and disconnect it.</li>
+<li>Remove the screws holding the shell and lift it off the deck stack. Take care of the LED ring cable and the lidar cable as the top plate comes free.</li>
+<li>The face can now be separated to reach the camera, depth sensor, servos and torch.</li>
+</ol>
+<h2>13.2 Replacing a hub motor</h2>
+<ol>
+<li>Open the body, unplug the motor cable from its RS485 harness and cut the strain relief tie.</li>
+<li>Remove the four M3 screws holding the mount to the bottom deck and take off the motor with its mount.</li>
+<li>Remove the three M2.5 screws and pull the stator out of the socket.</li>
+<li>Fit the new motor of the same hand: seat the stator flats in the socket, fit the three M2.5 × 10 mm screws with washers, then tighten gently (the thread is 5 mm deep).</li>
+<li>Refit the mount, route the cable without contact with the rotating wheel and add a new cable tie.</li>
+<li>Check that the wheel turns freely by hand before closing the body.</li>
+<li>After power-up, check the System map shows the motor online and in torque mode before arming. A replacement motor must have the same RS485 id (1 left, 2 right).</li>
+</ol>
+<h2>13.3 Reassembly</h2>
+<ol>
+<li>Check every connector is seated and every cable clears the wheels, servos and the pan range of the camera.</li>
+<li>Slide the shell over the decks, guiding the ring and lidar cables, and fit the screws.</li>
+<li>Power up, wait for the start-up loader to finish and check the LED ring front (section 9) and the System map before the first arm.</li>
+<li>If the controller board was moved, recalibrate the pitch trim before balancing.</li>
+</ol>
+
+<h1 id="s14"><span class="no">14</span>Inspection and maintenance</h1>
+<table><thead><tr><th style="width:30%">Item</th><th style="width:18%">Interval</th><th>Check</th></tr></thead><tbody>
+<tr><td>Wheels and tyres</td><td>Weekly</td><td>Free rotation, no rubbing on covers, tyre wear and debris.</td></tr>
+<tr><td>Motor mounts</td><td>After hard falls</td><td>Cracks around the socket and anchor screws, loose M3 or M2.5 screws.</td></tr>
+<tr><td>Front bumper</td><td>Monthly</td><td>Wear and secure fixing; it carries every fall.</td></tr>
+<tr><td>Lidar window</td><td>Before mapping</td><td>Clean with a soft dry cloth; nothing inside the scan plane.</td></tr>
+<tr><td>Camera and depth sensor</td><td>Monthly</td><td>Clean the lens and sensor window.</td></tr>
+<tr><td>Motor cables</td><td>Monthly</td><td>Connectors seated, strain relief intact, lost reply counts low (System map).</td></tr>
+<tr><td>Servos</td><td>Monthly</td><td>Smooth movement through the full range, horn screws tight.</td></tr>
+<tr><td>Battery</td><td>Every charge</td><td>No swelling or damage, balanced cells.</td></tr>
+<tr><td>Motor temperature</td><td>During long runs</td><td>Shown in the console and control centre; let the robot cool if the drivers get hot.</td></tr>
+</tbody></table>
+
+<h1 id="s15"><span class="no">15</span>Hardware fault finding</h1>
+<table><thead><tr><th style="width:30%">Symptom</th><th style="width:30%">Likely cause</th><th>Action</th></tr></thead><tbody>
+<tr><td>Error code 1 (motor link)</td><td>Motor cable, connector, transceiver, no battery power to the motor</td><td>Check the side shown in the System map; reseat or replace the cable.</td></tr>
+<tr><td>Error code 2 (motor fault)</td><td>Overcurrent, stall, overheating or sensor fault reported by the driver</td><td>Read the fault name in the controller log; let the motor cool; check for a jammed wheel.</td></tr>
+<tr><td>Error code 3 (motor mode)</td><td>Driver reset or brown-out</td><td>Check battery voltage and the motor supply connection.</td></tr>
+<tr><td>Error code 4 (IMU)</td><td>I2C wiring, sensor damage</td><td>Check SDA 21 and SCL 22 and the sensor supply.</td></tr>
+<tr><td>Frequent lost replies on one side</td><td>RS485 pair, connector or ground</td><td>Inspect and reseat the cable on that side; keep it away from noise sources.</td></tr>
+<tr><td>Robot leans or drifts while holding</td><td>Controller board moved, pitch trim wrong</td><td>Recalibrate the trim with the robot balancing on a flat floor.</td></tr>
+<tr><td>Lidar shows no data</td><td>Cable, UART clock overlay</td><td>Check the cable and the 96 MHz UART overlay (section 8).</td></tr>
+<tr><td>Ring animations point the wrong way</td><td>Ring rotated during reassembly</td><td>Run the front check and set <code>LEDFRONT</code> (section 9).</td></tr>
+<tr><td>Zoom servo or torch flashes at power-on</td><td>Strapping pin pulled high</td><td>Check for external pull-ups on GPIO 0 and GPIO 2.</td></tr>
+<tr><td>Controller does not start</td><td>Host not up, boot gate holding reset</td><td>Wait for the host; check the USB cable between host and controller.</td></tr>
+</tbody></table>
+<p>The motor driver reports these faults: sensor, bus overcurrent, phase overcurrent, stall and overheat. A fault only counts if it repeats in three consecutive replies, so a single corrupt frame never trips the robot.</p>
+
+<h1 id="sA"><span class="no">Appendix A</span>Pin and interface reference</h1>
+<div class="cols2">
+<div>
+<h3>Controller (ESP32-WROOM)</h3>
+<table><tbody>
+<tr><td>GPIO 4</td><td>Left RS485 DE</td></tr>
+<tr><td>GPIO 16 / 17</td><td>Left RS485 RX / TX</td></tr>
+<tr><td>GPIO 18 / 19</td><td>Right RS485 RX / TX</td></tr>
+<tr><td>GPIO 23</td><td>Right RS485 DE</td></tr>
+<tr><td>GPIO 21 / 22</td><td>I2C SDA / SCL</td></tr>
+<tr><td>GPIO 15</td><td>LED ring</td></tr>
+<tr><td>GPIO 32</td><td>Status LED</td></tr>
+<tr><td>GPIO 26</td><td>Pan servo</td></tr>
+<tr><td>GPIO 0</td><td>Zoom servo</td></tr>
+<tr><td>GPIO 2</td><td>Torch</td></tr>
+</tbody></table>
+</div>
+<div>
+<h3>Host (Radxa Cubie A7A)</h3>
+<table><tbody>
+<tr><td>USB</td><td>Controller, 460800 baud</td></tr>
+<tr><td>CSI</td><td>IMX708 camera</td></tr>
+<tr><td>UART4</td><td>Lidar, 460800 baud</td></tr>
+<tr><td>I2C 7</td><td>VL53L5CX, 0x29</td></tr>
+</tbody></table>
+<h3>Buses</h3>
+<table><tbody>
+<tr><td>RS485 left</td><td>id 1, 115200</td></tr>
+<tr><td>RS485 right</td><td>id 2, 115200</td></tr>
+<tr><td>I2C controller</td><td>400 kHz</td></tr>
+</tbody></table>
+</div>
+</div>
+
+<h1 id="sB"><span class="no">Appendix B</span>Fasteners and printed parts</h1>
+<table><thead><tr><th style="width:40%">Item</th><th style="width:16%">Per side</th><th>Use</th></tr></thead><tbody>
+<tr><td>M3 × 10 mm screw, M3 nut, M3 washer</td><td>4 each</td><td>Motor mount to the bottom deck anchors</td></tr>
+<tr><td>M2.5 × 10 mm screw, 0.5 mm washer</td><td>3 each</td><td>Motor stator to the mount end plate</td></tr>
+<tr><td>Small cable tie</td><td>1</td><td>Motor cable strain relief</td></tr>
+<tr><td>M3 standoffs and screws</td><td>Corners</td><td>Deck stack</td></tr>
+</tbody></table>
+<table><thead><tr><th style="width:40%">Source</th><th>Contents</th></tr></thead><tbody>
+<tr><td><code>models/*.stl</code></td><td>Covers used on the robot</td></tr>
+<tr><td><code>hardware/cad/enclosure/rev5/</code></td><td>Parametric enclosure (OpenSCAD), not yet fit-tested</td></tr>
+<tr><td><code>hardware/cad/m0601_mount/rev1/</code></td><td>Motor mounts and fit gauges (OpenSCAD)</td></tr>
+<tr><td><code>hardware/dynamics/</code></td><td>Mass estimates and the balance model inputs</td></tr>
+</tbody></table>
+
+<h1 id="sR">Revision history</h1>
+<table><thead><tr><th style="width:18%">Date</th><th style="width:12%">Revision</th><th>Changes</th></tr></thead><tbody>
+<tr><td>November 2026</td><td>4.7</td><td>First edition, for firmware and host 4.7.6.</td></tr>
+</tbody></table>
+<h2>Important notice</h2>
+<p class="legal">Dimensions marked as estimates come from CAD that has not been measured against the physical robot. Measure before machining or printing replacement parts. Work on the robot only with the battery disconnected unless a step says otherwise.</p>
+</body></html>

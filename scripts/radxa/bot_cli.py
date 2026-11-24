@@ -195,13 +195,13 @@ class Bot:
                         print(c(entry["text"], "ok"))
                         return
                 time.sleep(1)
-            print(c("No gamepad connected yet. Keep HOME + B held, or run this again.", "warn"))
+            print(c("No gamepad connected yet. Keep HOME + A held, or run this again.", "warn"))
             return
         st = self.api("/api/autonomy/status").get("controller", {})
         connected = bool(st.get("pad"))
         print("Gamepad: " + (c("connected", "ok") if connected else c("not connected", "warn")))
         if not connected:
-            print("Pair it: hold HOME + B. If it will not connect, run: 2pybot gamepad repair")
+            print("Pair it: hold HOME + A. If it will not connect, run: 2pybot gamepad repair")
 
     def controller_log(self):
         lines = V.log_tail(self.args.lines)

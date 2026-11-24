@@ -257,12 +257,12 @@ def debug_record_status():return link.record_status()
 
 @app.post("/api/gamepad/repair")
 def gamepad_repair():
-    """Forget bonded gamepads on the controller so a pad can pair again (HOME + B)."""
+    """Forget bonded gamepads on the controller so a pad can pair again (HOME + A)."""
     if not link.connected or link.tel.get("stale",True):raise HTTPException(409,"Controller is not connected")
     if link.tel.get("balancing") or link.tel.get("self_righting"):raise HTTPException(409,"Press SELECT to stop the motors first")
     if link.derived.get("PADREPAIR")!=1:raise HTTPException(409,"Controller firmware is too old for re-pairing (needs 4.7.6)")
     if not link.send("BT,FORGET"):raise HTTPException(503,"Serial command unavailable")
-    return {"ok":True,"message":"Pairing keys cleared. Hold HOME + B on the gamepad until it connects."}
+    return {"ok":True,"message":"Pairing keys cleared. Hold HOME + A on the gamepad until it connects."}
 
 
 class LedTestInput(BaseModel):

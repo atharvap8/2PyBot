@@ -81,7 +81,7 @@ References are relative to [firmware/BaseLink](../../firmware/BaseLink/). Runtim
 
 | # | Question or symptom | Source | Check / behavior |
 | :--- | :--- | :--- | :--- |
-| 61 | Gamepad will not connect | `btgamepad_begin()` | Use EVOFOX Home+B pairing mode and the Bluepad32 core |
+| 61 | Gamepad will not connect | `btgamepad_begin()` | Use EVOFOX Home+A pairing mode and the Bluepad32 core |
 | 62 | Pairing keys need clearing | BP32.forgetBluetoothKeys | Enable the existing call for one flash, then disable it |
 | 63 | Buttons do nothing after connection | Center-calibration block | Both sticks must be near center before buttons are processed |
 | 64 | START held while connecting does not arm | `_freshConnect` | First processed button levels are adopted, not treated as presses |

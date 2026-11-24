@@ -84,7 +84,7 @@ export const NODES = {
     kind: "leaf", x: 1590, y: 316, w: 290, h: 106, icon: "pad",
     title: "EVOFOX gamepad", sub: "Direct Bluetooth, Bluepad32", lineCount: 1,
     path: "EVOFOX One S → Bluetooth → Bluepad32 (core 0) → arming and drive input",
-    checks: ["Pairing: Home + B.", "SELECT stops the robot locally; START arms it."],
+    checks: ["Pairing: Home + A.", "SELECT stops the robot locally; START arms it."],
     log: /\[PAD\]/,
   },
   lights: {

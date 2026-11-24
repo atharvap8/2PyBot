@@ -281,7 +281,7 @@ class Robot(ActionPage):
             ("LED test: show front", "front white, right green, back red", lambda: a.call("/api/led/test", {"mode": 2}, "Front check shown")),
             ("LED test: end", "back to normal ring", lambda: a.call("/api/led/test", {"mode": 0}, "LED test ended")),
             ("Calibrate gyro", "robot disarmed and perfectly still", self.gyro),
-            ("Re-pair gamepad", "forget the old pairing, then hold HOME + B", self.repair),
+            ("Re-pair gamepad", "forget the old pairing, then hold HOME + A", self.repair),
             ("Record 30 s of data", "for bubble/vibration analysis", self.record),
         ]
 
@@ -294,10 +294,10 @@ class Robot(ActionPage):
     def repair(self):
         if self.app.moving("re-pair the gamepad"):
             return
-        if self.app.confirm("Re-pair gamepad", "Forget the current gamepad pairing?\nAfterwards hold HOME + B on the gamepad until it connects."):
-            r = self.app.call("/api/gamepad/repair", {}, "Pairing cleared: hold HOME + B on the gamepad")
+        if self.app.confirm("Re-pair gamepad", "Forget the current gamepad pairing?\nAfterwards hold HOME + A on the gamepad until it connects."):
+            r = self.app.call("/api/gamepad/repair", {}, "Pairing cleared: hold HOME + A on the gamepad")
             if r:
-                self.app.message("Re-pair gamepad", r.get("message", "Hold HOME + B on the gamepad."))
+                self.app.message("Re-pair gamepad", r.get("message", "Hold HOME + A on the gamepad."))
 
     def record(self):
         r = self.app.call("/api/debug/record", {"seconds": 30, "label": "tui", "fast": True})

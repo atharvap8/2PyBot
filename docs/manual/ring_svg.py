@@ -68,8 +68,8 @@ def svg(name, size=118):
     leds, arrows, spin = STATES[name]
     out = [f'<svg class="ring" width="{size}" height="{size}" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">',
            '<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">'
-           '<path d="M0,0 L6,3 L0,6 z" fill="#d9cfc5"/></marker></defs>',
-           '<circle cx="60" cy="60" r="46" fill="#141210"/>',
+           '<path d="M0,0 L6,3 L0,6 z" fill="#8a7f74"/></marker></defs>',
+           '<circle cx="60" cy="60" r="47" fill="#0c0b0a" stroke="#3a332d" stroke-width="1"/>',
            '<path d="M60,4 l-5,7 h10 z" fill="#f08a4b"/>']                       # front marker
     for i in range(N):
         deg = i * STEP
@@ -85,9 +85,9 @@ def svg(name, size=118):
             out.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5.2" fill="{OFF}" stroke="#3d3630" stroke-width="0.8"/>')
     for a0, a1, dashed in arrows:
         dash = ' stroke-dasharray="3 3"' if dashed else ""
-        out.append(f'<path d="{_arc_path(a0, a1, 25)}" fill="none" stroke="#d9cfc5" stroke-width="2"{dash} marker-end="url(#ah)"/>')
+        out.append(f'<path d="{_arc_path(a0, a1, 25)}" fill="none" stroke="#8a7f74" stroke-width="2"{dash} marker-end="url(#ah)"/>')
     if spin:
         out.append(f'<path d="{_arc_path(200, 330, 25) if spin > 0 else _arc_path(330, 200, 25)}" fill="none" '
-                   'stroke="#d9cfc5" stroke-width="2" marker-end="url(#ah)"/>')
+                   'stroke="#8a7f74" stroke-width="2" marker-end="url(#ah)"/>')
     out.append("</svg>")
     return "".join(out)
