@@ -51,37 +51,12 @@ function render() {
   $("h-robot").textContent = live ? "connected" : "no data";
   $("h-mode").textContent = { idle: "ready", mapping: "mapping", localizing: "using map" }[S.mode] || S.mode;
 
-  // step 1
-  setCheck("c-lidar-conn", scanning ? "ok" : L.state === "error" ? "bad" : "wait");
-  setCheck("c-lidar-health", L.health === "good" ? "ok" : L.health ? "bad" : "");
-  const hz = S.rates.scan || 0;
-  setCheck("c-lidar-rate", hz > 6 ? "ok" : scanning ? "wait" : "");
-  $("h-step1").textContent = L.error ? "Problem: " + L.error : (L.note || "");
-  // step 2
-  setCheck("c-robot", live ? "ok" : "wait");
-  setCheck("c-axis", S.odom.axis ? "ok" : live ? "wait" : "");
-  $("c-axis").textContent = S.odom.axis ? `Gyro figured out (axis ${S.odom.axis})` :
-                                          `Gyro figured out ("spin the robot a few times")`;
-  for (const name of ["push", "turn"]) {
-    const t = (S.tests || {})[name];
-    if (!t) continue;
-    const val = name === "push" ? `${fmt(t.distance_m)} m` : `${fmt(t.turn_deg, 0)}°`;
-    $("t-" + name).innerHTML = `${val} — <span class="${t.pass ? "pass" : "fail"}">${t.pass ? "looks right" : t.hint}</span>`;
-  }
-  // step highlighting
-  const s1 = scanning && hz > 6, s2 = live && !!S.odom.axis, s3 = S.map_version > 0;
-  const active = !s1 ? 1 : !s2 ? 2 : S.mode === "mapping" || !s3 ? 3 : S.mode === "localizing" ? 5 : 4;
-  document.querySelectorAll(".step").forEach((el) => {
-    const n = +el.dataset.step;
-    el.classList.toggle("active", n === active);
-    el.classList.toggle("done", (n === 1 && s1) || (n === 2 && s2) || (n === 3 && s3 && S.mode !== "mapping")
-                                || (n === 4 && !!S.map_name));
-  });
   $("b-start").disabled = S.mode === "mapping";
   $("b-stop").disabled = S.mode === "idle";
   $("b-save").disabled = S.map_version === 0;
+  $("b-extend").disabled = S.mode === "mapping";
 
-  // meters + numbers
+  // meters + status
   const pts = L.points || (S.scan || []).length;
   meter("m-scan", pts / 450, pts ? `${pts}` : "–");
   meter("m-match", S.mode === "idle" ? 0 : S.match.score / 0.5, S.mode === "idle" ? "–" : fmt(S.match.score),
@@ -91,16 +66,10 @@ function render() {
   $("n-pose").textContent = `${fmt(S.pose[0])}, ${fmt(S.pose[1])} m · ${fmt((S.pose[2] * 180) / Math.PI, 0)}°`;
   $("n-odom").textContent = live ? `${fmt(Math.hypot(S.odom.x, S.odom.y))} m (${S.odom.source})` : "–";
   $("n-range").textContent = S.gate.usable_range ? `${fmt(S.gate.usable_range, 1)} m` : "–";
-  $("n-gate").textContent = `${S.gate.passed} / ${S.gate.tilt + S.gate.rate}`;
-  $("n-pts").textContent = pts || "–";
-  $("n-fw").textContent = L.model !== null && L.model !== undefined ? `${L.model} / ${L.firmware}` : "–";
-  $("adv").innerHTML = Object.entries(S.settings || {})
-    .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join("");
 
   const warn = /skipping|not sure|can't|Problem|error/i.test(S.message);
   setSay(S.message, warn ? "warn" : "");
   if (S.map_name && !$("map-name").value && document.activeElement !== $("map-name")) $("map-name").value = S.map_name;
-  $("b-extend").disabled = S.mode === "mapping";
   renderLabels();
   if (!guard) renderBubble();
   draw();
@@ -502,7 +471,6 @@ $("b-center").onclick = () => { cam.follow = true; if (view === "3d" && s3d) s3d
 $("estop").onclick = () => post("api/estop");
 $("b-start").onclick = () => post("api/mapping/start?fresh=true");
 $("b-stop").onclick = () => post("api/mapping/stop");
-document.querySelectorAll("[data-test]").forEach((b) => (b.onclick = () => post("api/test/" + b.dataset.test)));
 $("b-save").onclick = async () => {
   const name = $("map-name").value.trim();
   const r = await post("api/maps/save", { name });

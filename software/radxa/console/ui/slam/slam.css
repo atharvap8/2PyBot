@@ -26,7 +26,7 @@ button { background: none; border: 0; cursor: pointer; }
 .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.err { background: var(--err); }
 .estop { background: var(--err); color: #fff; font-weight: 700; padding: 8px 18px; border-radius: 6px; letter-spacing: .04em; }
 
-.layout { display: grid; grid-template-columns: 330px 1fr 290px; height: calc(100% - 60px); }
+.layout { display: grid; grid-template-columns: 340px 1fr; height: calc(100% - 60px); }
 .steps, .side { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .steps { border-right: 1px solid var(--line); }
 .side { border-left: 1px solid var(--line); }
