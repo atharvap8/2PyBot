@@ -86,7 +86,7 @@ def main():
         if existing.get("managed_by") != "2pybot-command-environment":
             raise RuntimeError("Existing unmanaged configuration left untouched: " + str(config_path))
     # Check every public command before installing anything over a user's tools.
-    for name in ["bot", "bot-env", *ALIASES]:
+    for name in ["bot", "2pybot", "bot-env", *ALIASES]:
         path = Path("/usr/local/bin") / name
         if path.exists() and MARKER not in path.read_text(errors="replace"):
             raise RuntimeError("Existing unmanaged command left untouched: " + str(path))
@@ -117,17 +117,19 @@ def main():
     launcher = "#!/bin/sh\n" + MARKER + "\nexec " + quote(str(environment / "bin/python3")) + " " + quote(str(repo / "scripts/radxa/bot_cli.py")) + ' "$@"\n'
     for directory in [Path("/usr/local/bin"), environment / "bin"]:
         managed(directory / "bot", launcher, True)
+        # `2pybot` alone opens the full-screen interface; with a command it is `bot`.
+        managed(directory / "2pybot", launcher.replace(' "$@"', ' --launcher 2pybot "$@"'), True)
         for name, command in ALIASES.items():
             managed(directory / name, "#!/bin/sh\n" + MARKER + "\nexec /usr/local/bin/bot " + quote(command) + ' "$@"\n', True)
     shellrc = base / "shellrc"
     managed(shellrc, MARKER + '\n[ ! -f "$HOME/.bashrc" ] || . "$HOME/.bashrc"\n. ' +
             quote(str(environment / "bin/activate")) + '\nexport BOT_CLI_CONFIG=' + quote(str(config_path)) + '\n' +
-            'complete -W "status check firmware-status build-firmware flash-fw deploy deploy-status update calibration diagnostics doctor backup restore params stop logs restart toolchain" bot\n')
+            'complete -W "status services check firmware-status build-firmware flash-fw deploy deploy-status update calibration diagnostics doctor backup restore params stop logs restart toolchain" bot\n')
     managed(Path("/usr/local/bin/bot-env"), "#!/bin/sh\n" + MARKER + "\nexec /bin/bash --rcfile " + quote(str(shellrc)) + ' -i "$@"\n', True)
     ssh_activation(home / ".bashrc", environment, account)
     login = next((home / name for name in (".bash_profile", ".bash_login", ".profile") if (home / name).exists()), home / ".profile")
     ssh_activation(login, environment, account)
-    print("Bot commands installed. From any directory: bot --help")
+    print("Bot commands installed. Type 2pybot for the control centre, or 2pybot help for commands.")
     print("New interactive SSH logins automatically activate (2pybot).")
     print("Optional isolated shell: bot-env (exit returns to your previous shell).")
 

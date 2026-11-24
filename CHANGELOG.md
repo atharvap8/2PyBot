@@ -3,6 +3,16 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## Unreleased — 2pybot control centre
+
+- `2pybot` opens a full-screen terminal control centre (curses, Python 3.9 standard
+  library). Pages: dashboard, robot actions, parameters, logs, services, updates,
+  network, system and help. `X` stops the motors from any page.
+- `2pybot <command>` / `bot <command>` print readable coloured tables instead of
+  raw JSON (`--json` keeps the raw data). New commands `services` and
+  `logs [-f]` (controller log by default).
+- `doctor` prints a summary and always saves the full report to a file.
+
 ## 4.7.4 — Start-up loader, new fall pattern
 
 - **Start-up loader:** the boot rainbow is gone. From power-on, a white comet spins
