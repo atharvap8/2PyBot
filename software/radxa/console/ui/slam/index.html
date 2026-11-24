@@ -145,10 +145,9 @@
   <section class="view">
     <div class="viewbar">
       <div class="seg" role="tablist">
-        <button id="v-map" aria-selected="true">Map</button>
+        <button id="v-map" aria-selected="false">Map</button>
         <button id="v-radar" aria-selected="false">Radar</button>
-        <button id="v-3d" aria-selected="false">3D</button>
-        <button id="v-drive" aria-selected="false">Drive</button>
+        <button id="v-3d" aria-selected="true">3D</button>
       </div>
       <span class="sub" id="view-note">Scroll or pinch to zoom · drag to move</span>
       <div class="spacer"></div>
@@ -156,7 +155,6 @@
     </div>
     <canvas id="cv"></canvas>
     <canvas id="cv3" hidden></canvas>
-    <div id="drive" class="drive" hidden></div>
     <div class="legend3d" id="legend3d" hidden><span><i style="background:#efe9e3"></i>Walls (lidar map)</span><span><i style="background:#2e2823;border:1px solid #4a4038"></i>Floor seen</span><span><i style="background:#f08a4b"></i>Robot / path</span><b id="stat3d"></b></div>
     <div class="say" id="say">Connecting…</div>
   </section>
@@ -199,7 +197,6 @@
   </aside>
 </main>
 <script src="static/slam3d.js"></script>
-<script src="static/drive.js"></script>
 <script src="static/slam.js"></script>
 </body>
 </html>

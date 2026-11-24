@@ -103,8 +103,7 @@ function render() {
   $("b-extend").disabled = S.mode === "mapping";
   renderLabels();
   if (!guard) renderBubble();
-  if (view === "drive") { if (drive) drive.update(S); }
-  else draw();
+  draw();
 }
 
 // ---------------------------------------------------------------- drawing
@@ -418,7 +417,6 @@ async function pollMission() {
     const m = r.mission;
     if (m && (m.state === "running" || m.state === "paused")) renderMission.lastSeen = Date.now();
     lastPoll = r; guard = r.bubble;
-    if (drive) drive.setHud(m ? { state: m.state, name: m.name, v: m.command_v, w: m.command_w } : null);
     if (m && m.state !== "running" && m.state !== "paused") sup = null;
   } catch (e) { /* console offline or separate SLAM port: no autonomy here */ }
   renderMission(); renderBubble();
@@ -484,33 +482,19 @@ async function update3d(force) {
   } catch (e) { /* the next state message retries */ }
   scene3dBusy = false;
 }
-const driveEl = $("drive"), drive = window.DriveView ? window.DriveView.create(driveEl) : null;
 function setView(v) {
   if (v === "3d" && !s3d) { setSay("3D needs WebGL, which this browser does not provide.", "warn"); v = "map"; }
   view = v;
-  for (const k of ["map", "radar", "3d", "drive"]) $("v-" + k).setAttribute("aria-selected", v === k);
-  cv.hidden = v === "3d" || v === "drive"; cv3.hidden = v !== "3d"; driveEl.hidden = v !== "drive";
+  for (const k of ["map", "radar", "3d"]) $("v-" + k).setAttribute("aria-selected", v === k);
+  cv.hidden = v === "3d"; cv3.hidden = v !== "3d";
   $("legend3d").hidden = v !== "3d";
   if (s3d) s3d.show(v === "3d");
-  if (drive) drive.show(v === "drive");
   $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
     : v === "radar" ? "Live scan around the robot (top = front)"
-    : v === "drive" ? "Live camera with lidar distances, safety bubble and planned path"
     : "45° corner view · drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
   if (v === "3d") update3d(true);
-  else if (v === "drive") { if (drive) { drive.resize(); fetchDriveScene(true); } }
   else resize();
 }
-let driveAt = 0;
-async function fetchDriveScene(force) {
-  if (!drive || view !== "drive" || !S) return;
-  const now = Date.now();
-  if (!force && (drive.version === S.map_version || now - driveAt < 2000)) return;
-  driveAt = now;
-  try { drive.setScene(await (await fetch(base + "api/scene3d")).json()); } catch (e) { /* retry later */ }
-}
-setInterval(() => fetchDriveScene(false), 1000);
-$("v-drive").onclick = () => setView("drive");
 $("v-map").onclick = () => setView("map");
 $("v-radar").onclick = () => setView("radar");
 $("v-3d").onclick = () => setView("3d");
@@ -533,4 +517,4 @@ $("b-find").onclick = async () => {
 };
 window.addEventListener("resize", resize);
 resize(); connect(); refreshMaps();
-setView({ radar: "radar", "3d": "3d", drive: "drive" }[new URLSearchParams(location.search).get("view")] || "map");
+setView({ map: "map", radar: "radar", "3d": "3d" }[new URLSearchParams(location.search).get("view")] || "3d");

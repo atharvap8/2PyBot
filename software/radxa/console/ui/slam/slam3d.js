@@ -1,12 +1,17 @@
 // Tilted map view: the 2D lidar map seen from a top corner at 45 degrees,
-// walls raised slightly, floor tiles flat.
+// walls raised slightly, floor tiles flat, plus a simple assembled model of the
+// robot (body, two wheels, camera head, lidar puck) scaled to its real size.
 // Self-contained WebGL1 + ANGLE_instanced_arrays; renders only when something
 // changes, so an idle page costs no GPU time. Exposes window.Slam3D.
+//
+// Instance layout: [offx, offy, offz, sx, sy, sz, r, g, b] (9 floats). Each cube
+// spans [off, off + scale]. Floor and wall cells share one size; the robot parts
+// each carry their own size, which is how one pipeline draws all of them.
 (function () {
   "use strict";
-  const VS = `attribute vec3 aPos; attribute vec3 aNrm; attribute vec4 aInst; attribute vec3 aCol;
-uniform mat4 uMVP; uniform float uSize; varying vec3 vCol;
-void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst.z + aPos.z*aInst.w);
+  const VS = `attribute vec3 aPos; attribute vec3 aNrm; attribute vec3 aOff; attribute vec3 aScl; attribute vec3 aCol;
+uniform mat4 uMVP; varying vec3 vCol;
+void main(){ vec3 p = aOff + aPos * aScl;
   float l = 0.55 + 0.45*max(dot(aNrm, normalize(vec3(0.4,0.3,0.85))), 0.0);
   vCol = aCol * l; gl_Position = uMVP * vec4(p, 1.0); }`;
   const FS = `precision mediump float; varying vec3 vCol; void main(){ gl_FragColor = vec4(vCol, 1.0); }`;
@@ -37,8 +42,22 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   const norm = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
   const hex = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
-  const C_WALL = hex("#efe9e3"), C_FLOOR = hex("#2e2823"), C_BOT = hex("#f08a4b");
+  const C_WALL = hex("#efe9e3"), C_FLOOR = hex("#2e2823");
   const WALL_H = 0.175;                  // visual wall height (3.5 map cells)
+
+  // Simple robot, parts in the robot frame (x forward, y left, z up), metres.
+  // [cx, cy, cz, sx, sy, sz, colour]. Boxes stay axis-aligned; their centres are
+  // rotated by the heading, which is enough to read the robot's pose and facing.
+  const BOT_SCALE = 0.6;   // compact marker, smaller than life size
+  const C_BODY = hex("#f08a4b"), C_DARK = hex("#1f1b18"), C_LIDAR = hex("#cfc8bf"), C_NOSE = hex("#ffd9a8");
+  const BOT_PARTS = [
+    [0.00,  0.000, 0.105, 0.145, 0.095, 0.150, C_BODY],   // body
+    [0.00,  0.088, 0.052, 0.104, 0.028, 0.104, C_DARK],   // left wheel
+    [0.00, -0.088, 0.052, 0.104, 0.028, 0.104, C_DARK],   // right wheel
+    [0.052, 0.000, 0.205, 0.050, 0.075, 0.055, C_DARK],   // camera head
+    [0.00,  0.000, 0.260, 0.062, 0.062, 0.030, C_LIDAR],  // lidar puck
+    [0.088, 0.000, 0.150, 0.030, 0.030, 0.030, C_NOSE],   // front marker
+  ];
 
   function create(canvas) {
     const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
@@ -51,36 +70,42 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
       gl.linkProgram(p); return p; };
     const P = prog(VS, FS), L = prog(LVS, LFS);
     const a = { pos: gl.getAttribLocation(P, "aPos"), nrm: gl.getAttribLocation(P, "aNrm"),
-      inst: gl.getAttribLocation(P, "aInst"), col: gl.getAttribLocation(P, "aCol"), lpos: gl.getAttribLocation(L, "aPos") };
-    const u = { mvp: gl.getUniformLocation(P, "uMVP"), size: gl.getUniformLocation(P, "uSize"),
-      lmvp: gl.getUniformLocation(L, "uMVP"), lcol: gl.getUniformLocation(L, "uCol") };
+      off: gl.getAttribLocation(P, "aOff"), scl: gl.getAttribLocation(P, "aScl"), col: gl.getAttribLocation(P, "aCol"),
+      lpos: gl.getAttribLocation(L, "aPos") };
+    const u = { mvp: gl.getUniformLocation(P, "uMVP"), lmvp: gl.getUniformLocation(L, "uMVP"), lcol: gl.getUniformLocation(L, "uCol") };
     const cube = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, cube); gl.bufferData(gl.ARRAY_BUFFER, cubeGeometry(), gl.STATIC_DRAW);
-    const sets = { floor: { buf: gl.createBuffer(), n: 0, size: 0.05 }, walls: { buf: gl.createBuffer(), n: 0, size: 0.05 },
-      bot: { buf: gl.createBuffer(), n: 0, size: 0.16 } };
+    const sets = { floor: { buf: gl.createBuffer(), n: 0 }, walls: { buf: gl.createBuffer(), n: 0 }, bot: { buf: gl.createBuffer(), n: 0 } };
     const lines = { grid: { buf: gl.createBuffer(), n: 0 }, path: { buf: gl.createBuffer(), n: 0 } };
     const cam = { yaw: -2.356, pitch: 0.785, dist: 7, tx: 0, ty: 0, follow: true };   // 45 deg, low-x/low-y corner
     let pose = [0, 0, 0], dirty = true, raf = 0, visible = false;
 
-    function upload(set, data) { gl.bindBuffer(gl.ARRAY_BUFFER, set.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); set.n = data.length / 7; }
+    function upload(set, data) { gl.bindBuffer(gl.ARRAY_BUFFER, set.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); set.n = data.length / 9; }
     function uploadLine(l, data) { gl.bindBuffer(gl.ARRAY_BUFFER, l.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); l.n = data.length / 3; }
 
     function setScene(sc) {
       const r = sc.grid_res, o = sc.grid_origin;
-      const f = new Float32Array(sc.floor.length * 7);
-      sc.floor.forEach((c, i) => f.set([o + c[0] * r, o + c[1] * r, 0, 0.004, ...C_FLOOR], i * 7));
-      sets.floor.size = r; upload(sets.floor, f);
-      const w = new Float32Array(sc.walls.length * 7);
-      sc.walls.forEach((c, i) => w.set([o + c[0] * r, o + c[1] * r, 0, WALL_H, ...C_WALL], i * 7));
-      sets.walls.size = r; upload(sets.walls, w);
+      const f = new Float32Array(sc.floor.length * 9);
+      sc.floor.forEach((c, i) => f.set([o + c[0] * r, o + c[1] * r, 0, r, r, 0.004, ...C_FLOOR], i * 9));
+      upload(sets.floor, f);
+      const w = new Float32Array(sc.walls.length * 9);
+      sc.walls.forEach((c, i) => w.set([o + c[0] * r, o + c[1] * r, 0, r, r, WALL_H, ...C_WALL], i * 9));
+      upload(sets.walls, w);
       uploadLine(lines.path, new Float32Array(sc.path.flatMap((p) => [p[0], p[1], 0.012])));
       if (!lines.grid.n) { const g = []; for (let i = -20; i <= 20; i++) g.push(i, -20, -0.001, i, 20, -0.001, -20, i, -0.001, 20, i, -0.001);
         uploadLine(lines.grid, new Float32Array(g)); }
       setPose(sc.pose);
-    }    function setPose(p) {
+    }
+    function setPose(p) {
       if (!p) return; pose = p;
-      const s = sets.bot.size, c = Math.cos(p[2]), sn = Math.sin(p[2]);
-      upload(sets.bot, new Float32Array([p[0] - s / 2, p[1] - s / 2, 0.005, 0.12, ...C_BOT,
-        p[0] + c * 0.13 - s / 2, p[1] + sn * 0.13 - s / 2, 0.005, 0.06, ...C_BOT]));
+      const c = Math.cos(p[2]), sn = Math.sin(p[2]);
+      const data = new Float32Array(BOT_PARTS.length * 9);
+      BOT_PARTS.forEach((part, i) => {
+        const k = BOT_SCALE;
+        const cx = part[0] * k, cy = part[1] * k, cz = part[2] * k, sx = part[3] * k, sy = part[4] * k, sz = part[5] * k, col = part[6];
+        const wx = p[0] + c * cx - sn * cy, wy = p[1] + sn * cx + c * cy;   // rotate centre by heading
+        data.set([wx - sx / 2, wy - sy / 2, cz - sz / 2, sx, sy, sz, ...col], i * 9);
+      });
+      upload(sets.bot, data);
       if (cam.follow) { cam.tx = p[0]; cam.ty = p[1]; }
       request();
     }
@@ -103,12 +128,13 @@ void main(){ vec3 p = vec3(aInst.x + aPos.x*uSize, aInst.y + aPos.y*uSize, aInst
       gl.enableVertexAttribArray(a.pos); gl.vertexAttribPointer(a.pos, 3, gl.FLOAT, false, 24, 0);
       gl.enableVertexAttribArray(a.nrm); gl.vertexAttribPointer(a.nrm, 3, gl.FLOAT, false, 24, 12);
       for (const set of [sets.floor, sets.walls, sets.bot]) {
-        if (!set.n) continue; gl.uniform1f(u.size, set.size); gl.bindBuffer(gl.ARRAY_BUFFER, set.buf);
-        gl.enableVertexAttribArray(a.inst); gl.vertexAttribPointer(a.inst, 4, gl.FLOAT, false, 28, 0); inst.vertexAttribDivisorANGLE(a.inst, 1);
-        gl.enableVertexAttribArray(a.col); gl.vertexAttribPointer(a.col, 3, gl.FLOAT, false, 28, 16); inst.vertexAttribDivisorANGLE(a.col, 1);
+        if (!set.n) continue; gl.bindBuffer(gl.ARRAY_BUFFER, set.buf);
+        gl.enableVertexAttribArray(a.off); gl.vertexAttribPointer(a.off, 3, gl.FLOAT, false, 36, 0); inst.vertexAttribDivisorANGLE(a.off, 1);
+        gl.enableVertexAttribArray(a.scl); gl.vertexAttribPointer(a.scl, 3, gl.FLOAT, false, 36, 12); inst.vertexAttribDivisorANGLE(a.scl, 1);
+        gl.enableVertexAttribArray(a.col); gl.vertexAttribPointer(a.col, 3, gl.FLOAT, false, 36, 24); inst.vertexAttribDivisorANGLE(a.col, 1);
         inst.drawArraysInstancedANGLE(gl.TRIANGLES, 0, 36, set.n); }
-      inst.vertexAttribDivisorANGLE(a.inst, 0); inst.vertexAttribDivisorANGLE(a.col, 0);
-      gl.disableVertexAttribArray(a.inst); gl.disableVertexAttribArray(a.col);
+      inst.vertexAttribDivisorANGLE(a.off, 0); inst.vertexAttribDivisorANGLE(a.scl, 0); inst.vertexAttribDivisorANGLE(a.col, 0);
+      gl.disableVertexAttribArray(a.off); gl.disableVertexAttribArray(a.scl); gl.disableVertexAttribArray(a.col);
     }
     // orbit (1 finger / left drag), pan (2 fingers / right drag), zoom (pinch / wheel)
     const pts = new Map(); let last = null;
