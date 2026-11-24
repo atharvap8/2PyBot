@@ -759,7 +759,7 @@ COMMAND_LIST = [
 
 def print_help(launcher):
     print(c("2PyBot", "acc") + " robot commands\n")
-    print("  " + c(launcher, "info") + "  (no command)".ljust(36 - len(launcher)) + "open the full-screen interface")
+    print("  " + c(launcher.ljust(42), "info") + "open the full-screen interface (no command)")
     for cmd, text in COMMAND_LIST:
         print("  " + c((launcher + " " + cmd).ljust(42), "info") + text)
     print("\nAdd " + c("--json", "info") + " for raw data. Details: " + launcher + " <command> --help")
