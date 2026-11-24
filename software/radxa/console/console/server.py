@@ -280,6 +280,21 @@ def power_status():
     return power.status()
 
 
+class VisualPairInput(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/visual_pair")
+def visual_pair_status():
+    return visual_pair.status()
+
+
+@app.post("/api/visual_pair")
+def visual_pair_set(body: VisualPairInput):
+    """Enable or disable showing the gamepad to the camera to clear pairings."""
+    return visual_pair.set_enabled(body.enabled)
+
+
 @app.post("/api/power")
 async def power_set(body: PowerInput):
     """Power-down mode: camera, lidar, depth sensor and controller outputs off; wake from the console."""
@@ -386,7 +401,8 @@ async def _startup():
                                    asyncio.create_task(firmware.monitor()),
                                    asyncio.create_task(autonomy.run()),
                                   asyncio.create_task(publish_ready(link, host_ready)),
-                                  asyncio.create_task(power.run())]
+                                  asyncio.create_task(power.run()),
+                                  asyncio.create_task(visual_pair.run())]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
     app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
@@ -710,6 +726,8 @@ from .bubble_guard import BubbleGuard
 bubble_guard = BubbleGuard(slam_engine, link)    # BG caps to the controller (started in _startup)
 from .power import Power
 power = Power(link, stream.streamer, lidar, tof, autonomy, detector, link._log)   # console power-down mode
+from .visual_pair import VisualPair
+visual_pair = VisualPair(link, power, log=link._log)   # show the gamepad to the camera to re-pair
 # Threads start in _startup(), not at import: the deployer's import check
 # must not open /dev/ttyAS4 next to the running console.
 slam_web = slam_app.create_app(slam_engine, lidar, estop)

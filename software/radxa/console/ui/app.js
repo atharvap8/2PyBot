@@ -175,6 +175,8 @@ function connectWS() {
       state.params = Object.fromEntries(m.params.map(p => [p.key, p]));
       state.derived = m.derived || {};
       document.dispatchEvent(new CustomEvent('params'));
+    } else if (m.type === 'visual_pair') {
+      paintVisualPair(m.visual_pair);
     } else if (m.type === 'param_msg' || m.type === 'log') {
       msg(m.text, /PE,|ERROR|FAIL/.test(m.text));
       document.dispatchEvent(new CustomEvent('logline', { detail: m.text }));
@@ -198,6 +200,29 @@ function paintHeader() {
   const rx = document.getElementById('cRx');
   rx.textContent = `${(t.rx_hz ?? 0).toFixed(0)} Hz`;
   rx.className = 'chip' + ((t.rx_hz ?? 0) < 30 ? ' warn' : '');
+}
+
+// ---------------- visual re-pair ----------------
+// Shows a progress banner while the gamepad is being held in front of the camera.
+let vpTimer = null;
+function paintVisualPair(vp) {
+  if (!vp) return;
+  let bar = document.getElementById('vpbar');
+  const active = vp.enabled && ['watching', 'seen', 'triggered'].includes(vp.state) && (vp.hits > 0 || vp.state === 'triggered');
+  if (!active) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div'); bar.id = 'vpbar'; bar.className = 'vpbar';
+    bar.innerHTML = '<span class="t"></span><div class="track"><div class="fill"></div></div>';
+    (document.getElementById('sleepbar') || document.querySelector('header.top')).after(bar);
+  }
+  const fire = vp.state === 'triggered';
+  bar.classList.toggle('fire', fire);
+  bar.querySelector('.t').textContent = fire
+    ? 'Gamepad recognised: clearing pairings and restarting. Hold HOME + A on the pad.'
+    : `Hold the gamepad face-on to the camera… ${Math.round(vp.progress * 100)}%`;
+  bar.querySelector('.fill').style.width = Math.round((fire ? 1 : vp.progress) * 100) + '%';
+  clearTimeout(vpTimer);
+  vpTimer = setTimeout(() => { const b = document.getElementById('vpbar'); if (b) b.remove(); }, fire ? 12000 : 4000);
 }
 
 // ---------------- power-down ----------------
