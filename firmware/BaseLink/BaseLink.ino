@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.7.7
+ *  BaseLink.ino — 2PyBot v4.7.8
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -133,7 +133,7 @@ uint32_t ledLatchedMs = 0;
 int ledTestMode = 0;       // LT,<n> ring orientation test (0 = off)
 uint32_t ledTestUntilMs = 0;
 bool sleepMode = false;          // SL,1: power-down (no arming, ring/servos/torch off, no gamepad)
-uint32_t padRepairRestartAt = 0; // BT,FORGET: restart time; pairing storage is wiped at the next boot
+uint32_t padRepairRestartAt = 0; // BT,FORGET: restart time after the pairing storage is erased
 AutoClimb autoClimb;
 DescentGuard descentGuard;
 NavigationLease navigation;
@@ -429,12 +429,12 @@ void handleLine(char* line) {
     }
 
     if (!strcmp(line, "BT,FORGET")) {
-        // Re-pair: wipe the Bluetooth pairing storage at the next boot (the same
-        // Bluetooth state as a full flash erase, settings untouched), then restart.
+        // Re-pair: erase the Bluetooth pairing storage (the same Bluetooth state as
+        // a full flash erase, settings untouched), then restart so it takes effect.
         if (state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before re-pairing the gamepad"); return; }
-        if (!btgamepad_requestWipe()) { Serial.println("PE,could not store the re-pair request"); return; }
+        if (!btgamepad_forget()) { Serial.println("PE,could not clear the Bluetooth storage"); return; }
         padRepairRestartAt = millis() + 300;
-        Serial.println("[PAD] Re-pair: restarting the controller to clear all gamepad pairings");
+        Serial.println("[PAD] Re-pair: restarting the controller to finish clearing pairings");
         return;
     }
     if (!strcmp(line, "SL,1") || !strcmp(line, "SL,0")) {
@@ -852,7 +852,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.7.7");
+    Serial.println("     2PyBot BaseLink v4.7.8");
     Serial.println("==================================================");
 
     params_begin();

@@ -133,46 +133,36 @@ inline bool btgamepad_connected() { return _pad && _pad->isConnected(); }
 // Bluepad32 4.1 inconsistent with this pad ("SM_EVENT_PAIRING_COMPLETE: Invalid
 // device", "uni_bt_le_on_encryption_change: Device not found") and it would not
 // pair again. A full flash erase always worked because it starts BTstack with
-// empty storage. Re-pair therefore does exactly that for Bluetooth only: a
-// marker is stored, the ESP32 restarts, and before Bluetooth starts the two NVS
-// namespaces that hold pairing state are erased:
+// empty storage. Re-pair does exactly that for Bluetooth only: it erases the two
+// NVS namespaces that hold pairing state and the caller restarts the controller,
+// so BTstack and Bluepad32 reload from empty storage:
 //   "BTstack"  BTstack TLV: BR/EDR link keys, LE bonds, LE root keys
 //   "bp32"     Bluepad32 properties (allowlist, GAP settings)
-// Parameters, PHY calibration and Wi-Fi data stay untouched.
-#define PAD_WIPE_NS  "2pb_bt"
-#define PAD_WIPE_KEY "wipe"
-
+// Both namespaces already exist, so this never creates one (creating a new
+// namespace was refused in 4.7.7 even with NVS space free). Parameters, PHY
+// calibration and Wi-Fi data stay untouched.
 static bool _nvsEraseNamespace(const char* ns) {
     nvs_handle_t h;
-    if (nvs_open(ns, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t open = nvs_open(ns, NVS_READWRITE, &h);
+    if (open == ESP_ERR_NVS_NOT_FOUND) return true;   // nothing stored under it: already clear
+    if (open != ESP_OK) return false;
     esp_err_t e = nvs_erase_all(h);
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     return e == ESP_OK;
 }
 
-inline bool btgamepad_requestWipe() {
-    nvs_handle_t h;
-    if (nvs_open(PAD_WIPE_NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    esp_err_t e = nvs_set_u8(h, PAD_WIPE_KEY, 1);
-    if (e == ESP_OK) e = nvs_commit(h);
-    nvs_close(h);
-    return e == ESP_OK;
-}
-
-// Runs in btgamepad_begin() before BP32.setup(); Bluetooth is not running yet.
-static void _wipeIfRequested() {
-    nvs_handle_t h;
-    if (nvs_open(PAD_WIPE_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    uint8_t want = 0;
-    if (nvs_get_u8(h, PAD_WIPE_KEY, &want) == ESP_OK && want) {
-        const bool a = _nvsEraseNamespace("BTstack"), b = _nvsEraseNamespace("bp32");
-        nvs_erase_key(h, PAD_WIPE_KEY);
-        nvs_commit(h);
-        Serial.printf("[PAD] Gamepad pairings cleared (BTstack %s, bp32 %s). Hold HOME + A on the gamepad to pair.\n",
-                      a ? "erased" : "FAILED", b ? "erased" : "FAILED");
-    }
-    nvs_close(h);
+// Clears every gamepad pairing. The caller restarts the controller afterwards so
+// the stale in-RAM Bluetooth state is discarded. Returns true if the link-key
+// store was cleared.
+inline bool btgamepad_forget() {
+    if (_pad && _pad->isConnected()) _pad->disconnect();
+    BP32.enableNewBluetoothConnections(false);
+    const bool a = _nvsEraseNamespace("BTstack");
+    const bool b = _nvsEraseNamespace("bp32");
+    Serial.printf("[PAD] Gamepad pairings cleared (BTstack %s, bp32 %s); restarting to finish\n",
+                  a ? "erased" : "FAILED", b ? "erased" : "FAILED");
+    return a;
 }
 
 // ---- power-down ----
@@ -217,7 +207,6 @@ static void _applyTxPower() {
 }
 
 inline void btgamepad_begin() {
-    _wipeIfRequested();
     BP32.setup(&_onPadConnect, &_onPadDisconnect);
     BP32.enableNewBluetoothConnections(true);
     _applyTxPower();

@@ -298,10 +298,12 @@ never limited. `BG,0,0,0` releases it. Accepted during self-uprighting. See
 ### Gamepad re-pair (4.7.6, reworked in 4.7.7)
 
 `BT,FORGET` (stopped motors only) clears every gamepad pairing. With `PR,PADREPAIR,2`
-(4.7.7) the controller stores a marker in NVS namespace `2pb_bt` and restarts about
-0.3 s later. Before Bluetooth starts, it erases the NVS namespaces `BTstack` (link keys,
-BLE bonds, BLE root keys) and `bp32` (Bluepad32 settings) and logs
-`[PAD] Gamepad pairings cleared (BTstack erased, bp32 erased)`. This is the Bluetooth
+(4.7.8) the controller erases the NVS namespaces `BTstack` (link keys, BLE bonds, BLE
+root keys) and `bp32` (Bluepad32 settings), logs
+`[PAD] Gamepad pairings cleared (BTstack erased, bp32 erased)` and restarts about 0.3 s
+later so BTstack and Bluepad32 reload from the empty storage. Both namespaces already
+exist, so no new namespace is created (4.7.7 tried to create a marker namespace and the
+request was refused, so re-pair failed). This is the Bluetooth
 part of a full flash erase; parameters, PHY calibration and Wi-Fi data are kept. Then
 hold HOME + A on the EVOFOX One S (Android mode; it reports as `Android`). With
 `PR,PADREPAIR,1` (4.7.6) keys were deleted at runtime, which left Bluepad32 4.1's BLE

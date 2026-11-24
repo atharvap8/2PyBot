@@ -3,6 +3,16 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.8: Gamepad re-pair actually clears the pairing
+
+- **Re-pair fixed.** 4.7.7 tried to create a new NVS namespace (`2pb_bt`) to hold a
+  restart marker, and the create call was refused on the robot even with NVS space
+  free, so `BT,FORGET` reported `could not store the re-pair request` and did nothing.
+  Re-pair now erases the two existing namespaces that hold pairing state, `BTstack`
+  (BR/EDR link keys, BLE bonds, BLE root keys) and `bp32` (Bluepad32 settings),
+  directly, then restarts so the stale in-RAM Bluetooth state is dropped. No new
+  namespace is created. Parameters and calibration are untouched.
+
 ## 4.7.7: Gamepad re-pair that works; power-down mode
 
 - **Gamepad re-pair fixed.** In 4.7.6 `BT,FORGET` deleted the pairing keys while
