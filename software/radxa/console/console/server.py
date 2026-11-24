@@ -760,6 +760,16 @@ if os.path.isdir(UI_DIR):
     app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
 
 
+@app.get("/deploy")
+def deploy_redirect():
+    return RedirectResponse("/deploy/")
+
+
+@app.get("/deploy/")
+def deploy_page():
+    return FileResponse(os.path.join(UI_DIR, "deployment.html"))
+
+
 @app.get("/")
 def index():
     return FileResponse(os.path.join(UI_DIR, "index.html"))
