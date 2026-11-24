@@ -419,6 +419,20 @@ $("b-delete").onclick = async () => {
   const n = $("map-list").value;
   if (n && confirm(`Delete map “${n}” permanently?`)) { await post("api/maps/delete", { name: n }); refreshMaps(); }
 };
+$("b-zip").onclick = () => { const n = $("map-list").value; if (n) location.href = base + "api/maps/" + encodeURIComponent(n) + "/zip"; };
+$("b-stl").onclick = () => { const n = $("map-list").value; if (n) location.href = base + "api/maps/" + encodeURIComponent(n) + "/stl"; };
+$("b-import").onclick = () => $("imp-file").click();
+$("imp-file").onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const name = (f.name.replace(/\.zip$/i, "") || "imported").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+  try {
+    const r = await fetch(base + "api/maps/import?name=" + encodeURIComponent(name), { method: "POST", body: await f.arrayBuffer() });
+    const j = await r.json().catch(() => ({}));
+    setSay(r.ok ? `Imported “${name}”.` : (j.error || "Import failed."), r.ok ? "" : "warn");
+    refreshMaps();
+  } catch (err) { setSay(err.message, "warn"); }
+  e.target.value = "";
+};
 // Supervision: the robot only keeps driving while this page is visible.
 const pauseNow = () => { if (sup) fetch("/api/autonomy/pause", { method: "POST", keepalive: true }); };
 document.addEventListener("visibilitychange", () => { if (document.hidden) pauseNow(); });

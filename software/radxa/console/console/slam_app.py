@@ -12,10 +12,12 @@ import base64
 import math
 import os
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from . import map_export
 
 UI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui", "slam")
 
@@ -121,6 +123,35 @@ def create_app(engine, lidar, estop):
     def delete(body: NameBody):
         try:
             return {"ok": engine.delete_map(body.name.strip()) > 0}
+        except (ValueError, OSError) as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+    @app.get("/api/maps/{name}/stl")
+    def export_stl(name: str):
+        if not map_export.SAFE.match(name or ""):
+            return JSONResponse({"error": "bad map name"}, status_code=400)
+        try:
+            data = map_export.stl_bytes(engine.maps_dir, name)
+        except (OSError, ValueError, KeyError) as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return Response(data, media_type="model/stl",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.stl"'})
+
+    @app.get("/api/maps/{name}/zip")
+    def export_zip(name: str):
+        if not map_export.SAFE.match(name or ""):
+            return JSONResponse({"error": "bad map name"}, status_code=400)
+        data = map_export.zip_bytes(engine.maps_dir, name)
+        if not data:
+            return JSONResponse({"error": "map not found"}, status_code=404)
+        return Response(data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+    @app.post("/api/maps/import")
+    async def import_map(name: str, request: Request):
+        try:
+            written = map_export.import_zip(engine.maps_dir, name.strip(), await request.body())
+            return {"ok": True, "written": written}
         except (ValueError, OSError) as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
