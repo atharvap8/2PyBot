@@ -92,6 +92,9 @@ class GitBusy(RuntimeError):
     pass
 
 
+DEFER_LIMIT = 3   # consecutive deferrals for one commit before the deploy latches as failed
+
+
 class DeploymentDeferred(RuntimeError):
     def __init__(self,message,phase="waiting_idle"):
         super().__init__(message);self.phase=phase
@@ -366,7 +369,7 @@ class Deployment:
         request=Request(base+path,data=None if body is None else json.dumps(body).encode(),
                         headers={"Content-Type":"application/json"})
         try:
-            with urlopen(request,timeout=12) as response:return json.load(response)
+            with urlopen(request,timeout=45) as response:return json.load(response)
         except HTTPError as error:
             detail=error.read().decode(errors="replace")
             if error.code in (404,409):raise DeploymentDeferred(detail) from error
@@ -831,7 +834,23 @@ class Deployment:
             if token and not activated:
                 try:self.api("/api/internal/deployment/release",{"token":token})
                 except Exception:pass
-            self.progress.update(getattr(error,"phase","waiting_idle"),str(error),progress=0)
+            phase=getattr(error,"phase","waiting_idle")
+            # A deferral (console/controller not ready) must not retry forever: that is
+            # what turned one bad push into an endless redeploy/console-restart loop.
+            # Count consecutive deferrals for this commit and latch as "failed" at the
+            # cap so the one-pull timer stops until the cause is fixed or a new commit lands.
+            if isinstance(error,DeploymentDeferred) and not isinstance(error,GitBusy):
+                prior=read_json(self.state_dir/"progress.json",{})
+                tries=(prior.get("defer_count",0) if prior.get("commit")==self.commit else 0)+1
+                if tries>=DEFER_LIMIT:
+                    self.progress.update("failed","Deferred "+str(tries)+" times; giving up: "+str(error),
+                        progress=0,commit=self.commit,defer_count=tries,
+                        recovery=["The deploy kept deferring: the controller/console was not ready to take the maintenance lock.",
+                                  "Wake the robot, stop it with SELECT, wait for READY, then run a manual deploy or push a new commit."])
+                else:
+                    self.progress.update(phase,str(error),progress=0,commit=self.commit,defer_count=tries)
+            else:
+                self.progress.update(phase,str(error),progress=0)
             raise
         except Exception as error:
             recovery=[]

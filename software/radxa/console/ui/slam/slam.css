@@ -160,3 +160,7 @@ p.kind-opts { margin: 0 0 8px; }
 .auto-safety { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--sub); }
 .auto-safety span { flex: 1; }
 .dot.bad { background: var(--err); } .dot.off { background: var(--mute); }
+.brand img.brand-logo{height:24px;width:auto;flex:none}
+.steps .step .meter:first-of-type{margin-top:12px}
+.steps .step .meter{margin-bottom:11px}
+.steps .step .row + .meter{margin-top:14px}

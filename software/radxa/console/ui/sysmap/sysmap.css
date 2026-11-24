@@ -168,4 +168,6 @@ main { height: calc(100% - 64px); }
 
 /* links between the pages on the single console port */
 .pagelinks{display:flex;gap:6px;margin-right:10px}.pagelinks a{color:var(--sub);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:13px}.pagelinks a:hover{color:var(--ink);border-color:var(--acc)}
-
+.brand{white-space:nowrap;flex:none}
+.brand img.brand-logo{height:24px;width:auto;flex:none}
+.brand .sub{color:var(--sub);font-size:12.5px}

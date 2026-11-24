@@ -124,3 +124,4 @@ details.card video{max-height:360px;margin-top:12px}
   .drive-scene canvas{height:100%}.drive-map canvas{max-height:calc(100% - 70px);aspect-ratio:auto}
   .drive-stats{overflow-y:auto}
 }
+.brand img.brand-logo{height:26px;width:auto;flex:none;display:block}
