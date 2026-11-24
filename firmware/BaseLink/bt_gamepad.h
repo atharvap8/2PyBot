@@ -127,6 +127,16 @@ static void _onPadDisconnect(ControllerPtr ctl) {
 
 inline bool btgamepad_connected() { return _pad && _pad->isConnected(); }
 
+// Forget all bonded controllers (fixes a pad that will not reconnect, or pairs a
+// new one) and keep accepting new connections. The robot must be disarmed.
+inline void btgamepad_forget() {
+    if (_pad && _pad->isConnected()) _pad->disconnect();
+    BP32.forgetBluetoothKeys();
+    BP32.enableNewBluetoothConnections(true);
+    _calDone = false; _freshConnect = true; _camArmed = false; _camNeutralSince = 0;
+    Serial.println("[PAD] Pairing keys cleared. Put the gamepad in pairing mode (hold HOME + B).");
+}
+
 // esp_power_level_t is 0..7 for -12..+9 dBm in 3 dB steps.
 static inline int _pwrDbm(esp_power_level_t l) { return -12 + 3 * (int)l; }
 

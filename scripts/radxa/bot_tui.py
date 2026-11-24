@@ -281,6 +281,7 @@ class Robot(ActionPage):
             ("LED test: show front", "front white, right green, back red", lambda: a.call("/api/led/test", {"mode": 2}, "Front check shown")),
             ("LED test: end", "back to normal ring", lambda: a.call("/api/led/test", {"mode": 0}, "LED test ended")),
             ("Calibrate gyro", "robot disarmed and perfectly still", self.gyro),
+            ("Re-pair gamepad", "forget the old pairing, then hold HOME + B", self.repair),
             ("Record 30 s of data", "for bubble/vibration analysis", self.record),
         ]
 
@@ -289,6 +290,14 @@ class Robot(ActionPage):
             return
         if self.app.confirm("Calibrate gyro", "Keep the robot completely still for about 3 seconds.\nContinue?"):
             self.app.call("/api/command", {"line": "C"}, "Gyro calibration started; keep still")
+
+    def repair(self):
+        if self.app.moving("re-pair the gamepad"):
+            return
+        if self.app.confirm("Re-pair gamepad", "Forget the current gamepad pairing?\nAfterwards hold HOME + B on the gamepad until it connects."):
+            r = self.app.call("/api/gamepad/repair", {}, "Pairing cleared: hold HOME + B on the gamepad")
+            if r:
+                self.app.message("Re-pair gamepad", r.get("message", "Hold HOME + B on the gamepad."))
 
     def record(self):
         r = self.app.call("/api/debug/record", {"seconds": 30, "label": "tui", "fast": True})
@@ -645,7 +654,7 @@ class Help(Page):
         ("2pybot status", "dashboard once"), ("2pybot stop", "stop the motors"),
         ("2pybot logs", "controller log (add -f to follow)"), ("2pybot logs console", "a service's log"),
         ("2pybot params list [GROUP]", "settings table"), ("2pybot params set KEY VALUE --save", "change and save a setting"),
-        ("2pybot services", "service states"), ("2pybot firmware-status", "controller firmware"),
+        ("2pybot services", "service states"), ("2pybot gamepad repair", "forget and re-pair the gamepad"), ("2pybot firmware-status", "controller firmware"),
         ("2pybot deploy-status --watch", "follow an update"), ("2pybot doctor", "diagnostics summary and report file"),
         ("add --json", "raw data instead of tables"),
     ]

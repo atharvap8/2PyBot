@@ -55,7 +55,7 @@ DEFAULTS = {
     "stale_s": 0.40,
     "headings": 24,
     # braking model mirrored from the firmware parameters (BUBDEC/BUBLAT/BUBMRG)
-    "decel": 0.35, "latency": 0.40, "margin": 0.08,
+    "decel": 0.50, "latency": 0.30, "margin": 0.08,
 }
 
 

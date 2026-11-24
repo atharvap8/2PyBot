@@ -134,6 +134,7 @@ void params_save() {
     if (written) written=_prefs.putUChar("_ver",2)==1;
     if (written) written=_prefs.putUChar("_cur5s",1)==1;
     if (written) written=_prefs.putUChar("_input3",1)==1;
+    if (written) written=_prefs.putUChar("_brake2",1)==1;
     const size_t freeEntries = _prefs.freeEntries();
     _prefs.end();
     if (!written) { Serial.printf("PE,NVS write failed (cleared=%d, free entries=%u); save not confirmed\n", (int)cleared, (unsigned)freeEntries); return; }
@@ -141,7 +142,7 @@ void params_save() {
     static ParamRecord back[PARAM_TABLE_MAX];
     bool verified = _prefs.getBytesLength(BLOB_KEY) == bytes && _prefs.getBytes(BLOB_KEY, back, bytes) == bytes &&
                     !memcmp(back, rec, bytes);
-    verified=verified && _prefs.getUChar("_ver",0)==2 && _prefs.getUChar("_cur5s",0)==1 && _prefs.getUChar("_input3",0)==1;
+    verified=verified && _prefs.getUChar("_ver",0)==2 && _prefs.getUChar("_cur5s",0)==1 && _prefs.getUChar("_input3",0)==1 && _prefs.getUChar("_brake2",0)==1;
     _prefs.end();
     if (!verified) { Serial.println("PE,NVS readback failed; save not confirmed"); return; }
     Serial.printf("PS!,saved (%u params, %u NVS entries free)\n", (unsigned)PARAM_COUNT, (unsigned)freeEntries);
@@ -163,6 +164,7 @@ void params_load() {
     const bool migrate = !opened || _prefs.getUChar("_cur5s", 0) != 1;
     const bool migrateInput = !opened || _prefs.getUChar("_input3", 0) != 1;
     const bool oldInputProfile = opened && _prefs.getUChar("_input2",0)==1;
+    const bool migrateBrake = !opened || _prefs.getUChar("_brake2", 0) != 1;
     for (size_t i = 0; i < PARAM_COUNT; i++) {
         float v = PARAM_META[i].def;
         if (ver == 1) v = _prefs.getFloat(PARAM_META[i].key, PARAM_META[i].def);
@@ -194,6 +196,12 @@ void params_load() {
         P.steerSlew=0;P.hubYawSlew=0;P.spdLoStr=1;P.expoSteer=0;
         Serial.println("[PARAM] Fixed TRIM=-1.2603 / MAXSTR=4000 active; PS confirms NVS persistence");
     }
+    if (migrateBrake) {
+        // 4.7.6: the DRVDEC ramp lengthened every stop; bubble back to the measured model.
+        const char* keys[] = {"DRVDEC", "BUBDEC", "BUBLAT", "BUBMRG", "VERRMAX"};
+        for (const char* k : keys) { int i = params_index(k); if (i >= 0) *params_ptr(i) = PARAM_META[i].def; }
+        Serial.println("[PARAM] Braking profile 2 defaults loaded in RAM (DRVDEC off, VERRMAX 0.7, bubble 0.5/0.3/0.08); PS saves it");
+    }
     params_recompute();
     params_applyHardware(true);
     Serial.printf("PL!,%s\n", have ? "loaded from NVS" : "no NVS, using defaults");
@@ -213,8 +221,8 @@ void params_service() {
     if (dumpRow < 0) return;
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
-        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW","SELFRIGHT","BUBBLE"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1,1,2};
+        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW","SELFRIGHT","BUBBLE","BRAKEPROFILE","PADREPAIR"};
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1,1,2,2,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

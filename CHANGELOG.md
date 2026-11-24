@@ -3,6 +3,25 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.6 — Stops are short again; gamepad re-pair
+
+- **Stops after a stick release were too long.** The 4.7.5 DRVDEC ramp let the drive
+  target fall at only 1.5 m/s², so the robot kept going about 0.35 m from 1 m/s and
+  appeared to shoot ahead or back before stopping.
+  - DRVDEC is off again (0).
+  - The fall it addressed is handled differently. New VERRMAX (0.7 m/s) clamps the
+    speed error in drive mode: braking starts at once and stays strong, but the
+    velocity term can no longer take all of the acceleration and motor current, so
+    the balance terms keep authority.
+- **Bubble** back to the measured braking model (BUBDEC 0.5 m/s², BUBLAT 0.30 s). The
+  stop margin stays at 8 cm, which covers the 3 cm overshoot seen in the recording.
+- **Migration.** New firmware applies these defaults once, replacing values saved by
+  4.7.5 (NVS marker `_brake2`; capability `PR,BRAKEPROFILE,2`). The update worker
+  no longer replays the old values after a flash.
+- **Gamepad re-pair.** New `BT,FORGET` command (disarmed only) clears all bonded pads
+  and accepts a new one. Available as `2pybot gamepad repair` and as *Re-pair gamepad*
+  on the TUI Robot page. Capability `PR,PADREPAIR,1`.
+
 ## 4.7.5 — Fixes from the bubble/vibration recording
 
 - **Fall when releasing the stick in fast reverse.**

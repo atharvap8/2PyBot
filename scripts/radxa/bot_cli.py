@@ -182,6 +182,27 @@ class Bot:
                  for i, s in enumerate(states)}
         V.table(["SERVICE", "STATE", "AT BOOT", "PURPOSE"], [[s["name"], s["active"], s["enabled"], s["desc"]] for s in states], COLOUR, tones)
 
+    def gamepad(self):
+        if self.args.operation == "repair":
+            r = self.api("/api/gamepad/repair", {})
+            print(c(r.get("message", "Re-pairing started."), "ok"))
+            print("Waiting up to 60 s for a gamepad to connect...")
+            deadline = time.time() + 60
+            seen = time.time() - 2
+            while time.time() < deadline:
+                for entry in self.api("/api/log?n=60").get("log", []):
+                    if entry.get("t", 0) >= seen and "[PAD] Connected" in entry.get("text", ""):
+                        print(c(entry["text"], "ok"))
+                        return
+                time.sleep(1)
+            print(c("No gamepad connected yet. Keep HOME + B held, or run this again.", "warn"))
+            return
+        st = self.api("/api/autonomy/status").get("controller", {})
+        connected = bool(st.get("pad"))
+        print("Gamepad: " + (c("connected", "ok") if connected else c("not connected", "warn")))
+        if not connected:
+            print("Pair it: hold HOME + B. If it will not connect, run: 2pybot gamepad repair")
+
     def controller_log(self):
         lines = V.log_tail(self.args.lines)
         for line in lines:
@@ -653,6 +674,8 @@ class Bot:
             self.firmware_status()
         elif name == "services":
             self.services()
+        elif name == "gamepad":
+            self.gamepad()
         elif name == "deploy-status":
             self.deploy_status()
         elif name == "build-firmware":
@@ -699,6 +722,8 @@ def parser():
     sub = result.add_subparsers(dest="command", metavar="<command>")
     sub.add_parser("tui", help="Open the full-screen interface")
     sub.add_parser("services", help="2PyBot service states")
+    p = sub.add_parser("gamepad", help="Gamepad: status or re-pair")
+    p.add_argument("operation", nargs="?", choices=["status", "repair"], default="status")
     sub.add_parser("help", help="List commands")
     sub.add_parser("status", help="Host readiness, controller telemetry and firmware versions")
     p = sub.add_parser("check", help="Check host/controller or deployment")
@@ -753,7 +778,7 @@ COMMAND_LIST = [
     ("services", "service states"), ("params list [GROUP|KEY]", "settings"), ("params set KEY VALUE --save", "change a setting"),
     ("firmware-status", "controller firmware"), ("deploy-status [--watch]", "software update progress"),
     ("doctor", "diagnostics summary + report file"), ("calibration imu|trim|tof|camera", "calibrations"),
-    ("restart SERVICE", "restart a service"), ("backup / restore", "firmware and settings backups"),
+    ("gamepad [repair]", "gamepad status / forget and re-pair"), ("restart SERVICE", "restart a service"), ("backup / restore", "firmware and settings backups"),
 ]
 
 

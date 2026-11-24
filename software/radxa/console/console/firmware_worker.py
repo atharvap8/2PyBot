@@ -116,6 +116,11 @@ class Controller:
             wanted["PANCURVE"]=wanted.get("PANCURVE",wanted.get("EXPOSTR",self.params["PANCURVE"]))
             for key in ("TRIM","MAXSTR","STRSLEW","HUBYAWSL","LOWSTR","EXPOSTR"):
                 wanted[key]=self.params[key]
+        brake_profile=self.derived.get("BRAKEPROFILE",0)
+        if brake_profile>=2 and snapshot.get("derived",{}).get("BRAKEPROFILE",0)!=brake_profile:
+            # 4.7.6: do not replay the 4.7.5 braking ramp / bubble values over the new defaults
+            for key in ("DRVDEC","BUBDEC","BUBLAT","BUBMRG","VERRMAX"):
+                if key in self.params:wanted[key]=self.params[key]
         if self.derived.get("FIXEDINPUT")==1:
             for key in ("TRIM","MAXSTR"):
                 wanted[key]=self.params[key] # never replay retired values over firmware-fixed requirements

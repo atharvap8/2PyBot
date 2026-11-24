@@ -66,7 +66,7 @@ class BubbleGuard:
             return default
 
     def status(self):
-        info = self.engine.bubble.status(decel=self._param("BUBDEC", 0.35), latency=self._param("BUBLAT", 0.4),
+        info = self.engine.bubble.status(decel=self._param("BUBDEC", 0.5), latency=self._param("BUBLAT", 0.3),
                                          margin=self._param("BUBMRG", 0.08))
         active = bool(self.enabled and self.supported() and self.link.connected and self.lidar_seen())
         return dict(info, enabled=self.enabled, firmware_supported=self.supported(), active=active,

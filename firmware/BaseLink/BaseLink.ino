@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.7.5
+ *  BaseLink.ino — 2PyBot v4.7.6
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -420,6 +420,12 @@ void handleLine(char* line) {
         return;
     }
 
+    if (!strcmp(line, "BT,FORGET")) {
+        // Re-pair: forget every bonded gamepad and accept a new one.
+        if (state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before re-pairing the gamepad"); return; }
+        btgamepad_forget();
+        return;
+    }
     if (!strncmp(line, "HF,", 3)) {
         const int s = atoi(line + 3);
         hfUntilMs = (s > 0 && s <= 60) ? millis() + (uint32_t)s * 1000u : 0;
@@ -657,7 +663,13 @@ void runController(float dt) {
         // robot parks smoothly where it stops.
         xRef = posM + velF * P.brakeLook;
         zInt = 0.0f;
-        uOut = -(k2 * (velF - vIn) + k3t * th + k4t * om);
+        // Speed-error clamp: a stick release at speed still brakes at once, but
+        // the velocity term can no longer take all of u and the motor current
+        // (recorded fall: k2*1.17 m/s asked 8.7 m/s^2, u and 2.7 A saturated
+        // 0.6 s). 0.7 m/s -> at most ~5 m/s^2 from this term, attitude keeps headroom.
+        float velErr = velF - vIn;
+        if (P.velErrMax > 0.0f) velErr = clampf(velErr, -P.velErrMax, P.velErrMax);
+        uOut = -(k2 * velErr + k3t * th + k4t * om);
     } else {
         // Position hold / go-to: full LQI vector. Position error is
         // clamped so a big displacement asks for a gentle walk back,
@@ -816,7 +828,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.7.5");
+    Serial.println("     2PyBot BaseLink v4.7.6");
     Serial.println("==================================================");
 
     params_begin();
