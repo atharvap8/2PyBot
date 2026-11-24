@@ -1,39 +1,129 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>2PyBot deployment</title><link rel="stylesheet" href="/ui/style.css">
+<!doctype html><html lang=en><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name=theme-color content="#141210">
+<title>2PyBot · Deploy</title>
+<link rel=stylesheet href=/ui/style.css?v=47>
 <style>
-body{margin:0;background:#141210;color:#efe9e3;font:15px system-ui,sans-serif}main{max-width:850px;margin:auto;padding:24px}
-a{color:#f08a4b}.panel{border:1px solid #332c26;border-radius:18px;padding:22px;background:#1b1815;margin:16px 0}
-#phase{font-size:28px;margin:0 0 10px;text-transform:capitalize}progress{width:100%;height:16px;accent-color:#a78bfa}
-dl{display:grid;grid-template-columns:180px minmax(0,1fr);gap:12px}dt{color:#aba196}dd{margin:0;overflow-wrap:anywhere;font-family:monospace}
-#message{line-height:1.5}#error{color:#ff4d6d}.note{color:#aba196;font-size:13px;line-height:1.6}
-@media(max-width:500px){main{padding:14px}dl{grid-template-columns:1fr;gap:7px}dd{margin-bottom:10px}}
-</style></head><body><main>
-<a href="/ui/">← Console</a><h1>Deployment</h1>
-<section class="panel"><h2 id="phase">Connecting</h2><progress id="progress" max="100" value="0"></progress>
-<p id="message">Reading the bot's deployment state…</p><p id="error"></p></section>
-<section class="panel"><dl>
-<dt>Requested commit</dt><dd id="requested">—</dd><dt>Applied commit</dt><dd id="applied">—</dd>
-<dt>Controller image</dt><dd id="firmware">—</dd><dt>Maintenance</dt><dd id="maintenance">—</dd>
-<dt>Deployment phase</dt><dd id="indicator">—</dd><dt>Last update</dt><dd id="updated">—</dd>
-</dl></section>
-<p class="note">Pulling → preparation → deployment/flash → verified success. An armed or moving bot queues the update until local stop.
-Deployment never arms the motors. The ESP32-connected ring cannot animate while its ESP32 is in the flash bootloader;
-a separately wired Radxa SPI ring can display continuous progress.</p>
-</main><script>
-const put=(id,value)=>document.getElementById(id).textContent=value;
-async function refresh(){
-  try{
-    const response=await fetch('/api/deployment/status',{cache:'no-store'});if(!response.ok)throw Error('Deployment status unavailable ('+response.status+')');
-    const data=await response.json(),indicator=data.indicator||{},s=indicator.led_active?indicator:(data.progress||{}),fw=(data.firmware||{}).installed||{};
-    put('phase',(s.phase||'idle').replaceAll('_',' '));put('message',s.message||'No deployment is pending.');
-    document.getElementById('progress').value=s.progress||0;
-    put('requested',s.commit||'—');put('applied',(data.applied||{}).commit||'—');
-    put('firmware',fw.version?fw.version+' · '+fw.build_id:'No verified registered image');
-    put('maintenance',data.maintenance?'Controller maintenance held':'Released');put('indicator',(data.indicator||{}).phase||'idle');
-    put('updated',s.updated_at?new Date(s.updated_at*1000).toLocaleString():'—');put('error','');
-    document.getElementById('phase').style.color=s.phase==='failed'?'#ff4d6d':s.phase==='success'?'#34d399':'#f0b84b';
-  }catch(error){put('error',error.message)}
+.wrap{max-width:900px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.card h2{font-size:14px;color:var(--cy);text-transform:uppercase;letter-spacing:.05em;margin:0 0 12px}
+.phase{font-size:22px;font-weight:600;text-transform:capitalize;margin:0 0 8px}
+progress{width:100%;height:12px;accent-color:var(--vi)}
+dl{display:grid;grid-template-columns:150px 1fr;gap:8px 14px;margin:12px 0 0;font-size:13px}
+dt{color:var(--dim)}dd{margin:0;overflow-wrap:anywhere;font-family:var(--mono)}
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--tx);border-radius:7px;padding:9px 14px;font:600 13px var(--font);cursor:pointer}
+.btn:hover{border-color:var(--cy)}.btn:disabled{opacity:.45;cursor:default}
+.btn.primary{background:var(--cy);color:#141210;border-color:var(--cy)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+code,.cmd{font-family:var(--mono);font-size:12.5px}
+.cmd{display:block;background:#0e0d0c;border:1px solid var(--line);border-radius:7px;padding:10px 12px;margin-top:8px;overflow-x:auto;white-space:pre;color:#f6c9a4}
+.msg{line-height:1.5;color:var(--dim)}.err{color:var(--rd)}.ok{color:var(--gr)}.warn{color:var(--am)}
+label.chk{display:flex;align-items:center;gap:6px;color:var(--dim);font-size:13px}
+input[type=text]{background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--tx);padding:7px 9px;font:13px var(--mono);min-width:220px}
+</style></head><body class=shell>
+<header class=top>
+  <a class=brand href=/>
+    <svg viewBox="0 0 32 32" aria-hidden=true><circle cx=16 cy=16 r=13 fill=none stroke=currentColor stroke-width=2.5 /><circle cx=16 cy=16 r=5 fill=currentColor /><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke=currentColor stroke-width=2.5 stroke-linecap=round /></svg>
+    <div><b>2PyBot</b><span>deploy</span></div>
+  </a>
+  <div class=chips></div>
+  <nav class=pages aria-label=Pages>
+    <a href=/>Console</a><a href=/sysmap/>System</a><a href=/slam/>Maps</a><a class=sel href=/deploy>Deploy</a><a href=/terminal>Terminal</a><a href=/ui/android.apk>App</a>
+  </nav>
+</header>
+<div class=wrap>
+  <div class=card>
+    <h2>Deployment status</h2>
+    <div class=phase id=phase>Connecting</div>
+    <progress id=progress max=100 value=0></progress>
+    <p class=msg id=message>Reading the bot's deployment state…</p><p class=err id=error></p>
+    <dl>
+      <dt>Requested commit</dt><dd id=requested>—</dd>
+      <dt>Applied commit</dt><dd id=applied>—</dd>
+      <dt>Maintenance</dt><dd id=maintenance>—</dd>
+      <dt>Last update</dt><dd id=updated>—</dd>
+    </dl>
+  </div>
+
+  <div class=card>
+    <h2>Controller firmware</h2>
+    <dl>
+      <dt>Installed</dt><dd id=fw-installed>—</dd>
+      <dt>Latest built</dt><dd id=fw-latest>—</dd>
+      <dt>Update job</dt><dd id=fw-job>idle</dd>
+    </dl>
+    <div class=row style="margin-top:12px">
+      <button class="btn primary" id=reflash disabled>Reflash latest firmware</button>
+      <span class=msg id=reflash-msg></span>
+    </div>
+    <p class=msg style="margin-top:8px">Reflashing restarts the ESP32 and needs the camera stream up and host READY. The robot must be stopped; local START is required afterwards.</p>
+  </div>
+
+  <div class=card>
+    <h2>Deploy a branch</h2>
+    <p class=msg>Deploying a branch runs with sudo over SSH, so it stays an operator command (the console never arms or deploys on its own). Copy and run it on the bot:</p>
+    <div class=row style="margin-top:8px">
+      <label class=msg>Branch <input type=text id=branch value="feature/lidar-autonomy"></label>
+      <button class=btn id=copy>Copy command</button>
+      <span class=msg id=copy-msg></span>
+    </div>
+    <code class=cmd id=cmd></code>
+    <p class=msg style="margin-top:10px">Then watch progress here, or run <code>2pybot deploy-status --watch</code>.</p>
+  </div>
+
+  <label class=chk><input type=checkbox id=auto checked> Auto-refresh</label>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const put = (id, v) => { $(id).textContent = v; };
+function cmdText() {
+  const b = ($("branch").value || "feature/lidar-autonomy").trim();
+  return `cd ~/projects/2PyBot && git fetch origin ${b} && git show FETCH_HEAD:scripts/radxa/deploy_branch.py | sudo python3 - ${b}`;
 }
-refresh();setInterval(refresh,1000);
+$("branch").oninput = () => put("cmd", cmdText());
+put("cmd", cmdText());
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(cmdText()); $("copy-msg").textContent = "copied"; }
+  catch (e) { $("copy-msg").textContent = "select and copy manually"; }
+  setTimeout(() => ($("copy-msg").textContent = ""), 2500);
+};
+let latestBuild = null, busy = false;
+$("reflash").onclick = async () => {
+  if (!latestBuild || busy) return;
+  if (!confirm("Reflash the controller with the latest firmware? The ESP32 restarts.")) return;
+  $("reflash-msg").textContent = "starting…";
+  try {
+    const r = await fetch("/api/firmware/reflash", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ build_id: latestBuild }) });
+    const j = await r.json().catch(() => ({}));
+    $("reflash-msg").textContent = r.ok ? "flashing started" : (j.detail || "could not start");
+    $("reflash-msg").className = "msg " + (r.ok ? "ok" : "err");
+  } catch (e) { $("reflash-msg").textContent = e.message; $("reflash-msg").className = "msg err"; }
+};
+async function refresh() {
+  try {
+    const r = await fetch("/api/deployment/status", { cache: "no-store" });
+    if (!r.ok) throw Error("Deployment status unavailable (" + r.status + ")");
+    const d = await r.json(), p = d.indicator && d.indicator.led_active ? d.indicator : (d.progress || {}), fw = d.firmware || {};
+    put("phase", (p.phase || "idle").replaceAll("_", " "));
+    put("message", p.message || "No deployment is pending.");
+    $("progress").value = p.progress || 0;
+    put("requested", p.commit || "—");
+    put("applied", (d.applied || {}).commit || "—");
+    put("maintenance", d.maintenance ? "controller held for maintenance" : "released");
+    put("updated", p.updated_at ? new Date(p.updated_at * 1000).toLocaleString() : "—");
+    $("phase").style.color = p.phase === "failed" ? "var(--rd)" : p.phase === "success" ? "var(--gr)" : "var(--am)";
+    put("error", "");
+    const inst = fw.installed || {}, latest = fw.latest || {}, job = fw.job || {};
+    put("fw-installed", inst.version ? `${inst.version} · ${inst.build_id || ""}` : "unknown");
+    put("fw-latest", latest.version ? `${latest.version} · ${latest.build_id || ""}` : "no registered build");
+    put("fw-job", job.stage ? `${job.stage} ${job.progress != null ? job.progress + "%" : ""}`.trim() : "idle");
+    latestBuild = latest.build_id || null;
+    busy = !!fw.busy || (job.stage && !["done", "success", "failed", "error"].includes(job.stage));
+    $("reflash").disabled = !latestBuild || busy || (inst.build_id && inst.build_id === latestBuild);
+    $("reflash").textContent = inst.build_id && inst.build_id === latestBuild ? "Firmware is up to date" : "Reflash latest firmware";
+  } catch (e) { put("error", e.message); }
+}
+refresh();
+let timer = setInterval(() => $("auto").checked && refresh(), 1500);
 </script></body></html>
