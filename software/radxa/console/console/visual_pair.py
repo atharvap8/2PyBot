@@ -31,7 +31,7 @@ WINDOW_S = 6.0                    # rolling window for the hold
 HITS_NEEDED = 3                  # qualifying snapshots within the window
 SPAN_NEEDED = 2.0                # oldest-to-newest hit span, so one lucky frame cannot fire
 RECENT_S = 1.8                   # newest hit must be this fresh
-COOLDOWN_S = 90.0                # covers the controller restart and re-pair
+COOLDOWN_S = 20.0                # covers the controller restart and re-pair
 POLL_S = 0.6
 
 

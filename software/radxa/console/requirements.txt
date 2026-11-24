@@ -3,4 +3,5 @@ uvicorn[standard]>=0.27
 pyserial>=3.5
 pydantic>=2.0
 pillow
-numpy>=1.19.5,<2   # lidar SLAM
+numpy>=1.21.6,<2   # lidar SLAM; >=1.21.6 also satisfies onnxruntime
+onnxruntime        # visual re-pair: COCO detector that recognises the gamepad on camera
