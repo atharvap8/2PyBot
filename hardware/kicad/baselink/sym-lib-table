@@ -1,0 +1,4 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "baselink")(type "KiCad")(uri "${KIPRJMOD}/baselink.kicad_sym")(options "")(descr "BaseLink power rails"))
+)
