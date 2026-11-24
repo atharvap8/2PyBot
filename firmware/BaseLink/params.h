@@ -171,7 +171,7 @@
   X(svYawHome, "SVYAWHOME",SERVO_YAW_HOME_DEG, 0.0f, 270.0f, "PAYLOAD", "pan home (deg)")               \
   X(svZoomHome,"SVZHOME", SERVO_ZOOM_HOME_DEG, 0.0f, 270.0f, "PAYLOAD", "zoom home (deg)")              \
   X(svRate,    "SVRATE",  SERVO_UPDATE_HZ,    10.0f, 200.0f, "PAYLOAD", "servo refresh (Hz)")           \
-  X(svIdleMs,  "SVIDLE",  SERVO_IDLE_RELEASE_MS,0.0f,10000.0f,"PAYLOAD","stop pulsing after idle (ms)") \
+  X(svIdleMs,  "SVIDLE",  SERVO_IDLE_RELEASE_MS,0.0f,10000.0f,"PAYLOAD","both servos detach after last command (ms; 0 = 2000)") \
   X(torchBoot, "TRCHBOOT",TORCH_BOOT_PCT,      1.0f,  90.0f, "PAYLOAD", "torch preset at boot (%)")     \
   X(torchMin,  "TRCHMIN", TORCH_MIN_PCT,       1.0f,  50.0f, "PAYLOAD", "torch minimum (%)")            \
   /* ---------- ring ---------- */                                           \
@@ -184,7 +184,18 @@
   X(dropG,     "DROPG",   0.55f,               0.10f,  0.95f,"TERRAIN", "free-fall threshold (g)")   \
   X(dropMs,    "DROPMS",  35.0f,               5.0f,  300.0f,"TERRAIN", "airborne confirm time (ms)")\
   X(landMs,    "LANDMS",  350.0f,             50.0f, 2000.0f,"TERRAIN", "soft-gain hold after landing (ms)")\
-  X(airFreeze, "AIRFRZ",  1.0f,                0.0f,   1.0f, "TERRAIN", "freeze integrator while airborne")
+  X(airFreeze, "AIRFRZ",  1.0f,                0.0f,   1.0f, "TERRAIN", "freeze integrator while airborne")\
+  /* ---------- lidar safety bubble (BG) ---------- */                         \
+  X(bubDecel,  "BUBDEC",  0.50f,               0.10f,  3.0f, "BUBBLE",  "braking decel assumed (m/s^2)")\
+  X(bubLat,    "BUBLAT",  0.30f,               0.0f,   1.0f, "BUBBLE",  "balance braking delay (s)")\
+  X(bubMargin, "BUBMRG",  0.08f,               0.0f,   0.30f,"BUBBLE",  "stop this far from the body (m)")\
+  X(bubStale,  "BUBSTALE",300.0f,             60.0f, 1000.0f,"BUBBLE",  "fail closed after no BG (ms)")\
+  /* ---------- drive feel / measurement ---------- */                       \
+  X(drvDec,    "DRVDEC",  0.0f,                0.0f,  10.0f, "DRIVE",   "max braking rate of the drive reference (m/s^2, 0 = off)")\
+  X(velErrMax, "VERRMAX", 0.7f,                0.0f,   3.0f, "BALANCE", "speed-error clamp while driving (m/s, 0 = off)")\
+  X(velSrc,    "VELSRC",  1.0f,                0.0f,   1.0f, "MOTOR",   "LQR speed: 0 position difference, 1 hub sample velocity")\
+  /* ---------- ring orientation ---------- */                               \
+  X(ledDir,    "LEDDIR",  LED_DIR_CW ? 1.0f : -1.0f, -1.0f, 1.0f, "LED", "+1: index grows clockwise seen from above")
 
 // ============================================================
 //  Struct, defaults, metadata
@@ -212,6 +223,7 @@ struct ParamMeta {
 extern Params            P;
 extern const ParamMeta   PARAM_META[];
 extern const size_t      PARAM_COUNT;
+constexpr size_t PARAM_TABLE_MAX = 256;   // blob capacity (records)
 
 // Implemented by the sketch: pushes changed values into hardware
 // (driver current, IMU filter, LED brightness...). See BaseLink.ino.
@@ -229,5 +241,6 @@ void   params_dump();
 void   params_service();
 bool   params_handleLine(char* line);
 void   params_begin();
+void   params_nvsReport();
 
 #endif // PARAMS_H

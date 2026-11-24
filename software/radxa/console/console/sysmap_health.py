@@ -12,6 +12,7 @@ Status vocabulary (one per node and per wire):
     blocked  cannot be judged because a block upstream has failed
     nodata   no signal has arrived yet (console just started, etc.)
     nofb     output-only hardware: the firmware commands it, nothing reports back
+    sleep    switched off on purpose by the console power-down mode
 
 Root-cause rule: a node only turns red when its own evidence says so. When a
 parent (for example the USB serial link) fails, everything that is only known
@@ -24,8 +25,8 @@ import math
 import re
 import time
 
-OK, WARN, ERROR, BLOCKED, NODATA, NOFB = "ok", "warn", "error", "blocked", "nodata", "nofb"
-RANK = {ERROR: 5, WARN: 4, BLOCKED: 3, NODATA: 2, NOFB: 1, OK: 0}
+OK, WARN, ERROR, BLOCKED, NODATA, NOFB, SLEEP = "ok", "warn", "error", "blocked", "nodata", "nofb", "sleep"
+RANK = {ERROR: 5, WARN: 4, BLOCKED: 3, NODATA: 2, NOFB: 1, SLEEP: 1, OK: 0}
 
 # M0601 fault byte (DDT M0601C-111 manual / firmware hub_drive.cpp)
 FAULT_BITS = ((0x01, "sensor fault"), (0x02, "bus overcurrent"), (0x04, "phase overcurrent"),
@@ -33,7 +34,7 @@ FAULT_BITS = ((0x01, "sensor fault"), (0x02, "bus overcurrent"), (0x04, "phase o
 
 # Which node each node is observed through. Used for root-cause suppression.
 PARENT = {
-    "radxa": None, "camera": "radxa", "tof": "radxa", "clients": "radxa",
+    "radxa": None, "camera": "radxa", "tof": "radxa", "lidar": "radxa", "clients": "radxa",
     "serial": "radxa", "esp32": "serial",
     "imu": "esp32", "compass": "esp32", "gamepad": "esp32", "lights": "esp32",
     "wheel_l": "esp32", "wheel_r": "esp32", "payload": "esp32",
@@ -134,6 +135,26 @@ def eval_tof(tof):
     if valid == 0:
         return node(WARN, "Ranging, but every zone fails its status/sigma checks", metrics)
     return node(OK, "Ranging", metrics)
+
+
+def eval_lidar(lidar):
+    hz = _num(lidar.get("scan_hz"))
+    metrics = [["Scan rate", _fmt(hz, "Hz", 1)], ["Points", str(lidar.get("points") or "–")],
+               ["Motor", f"{lidar.get('rpm', '–')} rpm"], ["Health", lidar.get("health") or "–"],
+               ["Port", lidar.get("port") or "–"]]
+    state = lidar.get("state")
+    if not lidar:
+        return node(NODATA, "Lidar driver not running", metrics)
+    if state == "error":
+        return node(ERROR, lidar.get("error") or "Lidar error", metrics)
+    if state != "scanning":
+        return node(WARN, f"Lidar {state or 'starting'}", metrics)
+    if lidar.get("health") not in (None, "good"):
+        return node(WARN, f"Lidar health: {lidar.get('health')}", metrics)
+    want = (_num(lidar.get("rpm"), 0) or 0) / 60.0
+    if hz is not None and want and hz < 0.8 * want:
+        return node(WARN, f"Scanning at {hz:.1f} Hz, requested {want:.0f} Hz", metrics)
+    return node(OK, "Scanning", metrics)
 
 
 def eval_clients(host, clients):
@@ -288,6 +309,7 @@ def evaluate(inp):
         "radxa": eval_radxa(inp.get("system", {})),
         "camera": eval_camera(inp.get("stream", {}), host),
         "tof": eval_tof(inp.get("tof", {})),
+        "lidar": eval_lidar(inp.get("lidar", {})),
         "clients": eval_clients(host, inp.get("clients", {})),
         "serial": eval_serial(serial),
         "esp32": eval_esp32(tel, debug),
@@ -299,10 +321,16 @@ def evaluate(inp):
         "wheel_r": eval_wheel("RIGHT", hub, hub_age, balancing, events),
         "payload": eval_payload(events),
     }
+    if host.get("asleep"):
+        # Power-down mode: these blocks are off on purpose, not failed.
+        off = "Powered down from the console; wake it to restart"
+        for name in ("camera", "tof", "lidar", "gamepad", "payload"):
+            nodes[name] = dict(nodes[name], status=SLEEP, reason=off)
+        nodes["radxa"] = dict(nodes["radxa"], reason="Powered down: console and Wi-Fi only")
 
     # Root-cause suppression, walked top-down so chains collapse correctly.
     for name in ("serial", "esp32", "imu", "compass", "gamepad", "lights",
-                 "wheel_l", "wheel_r", "payload", "camera", "tof", "clients"):
+                 "wheel_l", "wheel_r", "payload", "camera", "tof", "lidar", "clients"):
         parent = PARENT.get(name)
         if not parent:
             continue

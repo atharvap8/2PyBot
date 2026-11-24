@@ -3,6 +3,8 @@
  * Table, bounds and protocol live here; params.h only declares.
  */
 #include "params.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 
 Params P = {
 #define X(f, k, d, lo, hi, g, desc)  (float)(d),
@@ -85,38 +87,91 @@ void params_defaults() {
 // ============================================================
 //  NVS persistence
 // ============================================================
+// All parameters are stored as ONE blob of (FNV-1a(key), value) pairs. The old
+// layout used one NVS entry per key (~150 blobs, ~450 entries), which filled
+// the 20 KB NVS partition together with the Bluetooth bond keys: every save
+// failed and every boot read "no NVS". A single ~1.2 KB blob needs ~45 entries.
+struct __attribute__((packed)) ParamRecord { uint32_t hash; float value; };
+static uint32_t keyHash(const char* k) {
+    uint32_t h = 2166136261u;
+    while (*k) { h ^= (uint8_t)*k++; h *= 16777619u; }
+    return h;
+}
+static const char* BLOB_KEY = "pblob";
+
+// PN: what occupies the NVS partition (namespaces and entry counts).
+void params_nvsReport() {
+    nvs_stats_t st = {};
+    if (nvs_get_stats(NULL, &st) == ESP_OK)
+        Serial.printf("PN,stats,used=%u,free=%u,total=%u,namespaces=%u\n", (unsigned)st.used_entries,
+                      (unsigned)st.free_entries, (unsigned)st.total_entries, (unsigned)st.namespace_count);
+    struct NsCount { char name[16]; unsigned keys; };
+    static NsCount ns[24]; size_t nns = 0;
+    nvs_iterator_t it = nvs_entry_find("nvs", NULL, NVS_TYPE_ANY);
+    while (it) {
+        nvs_entry_info_t info; nvs_entry_info(it, &info);
+        size_t k = 0;
+        while (k < nns && strcmp(ns[k].name, info.namespace_name)) k++;
+        if (k == nns && nns < 24) { strncpy(ns[nns].name, info.namespace_name, 15); ns[nns].name[15] = 0; ns[nns].keys = 0; nns++; }
+        if (k < nns) ns[k].keys++;
+        it = nvs_entry_next(it);
+    }
+    nvs_release_iterator(it);
+    for (size_t k = 0; k < nns; k++) Serial.printf("PN,ns,%s,%u\n", ns[k].name, ns[k].keys);
+    Serial.println("PN.");
+}
+
 void params_save() {
     if (params_motionActive()) { Serial.println("PE,stop motors before saving NVS"); return; }
+    static ParamRecord rec[PARAM_TABLE_MAX];
+    if (PARAM_COUNT > PARAM_TABLE_MAX) { Serial.println("PE,parameter table too large for blob"); return; }
+    for (size_t i = 0; i < PARAM_COUNT; i++) { rec[i].hash = keyHash(PARAM_META[i].key); rec[i].value = *params_ptr(i); }
+    const size_t bytes = PARAM_COUNT * sizeof(ParamRecord);
     if (!_prefs.begin(NVS_NS, false)) { Serial.println("PE,NVS open for save failed"); return; }
-    bool written=true;
-    for (size_t i = 0; i < PARAM_COUNT; i++) {
-        if (_prefs.putFloat(PARAM_META[i].key,*params_ptr(i))!=sizeof(float)) { written=false;break; }
-    }
-    if (written) written=_prefs.putUChar("_ver",1)==1;
+    // Drop the old per-key entries (frees the space they wasted), then write the blob.
+    const bool cleared = _prefs.clear();
+    bool written = _prefs.putBytes(BLOB_KEY, rec, bytes) == bytes;
+    if (written) written=_prefs.putUChar("_ver",2)==1;
     if (written) written=_prefs.putUChar("_cur5s",1)==1;
     if (written) written=_prefs.putUChar("_input3",1)==1;
+    if (written) written=_prefs.putUChar("_brake2",1)==1;
+    const size_t freeEntries = _prefs.freeEntries();
     _prefs.end();
-    if (!written) { Serial.println("PE,NVS write failed; save not confirmed"); return; }
+    if (!written) { Serial.printf("PE,NVS write failed (cleared=%d, free entries=%u); save not confirmed\n", (int)cleared, (unsigned)freeEntries); return; }
     if (!_prefs.begin(NVS_NS,true)) { Serial.println("PE,NVS reopen for verification failed"); return; }
-    bool verified=true;
-    for (size_t i=0;i<PARAM_COUNT;i++) {
-        if (_prefs.getFloat(PARAM_META[i].key,NAN)!=*params_ptr(i)) { verified=false;break; }
-    }
-    verified=verified && _prefs.getUChar("_ver",0)==1 && _prefs.getUChar("_cur5s",0)==1 && _prefs.getUChar("_input3",0)==1;
+    static ParamRecord back[PARAM_TABLE_MAX];
+    bool verified = _prefs.getBytesLength(BLOB_KEY) == bytes && _prefs.getBytes(BLOB_KEY, back, bytes) == bytes &&
+                    !memcmp(back, rec, bytes);
+    verified=verified && _prefs.getUChar("_ver",0)==2 && _prefs.getUChar("_cur5s",0)==1 && _prefs.getUChar("_input3",0)==1 && _prefs.getUChar("_brake2",0)==1;
     _prefs.end();
     if (!verified) { Serial.println("PE,NVS readback failed; save not confirmed"); return; }
-    Serial.println("PS!,saved");
+    Serial.printf("PS!,saved (%u params, %u NVS entries free)\n", (unsigned)PARAM_COUNT, (unsigned)freeEntries);
 }
 
 void params_load() {
     if (params_motionActive()) { Serial.println("PE,stop motors before loading NVS"); return; }
     const bool opened=_prefs.begin(NVS_NS, true);
-    bool have = opened && _prefs.getUChar("_ver", 0) == 1;
+    const uint8_t ver = opened ? _prefs.getUChar("_ver", 0) : 0;
+    // v2: one blob; v1: legacy one-key-per-parameter (read once, rewritten as a blob by PS)
+    static ParamRecord rec[PARAM_TABLE_MAX];
+    size_t nrec = 0;
+    if (ver == 2) {
+        const size_t len = _prefs.getBytesLength(BLOB_KEY);
+        if (len && len % sizeof(ParamRecord) == 0 && len <= sizeof(rec) && _prefs.getBytes(BLOB_KEY, rec, len) == len)
+            nrec = len / sizeof(ParamRecord);
+    }
+    bool have = (ver == 1) || (ver == 2 && nrec > 0);
     const bool migrate = !opened || _prefs.getUChar("_cur5s", 0) != 1;
     const bool migrateInput = !opened || _prefs.getUChar("_input3", 0) != 1;
     const bool oldInputProfile = opened && _prefs.getUChar("_input2",0)==1;
+    const bool migrateBrake = !opened || _prefs.getUChar("_brake2", 0) != 1;
     for (size_t i = 0; i < PARAM_COUNT; i++) {
-        float v = have ? _prefs.getFloat(PARAM_META[i].key, PARAM_META[i].def) : PARAM_META[i].def;
+        float v = PARAM_META[i].def;
+        if (ver == 1) v = _prefs.getFloat(PARAM_META[i].key, PARAM_META[i].def);
+        else if (nrec) {
+            const uint32_t h = keyHash(PARAM_META[i].key);
+            for (size_t j = 0; j < nrec; j++) if (rec[j].hash == h) { v = rec[j].value; break; }
+        }
         const ParamMeta& m = PARAM_META[i];
         const bool discreteSign = !strcmp(m.key,"LDIR") || !strcmp(m.key,"RDIR");
         const bool discreteMode = !strcmp(m.key,"DRVMODE") || !strcmp(m.key,"HUBVSRC");
@@ -141,6 +196,12 @@ void params_load() {
         P.steerSlew=0;P.hubYawSlew=0;P.spdLoStr=1;P.expoSteer=0;
         Serial.println("[PARAM] Fixed TRIM=-1.2603 / MAXSTR=4000 active; PS confirms NVS persistence");
     }
+    if (migrateBrake) {
+        // 4.7.6: the DRVDEC ramp lengthened every stop; bubble back to the measured model.
+        const char* keys[] = {"DRVDEC", "BUBDEC", "BUBLAT", "BUBMRG", "VERRMAX"};
+        for (const char* k : keys) { int i = params_index(k); if (i >= 0) *params_ptr(i) = PARAM_META[i].def; }
+        Serial.println("[PARAM] Braking profile 2 defaults loaded in RAM (DRVDEC off, VERRMAX 0.7, bubble 0.5/0.3/0.08); PS saves it");
+    }
     params_recompute();
     params_applyHardware(true);
     Serial.printf("PL!,%s\n", have ? "loaded from NVS" : "no NVS, using defaults");
@@ -160,8 +221,9 @@ void params_service() {
     if (dumpRow < 0) return;
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
-        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW","SELFRIGHT"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1,1};
+        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW","SELFRIGHT","BUBBLE","BRAKEPROFILE","PADREPAIR","SLEEP"};
+    // PADREPAIR 2: BT,FORGET restarts and wipes the Bluetooth storage. SLEEP 1: SL,1/SL,0 power-down.
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1,1,2,2,2,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);
@@ -190,6 +252,21 @@ bool params_handleLine(char* line) {
     if (line[1] == '?') { params_dump();  return true; }
     if ((line[1]=='S' || line[1]=='L' || line[1]=='D') && params_motionActive()) {
         Serial.println("PE,stop motors before NVS/default operations"); return true;
+    }
+    if (line[1] == 'N' && line[2] == '\0') { params_nvsReport(); return true; }
+    if (line[1] == 'X' && line[2] == ',') {
+        // Erase one whole namespace (old firmware generations). Never the BT bonds.
+        const char* ns = line + 3;
+        if (params_motionActive()) { Serial.println("PE,stop motors before NVS operations"); return true; }
+        if (!*ns || strlen(ns) > 15 || !strncmp(ns, "bt", 2) || !strcmp(ns, "phy") || !strcmp(ns, "nvs.net80211")) {
+            Serial.println("PE,refusing to erase that namespace"); return true;
+        }
+        Preferences p;
+        const bool ok = p.begin(ns, false) && p.clear();
+        p.end();
+        Serial.printf("PX!,%s,%s\n", ns, ok ? "erased" : "failed");
+        params_nvsReport();
+        return true;
     }
     if (line[1] == 'S') { params_save();  return true; }
     if (line[1] == 'L') { params_load();  return true; }

@@ -28,12 +28,13 @@ def main():
     assert hashlib.sha256(image.read_bytes()).hexdigest()==firmware['sha256']
     shutil.copy2(image,directory/'firmware/application.bin')
     shutil.copy2(args.firmware/'manifest.json',directory/'firmware/manifest.json')
-    shutil.copy2(args.apk,directory/'android/app.apk')
+    apk_asset=args.output/f'2pybot-android-{commit}.apk'   # separate release asset (schema 2)
+    shutil.copy2(args.apk,apk_asset)
     android={'version':version,'version_code':metadata['versionCode'],'source_commit':commit,
         'bytes':args.apk.stat().st_size,'sha256':hashlib.sha256(args.apk.read_bytes()).hexdigest()}
     (directory/'android/manifest.json').write_text(json.dumps(android,indent=2)+'\n')
-    files=['firmware/application.bin','firmware/manifest.json','android/app.apk','android/manifest.json']
-    bundle={'schema':1,'source_commit':commit,'version':version,'sha256':{
+    files=['firmware/application.bin','firmware/manifest.json','android/manifest.json']
+    bundle={'schema':2,'android_asset':apk_asset.name,'source_commit':commit,'version':version,'sha256':{
         name:hashlib.sha256((directory/name).read_bytes()).hexdigest() for name in files}}
     (directory/'bundle.json').write_text(json.dumps(bundle,indent=2)+'\n')
     archive=args.output/f'2pybot-deploy-{commit}.tar.gz'

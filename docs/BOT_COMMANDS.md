@@ -1,5 +1,43 @@
 # Bot command environment
 
+## 2pybot control centre
+
+Type **`2pybot`** in an SSH terminal to open the full-screen control centre
+(like `nmtui`):
+
+| Page | What it shows / does |
+|---|---|
+| 1 Dashboard | Live state, motors, safety bubble, sensors, software, host, 24 h events, recent controller messages |
+| 2 Robot | Stop, centre camera, bubble and depth-guard switches, LED tests, gyro calibration, 30 s data recording |
+| 3 Parameters | All settings by group; Enter edits (range-checked), S saves to flash |
+| 4 Logs | Controller log and service logs, follow / scroll / filter |
+| 5 Services | 2PyBot services; restart, status, live log |
+| 6 Updates | Running commit and firmware; update to the latest branch, deploy another branch |
+| 7 Network | Wi-Fi, hotspot, addresses; opens `nmtui` |
+| 8 System | Temperature, memory, disk, event counts; diagnostics report, shell, reboot |
+| 9 Help | Keys and commands |
+
+Keys: `1`–`9` pages, arrows and Enter, Esc back, **`X` stops the motors from
+any page**, `Q` quits. Actions that change the robot refuse while it is armed.
+
+`2pybot <command>` runs one command without the screen and prints readable
+tables (`2pybot help` lists them; add `--json` for raw data):
+
+```sh
+2pybot status            # everything at a glance
+2pybot stop              # zero torque
+2pybot logs -f           # controller log, live (2pybot logs console for a service)
+2pybot services
+2pybot params list BUBBLE
+2pybot params set BUBDEC 0.6 --save
+2pybot doctor            # summary + full report file
+2pybot gamepad repair    # clear all pairings (controller restarts), then hold HOME + A
+2pybot power sleep       # power down: camera, lidar, ToF, ring, servos, gamepad off
+2pybot power wake        # back on
+```
+
+`bot` remains as the same command (`bot status` == `2pybot status`).
+
 Commands work from **any directory** on the Radxa. The environment uses its own
 Python venv; the CLI itself needs only the Python standard library.
 

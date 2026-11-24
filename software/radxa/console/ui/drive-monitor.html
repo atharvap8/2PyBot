@@ -14,8 +14,8 @@ const reasons=[[1,'shaping'],[2,'reversal'],[4,'recovery'],[8,'speed margin'],[1
 function flags(value){return value===undefined?'Unavailable':reasons.filter(([bit])=>value&bit).map(([,label])=>label).join(', ') || 'clear';}
 function metric(value,digits=3,suffix=''){return Number.isFinite(value)?value.toFixed(digits)+suffix:'Unavailable';}
 function chart(id,fields,colors){const c=document.getElementById(id),g=c.getContext('2d'),w=c.width=c.clientWidth*devicePixelRatio,h=c.height=c.clientHeight*devicePixelRatio;
-g.fillStyle='#0b111b';g.fillRect(0,0,w,h);if(!samples.length)return;const end=samples.at(-1).t,start=end-45000;
-let max=1;for(const s of samples)for(const field of fields)max=Math.max(max,Math.abs(s[field] || 0));g.strokeStyle='#283041';g.beginPath();g.moveTo(0,h/2);g.lineTo(w,h/2);g.stroke();
+g.fillStyle='#141210';g.fillRect(0,0,w,h);if(!samples.length)return;const end=samples.at(-1).t,start=end-45000;
+let max=1;for(const s of samples)for(const field of fields)max=Math.max(max,Math.abs(s[field] || 0));g.strokeStyle='#332c26';g.beginPath();g.moveTo(0,h/2);g.lineTo(w,h/2);g.stroke();
 fields.forEach((field,i)=>{g.strokeStyle=colors[i];g.lineWidth=2*devicePixelRatio;g.beginPath();samples.forEach((s,n)=>{const x=(s.t-start)/45000*w,y=h/2-(s[field] || 0)/max*h*.43;n?g.lineTo(x,y):g.moveTo(x,y);});g.stroke();g.fillStyle=colors[i];g.font=`${11*devicePixelRatio}px monospace`;g.fillText(field,10*devicePixelRatio,(16+i*16)*devicePixelRatio);});}
 function paint(t,d){document.getElementById('state').textContent=t.stale?'STALE':t.balancing?'BALANCING':'IDLE';
 const left=d.wheelL ?? (d.vCmd || 0)-(d.steer || 0),right=d.wheelR ?? (d.vCmd || 0)+(d.steer || 0);
@@ -24,8 +24,8 @@ values.push(['fall risk',metric(d.fpRisk*100,0,'%')],['predicted tilt',metric(d.
 values.push(['auto climb',['NORMAL','SUSPECT','CLIMB','LIMITED','MANUAL','DISABLED','DOWNCLIMB','EXITING','COOLDOWN'][d.acState] ?? 'Unavailable'],['climb blend',metric(d.acBlend*100,0,'%')],['climb integral',metric(d.clZ,3,' m·s')],['climb bleed',metric(d.clRecover*100,0,'%')],['descent excess',metric(d.dsExcess,3,' m/s')],['exit confirmation',metric(d.acExit,2,' s')]);
 document.getElementById('numbers').replaceChildren(...values.map(([label,value])=>{const el=document.createElement('div');el.className='stat';const u=document.createElement('u'),b=document.createElement('b');u.textContent=label;b.textContent=value;el.append(u,b);return el;}));
 samples.push({t:Date.now(),pitch:t.pitch,rate:d.w,fwd:d.fwd,steer:d.str,left,right,requested:d.driveReq,shaped:d.driveRef,effective:d.driveEff,measured:d.v,risk:d.fpRisk*100,feedback:d.balScale*100,integral:d.clZ,climbError:d.clEx});while(samples.length && samples[0].t<Date.now()-45000)samples.shift();
-chart('pitch',['pitch','rate'],['#35e0d8','#a78bfa']);chart('stick',['fwd','steer'],['#4ade80','#fbbf24']);chart('wheels',['left','right'],['#35e0d8','#f43f5e']);
-chart('references',['requested','shaped','effective','measured'],['#fbbf24','#4ade80','#35e0d8','#a78bfa']);chart('recovery',['risk','feedback'],['#f43f5e','#4ade80']);chart('climb',['integral','climbError'],['#35e0d8','#fbbf24']);}
+chart('pitch',['pitch','rate'],['#f08a4b','#a78bfa']);chart('stick',['fwd','steer'],['#34d399','#f0b84b']);chart('wheels',['left','right'],['#f08a4b','#ff4d6d']);
+chart('references',['requested','shaped','effective','measured'],['#f0b84b','#34d399','#f08a4b','#a78bfa']);chart('recovery',['risk','feedback'],['#ff4d6d','#34d399']);chart('climb',['integral','climbError'],['#f08a4b','#f0b84b']);}
 function connect(){const ws=new WebSocket(`ws://${location.host}/ws`);ws.onmessage=e=>{const data=JSON.parse(e.data);if(data.type==='telemetry')paint(data.tel,data.debug || {});
 if(data.type==='log' || data.type==='param_msg'){events.textContent+='\n'+data.text;events.scrollTop=events.scrollHeight;}};ws.onclose=()=>setTimeout(connect,1000);}
 connect();</script></body></html>

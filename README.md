@@ -71,7 +71,7 @@ assets/                     Project media
 2. Select ESP32 Dev Module with the Huge APP partition scheme.
 3. Open `firmware/BaseLink/BaseLink.ino`, review the pin assignments in `config.h`, and flash.
 4. Open USB serial at 460800 baud with newline termination. Check the IMU and driver boot messages, then send `P?` to inspect loaded parameters.
-5. Pair the EVOFOX One S in Home+B mode. Leave both sticks centered while calibration completes.
+5. Pair the EVOFOX One S in Home+A mode. Leave both sticks centered while calibration completes.
 6. Use the [v4 hardware guide](docs/BLDC_V4.md) for the BLDC pin map, confirmed polarity, parameter schema and offline verification.
 
 Saved v4 NVS parameters take precedence over compiled defaults in `2pybot-bldc4`. `PD` restores defaults in RAM; `PS` saves them with motors stopped. `ISGN` and `RPMSGN` are fixed at -1; `HUBVSRC` defaults to 1. Full-stick HIGH requests 1.00 m/s; `MAXSPD=0` leaves firmware speed uncapped. `VNOLOAD` is informational, not a driving limit.

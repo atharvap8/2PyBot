@@ -183,6 +183,7 @@ class Odometry:
         self.still_s = 0.0
         self.jumps = 0
         self.source = "encoder"
+        self.slip_acc = 0.0             # integrated |gyro yaw - wheel yaw| (rad); read+reset by fusion
 
     def re_anchor(self):
         self.prev = None
@@ -226,6 +227,10 @@ class Odometry:
                     self.bias += 0.02 * (w_raw - self.bias)
                 dth = (w_raw - self.bias) * dt
                 self.source = "gyro"
+                # Wheel slip shows as the wheels' yaw disagreeing with the gyro
+                # (scaled by the learned scrub ratio of this chassis).
+                ratio = self.detected[2] if self.detected else 1.0
+                self.slip_acc += abs((w_raw - self.bias) - ratio * w_enc) * dt
 
         mid = self.th + 0.5 * dth
         self.x += ds * math.cos(mid)

@@ -43,6 +43,7 @@
 
 #include <Bluepad32.h>
 #include <esp_bt.h>
+#include <nvs.h>
 #include "config.h"
 #include "params.h"
 
@@ -106,22 +107,74 @@ static float        _cx = 0.0f, _cy = 0.0f;    // left-stick centre offsets
 static float        _crx = 0.0f, _cry = 0.0f;  // right-stick centre offsets
 static bool         _calDone     = false;
 static bool         _freshConnect = true;      // swallow edges on frame 1
+static bool         _camArmed     = false;     // camera stick accepted only after reading centred
+static uint32_t     _camNeutralSince = 0;
 
 
 
 static void _onPadConnect(ControllerPtr ctl) {
     _pad = ctl;
     _freshConnect = true;
+    _camArmed = false; _camNeutralSince = 0;
     Serial.printf("[PAD] Connected: %s\n", ctl->getModelName().c_str());
 }
 static void _onPadDisconnect(ControllerPtr ctl) {
     _calDone = false;
     _freshConnect = true;
+    _camArmed = false; _camNeutralSince = 0;
     if (_pad == ctl) _pad = nullptr;
     Serial.println("[PAD] Disconnected — inputs zeroed, balance continues");
 }
 
 inline bool btgamepad_connected() { return _pad && _pad->isConnected(); }
+
+// ---- re-pairing ----
+// Deleting keys at runtime (BP32.forgetBluetoothKeys) left the BLE side of
+// Bluepad32 4.1 inconsistent with this pad ("SM_EVENT_PAIRING_COMPLETE: Invalid
+// device", "uni_bt_le_on_encryption_change: Device not found") and it would not
+// pair again. A full flash erase always worked because it starts BTstack with
+// empty storage. Re-pair does exactly that for Bluetooth only: it erases the two
+// NVS namespaces that hold pairing state and the caller restarts the controller,
+// so BTstack and Bluepad32 reload from empty storage:
+//   "BTstack"  BTstack TLV: BR/EDR link keys, LE bonds, LE root keys
+//   "bp32"     Bluepad32 properties (allowlist, GAP settings)
+// Both namespaces already exist, so this never creates one (creating a new
+// namespace was refused in 4.7.7 even with NVS space free). Parameters, PHY
+// calibration and Wi-Fi data stay untouched.
+static bool _nvsEraseNamespace(const char* ns) {
+    nvs_handle_t h;
+    esp_err_t open = nvs_open(ns, NVS_READWRITE, &h);
+    if (open == ESP_ERR_NVS_NOT_FOUND) return true;   // nothing stored under it: already clear
+    if (open != ESP_OK) return false;
+    esp_err_t e = nvs_erase_all(h);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e == ESP_OK;
+}
+
+// Clears every gamepad pairing. The caller restarts the controller afterwards so
+// the stale in-RAM Bluetooth state is discarded. Returns true if the link-key
+// store was cleared.
+inline bool btgamepad_forget() {
+    if (_pad && _pad->isConnected()) _pad->disconnect();
+    BP32.enableNewBluetoothConnections(false);
+    const bool a = _nvsEraseNamespace("BTstack");
+    const bool b = _nvsEraseNamespace("bp32");
+    Serial.printf("[PAD] Gamepad pairings cleared (BTstack %s, bp32 %s); restarting to finish\n",
+                  a ? "erased" : "FAILED", b ? "erased" : "FAILED");
+    return a;
+}
+
+// ---- power-down ----
+// Asleep: the pad is disconnected, new connections are refused and any input
+// is ignored. A bonded pad may still reconnect; it can do nothing until wake.
+static bool _sleep = false;
+inline void btgamepad_setSleep(bool on) {
+    _sleep = on;
+    if (on && _pad && _pad->isConnected()) _pad->disconnect();
+    BP32.enableNewBluetoothConnections(!on);
+    _calDone = false; _freshConnect = true; _camArmed = false; _camNeutralSince = 0;
+}
 
 // esp_power_level_t is 0..7 for -12..+9 dBm in 3 dB steps.
 static inline int _pwrDbm(esp_power_level_t l) { return -12 + 3 * (int)l; }
@@ -155,9 +208,9 @@ static void _applyTxPower() {
 
 inline void btgamepad_begin() {
     BP32.setup(&_onPadConnect, &_onPadDisconnect);
-    // BP32.forgetBluetoothKeys();  // uncomment for ONE flash if pairing misbehaves
+    BP32.enableNewBluetoothConnections(true);
     _applyTxPower();
-    Serial.println("[PAD] Bluepad32 ready — put the EVOFOX One S in pairing mode (Home+B)");
+    Serial.println("[PAD] Bluepad32 ready: to pair, hold HOME + A on the EVOFOX One S (Android mode)");
 }
 
 static inline float _dz(float v) { return (fabsf(v) < P.padDz) ? 0.0f : v; }
@@ -225,7 +278,7 @@ inline void btgamepad_update() {
     BP32.update();
     if (!_txPowerDone) _applyTxPower();
 
-    if (!btgamepad_connected()) {
+    if (!btgamepad_connected() || _sleep) {
         joyForward = 0.0f;
         joySteering = 0.0f;
         joyPanX     = 0.0f;   // rate control -> servos simply hold still
@@ -263,6 +316,16 @@ inline void btgamepad_update() {
     _shapeStick(rawX, rawY, false, &fwdNorm, &steerNorm); // direct steering: no cardinal-snap suppression
     // RIGHT stick is the camera; snap keeps a pure pan from creeping the zoom
     _shapeStick(rawRX, rawRY, true, &zoomNorm, &panNorm, P.camExpo);
+    // Camera stick is rate control: a bogus first report (or a pad that comes
+    // up in another axis mode) would run the yaw servo to its end stop. Only
+    // accept it after it has read centred for 300 ms since this connection.
+    if (!_camArmed) {
+        if (panNorm == 0.0f && zoomNorm == 0.0f) {
+            if (!_camNeutralSince) _camNeutralSince = millis();
+            else if (millis() - _camNeutralSince > 300) { _camArmed = true; Serial.println("[PAD] camera stick live"); }
+        } else _camNeutralSince = 0;
+        panNorm = zoomNorm = 0.0f;
+    }
     joyPanX  = panNorm  * P.padYawSgn;
     joyZoomY = zoomNorm * P.padZoomSgn;
 #else

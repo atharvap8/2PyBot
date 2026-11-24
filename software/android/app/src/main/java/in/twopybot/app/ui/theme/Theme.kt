@@ -7,25 +7,29 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// An instrument panel, not a Material demo: near-black ground, one cyan accent
-// for live data, violet for control, amber for "changed but unsaved", and red
-// reserved exclusively for stop and danger so it never loses its meaning.
-val Ink       = Color(0xFF090C10)
-val Panel     = Color(0xFF12171E)
-val PanelSoft = Color(0xFF1C2530)
-val Line      = Color(0xFF29333F)
-val TextHi    = Color(0xFFF1F4F8)
-val TextDim   = Color(0xFF9AA7B7)
-val Cyan      = Color(0xFF78D4F5)
-val Violet    = Color(0xFFA7B4F6)
-val Green     = Color(0xFF4ADE80)
-val Amber     = Color(0xFFFBBF24)
-val Red       = Color(0xFFF43F5E)
+// Same design system as the bot's System map web page: warm near-black ground,
+// one orange accent, green = OK, amber = changed/warning, red only for stop.
+// (Name "Cyan" is kept for source compatibility: it is the accent colour.)
+val Ink       = Color(0xFF141210)
+val Panel     = Color(0xFF1B1815)
+val PanelSoft = Color(0xFF221E1A)
+val Line      = Color(0xFF332C26)
+val TextHi    = Color(0xFFEFE9E3)
+val TextDim   = Color(0xFFABA196)
+val TextMute  = Color(0xFF73695F)
+val Cyan      = Color(0xFFF08A4B)
+val Accent    = Cyan
+val AccentBg  = Color(0xFF2A211B)
+val Violet    = Color(0xFFA78BFA)
+val Green     = Color(0xFF34D399)
+val Amber     = Color(0xFFF0B84B)
+val Red       = Color(0xFFFF4D6D)
 
 private val Scheme = darkColorScheme(
-    primary = Cyan, onPrimary = Ink,
+    primary = Cyan, onPrimary = Color(0xFF1B1210), primaryContainer = AccentBg, onPrimaryContainer = Cyan,
     secondary = Violet, onSecondary = Ink,
     tertiary = Green, onTertiary = Ink,
     background = Ink, onBackground = TextHi,
@@ -39,6 +43,14 @@ private val Scheme = darkColorScheme(
 // digits don't jitter sideways every time a value changes.
 val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
 
+private val Shapes = androidx.compose.material3.Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
+    small = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+)
+
 private val Typo = Typography(
     titleLarge  = Typography().titleLarge.copy(fontSize=23.sp,fontWeight = FontWeight.SemiBold, letterSpacing = (-0.4).sp),
     titleMedium = Typography().titleMedium.copy(fontSize=16.sp,fontWeight = FontWeight.SemiBold),
@@ -49,5 +61,5 @@ private val Typo = Typography(
 
 @Composable
 fun TwoPyBotTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, typography = Typo, content = content)
+    MaterialTheme(colorScheme = Scheme, typography = Typo, shapes = Shapes, content = content)
 }

@@ -110,7 +110,7 @@ main { height: calc(100% - 64px); }
 .s-error > .badge, .insp.s-error .badge { color: #fff; background: var(--err); border-color: var(--err); }
 .s-warn .line { color: var(--warn); }
 .s-error .line { color: var(--err); }
-.s-blocked, .s-nodata { opacity: .55; }
+.s-blocked, .s-nodata, .s-sleep { opacity: .55; }
 .blk.s-error, .hub.s-error, .grp.s-error { border-color: var(--err); animation: fault 1.2s steps(1, end) infinite; }
 @keyframes fault { 0% { border-color: var(--err); background: var(--errbg); } 50% { border-color: rgba(255, 77, 109, .35); background: var(--card); } }
 @media (prefers-reduced-motion: reduce) { .s-error { animation: none !important; } }
@@ -118,7 +118,7 @@ main { height: calc(100% - 64px); }
 /* ---------- robot ---------- */
 .bot { position: absolute; left: 780px; top: 116px; width: 360px; height: 360px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; }
 .botframe { width: 318px; height: 318px; border-radius: 50%; overflow: hidden; }
-.botframe img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%; display: block; }
+.botframe img { width: 100%; height: 100%; object-fit: contain; object-position: 50% 50%; display: block; transform: rotate(-4deg) scale(1.06); }
 .botcap { position: absolute; left: 700px; top: 494px; width: 520px; text-align: center; }
 .botcap h1 { font-size: 24px; font-weight: 600; }
 .chips { display: flex; justify-content: center; margin-top: 8px; font-size: 14.5px; color: var(--sub); }
@@ -127,7 +127,7 @@ main { height: calc(100% - 64px); }
 .chips b { color: var(--ink); font-weight: 600; }
 
 /* ---------- inspector ---------- */
-.insp { position: absolute; left: 40px; top: 600px; width: 620px; height: 396px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; overflow: hidden; display: flex; flex-direction: column; }
+.insp { position: absolute; left: 40px; top: 704px; width: 630px; height: 300px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; overflow: hidden; display: flex; flex-direction: column; }
 .insp .ih { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .insp h2 { font-size: 20px; font-weight: 600; }
 .insp .path { font-size: 14px; color: var(--sub); margin-top: 3px; }
@@ -165,3 +165,7 @@ main { height: calc(100% - 64px); }
 .loglist li { display: flex; gap: 14px; border-bottom: 1px solid rgba(255, 255, 255, .03); }
 .loglist time { color: var(--mute); flex: none; }
 .loglist .bad { color: var(--err); }
+
+/* links between the pages on the single console port */
+.pagelinks{display:flex;gap:6px;margin-right:10px}.pagelinks a{color:var(--sub);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:13px}.pagelinks a:hover{color:var(--ink);border-color:var(--acc)}
+

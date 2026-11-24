@@ -44,7 +44,8 @@ def main():
     parser.add_argument("--stable", action="store_true", help="Return to original stable BLDC ed91341 (4.2.0)")
     parser.add_argument("--config", type=Path, default=Path("/etc/2pybot-deploy.json"))
     args = parser.parse_args()
-    if args.stable:
+    if args.stable or args.branch == "stable":       # "stable" = same as --stable
+        args.stable = True
         args.branch = "hardware/bldc-v4.0.0"
     if os.geteuid() != 0:
         raise RuntimeError("Run the helper with sudo")

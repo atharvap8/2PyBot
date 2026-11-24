@@ -18,6 +18,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bot_view as V  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
 SERVICES = {
     "console": "2pybot-console.service", "firmware": "2pybot-firmware.service",
@@ -46,8 +49,55 @@ def atomic(path, data):
             temporary.unlink()
 
 
+JSON_MODE = False
+COLOUR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def c(text, tone):
+    return V.colour(str(text), tone, COLOUR)
+
+
+def _scalar(v):
+    if isinstance(v, bool):
+        return c("yes", "ok") if v else c("no", "dim")
+    if isinstance(v, float):
+        return "{:.6g}".format(v)
+    if v is None:
+        return c("-", "dim")
+    return str(v)
+
+
+def print_tree(data, indent=0, out=print):
+    """Readable nested key/value view (replaces raw JSON)."""
+    pad = "  " * indent
+    if isinstance(data, dict):
+        width = max((len(str(k)) for k in data), default=0) + 2
+        for k, v in data.items():
+            label = str(k).replace("_", " ")
+            if isinstance(v, (dict, list)) and v and not (isinstance(v, list) and all(not isinstance(x, (dict, list)) for x in v)):
+                out(pad + c(label, "acc"))
+                print_tree(v, indent + 1, out)
+            elif isinstance(v, list):
+                out(pad + c(label.ljust(width), "dim") + ", ".join(_scalar(x) for x in v[:12]) + (" ..." if len(v) > 12 else ""))
+            else:
+                text = _scalar(v)
+                out(pad + c(label.ljust(width), "dim") + (text if len(text) < 160 else text[:157] + "..."))
+    elif isinstance(data, list):
+        for i, item in enumerate(data):
+            if isinstance(item, (dict, list)):
+                out(pad + c("- item {}".format(i + 1), "dim"))
+                print_tree(item, indent + 1, out)
+            else:
+                out(pad + "- " + _scalar(item))
+    else:
+        out(pad + _scalar(data))
+
+
 def show(data):
-    print(json.dumps(data, indent=2))
+    if JSON_MODE:
+        print(json.dumps(data, indent=2))
+    else:
+        print_tree(data)
 
 
 def stamp():
@@ -99,15 +149,117 @@ class Bot:
         return status
 
     def status(self):
-        show({"host": self.api("/api/ready"), "controller": self.api("/api/status"),
-              "firmware": self.api("/api/firmware/status")})
+        if JSON_MODE:
+            show({"host": self.api("/api/ready"), "controller": self.api("/api/status"),
+                  "firmware": self.api("/api/firmware/status")})
+            return
+        snap = V.Collector(V.Api(self.base)).snapshot()
+        if not snap.get("status"):
+            raise RuntimeError("the console is not answering on " + self.base + " (is 2pybot-console running? try: 2pybot services)")
+        V.print_sections(V.dashboard(snap), COLOUR)
+
+    def firmware_status(self):
+        fw = self.api("/api/firmware/status")
+        if JSON_MODE:
+            return show(fw)
+        inst, latest, job = fw.get("installed") or {}, fw.get("latest") or {}, fw.get("job") or {}
+        same = inst.get("build_id") and inst.get("build_id") == latest.get("build_id")
+        rows = [("Installed", "{}  built {}  from {}".format(inst.get("version", "-"), (inst.get("built_at") or "")[:16].replace("T", " "),
+                                                             V.short(inst.get("source_commit"))), "ok" if inst else "warn"),
+                ("Latest build", "{}  from {}".format(latest.get("version", "-"), V.short(latest.get("source_commit"))), "ok" if same else "warn"),
+                ("Up to date", "yes" if same else "no, a newer build is registered", "ok" if same else "warn"),
+                ("Can flash now", "yes" if fw.get("can_flash") else "no: " + str(fw.get("blocked_reason") or "-"), "ok" if fw.get("can_flash") else "dim")]
+        if job:
+            rows.append(("Last update job", "{} · {} · {}".format(job.get("status"), job.get("stage"), job.get("message", "")),
+                         {"succeeded": "ok", "failed": "err", "recovery_required": "err"}.get(job.get("status"), "warn")))
+        V.print_sections([("Controller firmware", rows)], COLOUR)
+
+    def services(self):
+        states = V.service_states()
+        if JSON_MODE:
+            return show(states)
+        tones = {i: ("ok" if s["active"] == "active" else "dim" if s["name"] in ("deploy", "boot", "imx708") else "err")
+                 for i, s in enumerate(states)}
+        V.table(["SERVICE", "STATE", "AT BOOT", "PURPOSE"], [[s["name"], s["active"], s["enabled"], s["desc"]] for s in states], COLOUR, tones)
+
+    def power(self):
+        op = self.args.operation
+        r = self.api("/api/power", {"mode": op}) if op in ("sleep", "wake") else self.api("/api/power")
+        if self.args.json:
+            return show(r)
+        if r.get("asleep"):
+            print(c("Powered down", "warn") + " for {} min: camera, lidar, depth sensor, ring, servos, torch and gamepad off.".format(
+                round((r.get("asleep_s") or 0) / 60)))
+            print("Wake it with: 2pybot power wake")
+        else:
+            print(c("Awake", "ok") + "  camera {}  lidar {}  depth sensor {}".format(r.get("camera"), r.get("lidar"), r.get("tof")))
+        if not r.get("controller_supported"):
+            print(c("Controller firmware is older than 4.7.7: only the host side powers down.", "warn"))
+
+    def gamepad(self):
+        if self.args.operation == "repair":
+            r = self.api("/api/gamepad/repair", {})
+            print(c(r.get("message", "Re-pairing started."), "ok"))
+            if r.get("restart"):
+                print("Controller restarting; waiting for it to come back...")
+                time.sleep(4)
+                ready_by = time.time() + 40
+                while time.time() < ready_by:
+                    tel = (self.api("/api/status") or {}).get("telemetry", {})
+                    if tel.get("startup_ready") and not tel.get("stale", True):
+                        break
+                    time.sleep(1)
+                print(c("Now hold HOME + A on the gamepad.", "info"))
+            print("Waiting up to 60 s for a gamepad to connect...")
+            deadline = time.time() + 60
+            seen = time.time() - 2
+            while time.time() < deadline:
+                for entry in self.api("/api/log?n=60").get("log", []):
+                    if entry.get("t", 0) >= seen and "[PAD] Connected" in entry.get("text", ""):
+                        print(c(entry["text"], "ok"))
+                        return
+                time.sleep(1)
+            print(c("No gamepad connected yet. Keep HOME + A held, or run this again.", "warn"))
+            return
+        st = self.api("/api/autonomy/status").get("controller", {})
+        connected = bool(st.get("pad"))
+        print("Gamepad: " + (c("connected", "ok") if connected else c("not connected", "warn")))
+        if not connected:
+            print("Pair it: hold HOME + A. If it will not connect, run: 2pybot gamepad repair")
+
+    def controller_log(self):
+        lines = V.log_tail(self.args.lines)
+        for line in lines:
+            if "[PAD] btn=" not in line:
+                print(c(line, V.log_tone(line)))
+        if not self.args.follow:
+            return
+        path = V.CONTROLLER_LOG
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            while True:
+                chunk = f.readline()
+                if not chunk:
+                    time.sleep(0.3)
+                    continue
+                line = chunk.decode("utf-8", "replace").rstrip()
+                if "[PAD] btn=" not in line and line.count("\ufffd") < 5:
+                    print(c(line, V.log_tone(line)), flush=True)
 
     def deploy_status(self):
         previous = None
         while True:
             value = self.api("/api/deployment/status")
             if not self.args.watch:
-                show(value)
+                if JSON_MODE:
+                    return show(value)
+                p, a = value.get("progress", {}), value.get("applied", {})
+                V.print_sections([("Deployment", [
+                    ("Phase", "{} ({}%)".format(p.get("phase", "-"), p.get("progress", "-")), {"success": "ok", "failed": "err"}.get(p.get("phase"), "warn")),
+                    ("Message", p.get("message", "-"), None),
+                    ("Target commit", V.short(p.get("commit")), None),
+                    ("Running commit", V.short(a.get("commit")), None),
+                    ("Previous commit", V.short(a.get("previous")), "dim")])], COLOUR)
                 return
             progress = value.get("progress", {})
             line = (progress.get("phase"), progress.get("message"), progress.get("progress"))
@@ -192,7 +344,12 @@ class Bot:
             self.idle()
             answer=self.api("/api/params/save", {},timeout=25)
             if not answer.get("confirmed") or not answer.get("persisted"):raise RuntimeError("NVS persistence was not confirmed")
-        show({"applied": values, "save_requested": save})
+        if JSON_MODE:
+            show({"applied": values, "save_requested": save})
+        else:
+            for k, v in values.items():
+                print("{} = {:.6g}".format(c(k, "acc"), v))
+            print(c("Saved to flash." if save else "Applied (not saved: add --save, or run: 2pybot params save).", "ok" if save else "warn"))
 
     def calibration(self):
         kind = self.args.kind
@@ -261,11 +418,18 @@ class Bot:
                 report[name] = {"exit": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
             except (OSError, subprocess.TimeoutExpired) as error:
                 report[name] = {"error": str(error)}
-        if self.args.output:
-            atomic(self.args.output.expanduser().resolve(), report)
-            print("Saved diagnostics: " + str(self.args.output.expanduser().resolve()))
-        else:
-            show(report)
+        if JSON_MODE and not self.args.output:
+            return show(report)
+        out = (self.args.output or Path("~/2pybot-report-" + time.strftime("%Y%m%d-%H%M%S") + ".json")).expanduser().resolve()
+        atomic(out, report)
+        try:
+            self.status()
+        except RuntimeError as error:
+            print(c(str(error), "err"))
+        counts, last = V.event_summary()
+        V.print_sections([("Last 24 hours", [(k, str(v) + (("   last " + last[k]) if k in last else ""), "warn" if v else "dim")
+                                             for k, v in counts.items()])], COLOUR)
+        print("Full report saved: " + c(str(out), "info"))
 
     def prefix(self):
         paths = sorted(self.firmware_root.glob("jobs/*/boot-nvs-before.bin"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -434,17 +598,34 @@ class Bot:
     def params(self):
         if self.args.operation in {"get", "list"}:
             result = self.api("/api/params")
+            if JSON_MODE and not self.args.key:
+                return show(result)
+            params = result["params"]
             if self.args.key:
                 key = self.args.key.upper()
-                matches = [p for p in result["params"] if p["key"] == key]
-                if matches:
-                    show(matches)
-                elif key in result.get("derived", {}):
-                    show({"key": key, "value": result["derived"][key], "read_only": True})
+                groups = {g.upper() for g in result.get("groups", {})}
+                if key in groups:
+                    params = [p for p in params if p["group"].upper() == key]
                 else:
-                    raise ValueError("Unknown parameter/capability: " + key)
-            else:
-                show(result)
+                    matches = [p for p in params if p["key"] == key or key in p["key"]]
+                    if not matches and key in result.get("derived", {}):
+                        return show({"key": key, "value": result["derived"][key], "read_only": True})
+                    if not matches:
+                        raise ValueError("Unknown parameter or group: " + key + " (groups: " + ", ".join(result.get("groups", {})) + ")")
+                    params = matches
+                    if JSON_MODE:
+                        return show(params)
+            group = None
+            for p in params:
+                if p["group"] != group:
+                    group = p["group"]
+                    print(c("\n" + group, "acc"))
+                fixed = p["lo"] == p["hi"]
+                rng = "fixed" if fixed else "{:.4g}..{:.4g}".format(p["lo"], p["hi"])
+                line = "  {:<10} {:>11}  {:<17} {}".format(p["key"], "{:.6g}".format(p["value"]) + ("*" if p.get("dirty") else ""), rng, p.get("desc", ""))
+                print(c(line, "dim" if fixed else None))
+            if any(p.get("dirty") for p in params):
+                print(c("\n* changed but not saved (2pybot params save)", "warn"))
         elif self.args.operation == "set":
             if not self.args.key or self.args.value is None:
                 raise ValueError("Usage: bot params set KEY VALUE [--save]")
@@ -455,7 +636,7 @@ class Bot:
             self.idle()
             answer=self.api("/api/params/" + self.args.operation, {},timeout=25)
             if not answer.get("confirmed"):raise RuntimeError("Controller did not confirm settings operation; update the bot to 4.2.0")
-            show(answer)
+            print(c("Done: " + self.args.operation, "ok") if not JSON_MODE else json.dumps(answer, indent=2))
 
     def toolchain(self):
         cli = self.config.get("arduino_cli", "arduino-cli")
@@ -514,7 +695,13 @@ class Bot:
             else:
                 self.status()
         elif name == "firmware-status":
-            show(self.api("/api/firmware/status"))
+            self.firmware_status()
+        elif name == "services":
+            self.services()
+        elif name == "gamepad":
+            self.gamepad()
+        elif name == "power":
+            self.power()
         elif name == "deploy-status":
             self.deploy_status()
         elif name == "build-firmware":
@@ -532,7 +719,8 @@ class Bot:
         elif name == "params":
             self.params()
         elif name == "stop":
-            show(self.api("/api/estop", {}))
+            self.api("/api/estop", {})
+            print(c("STOP sent: motors at zero torque.", "err"))
         elif name == "deploy":
             self.deploy()
         elif name == "toolchain":
@@ -541,6 +729,8 @@ class Bot:
             self.restart()
         elif name == "update":
             subprocess.run(["git", "pull", "--ff-only"], cwd=self.repo, check=True)
+        elif name == "logs" and self.args.service == "controller":
+            self.controller_log()
         elif name == "logs":
             command = ["journalctl", "--no-pager", "-u", SERVICES[self.args.service], "-n", str(self.args.lines)]
             if self.args.follow:
@@ -549,10 +739,20 @@ class Bot:
 
 
 def parser():
-    result = argparse.ArgumentParser(prog="bot", description=__doc__, epilog="Works from any directory. Use '<command> --help' for options.")
+    result = argparse.ArgumentParser(prog="2pybot", description="2PyBot robot commands. Run without a command for the full-screen interface.",
+                                     epilog="Works from any directory. Use '2pybot <command> --help' for options.")
     result.add_argument("--config", type=Path, default=Path(os.environ.get("BOT_CLI_CONFIG", "/etc/2pybot-cli.json")))
     result.add_argument("--api", help="Override the local loopback API URL")
-    sub = result.add_subparsers(dest="command", required=True)
+    result.add_argument("--json", action="store_true", help="Print raw data instead of tables")
+    result.add_argument("--launcher", default="bot", help=argparse.SUPPRESS)
+    sub = result.add_subparsers(dest="command", metavar="<command>")
+    sub.add_parser("tui", help="Open the full-screen interface")
+    sub.add_parser("services", help="2PyBot service states")
+    p = sub.add_parser("gamepad", help="Gamepad: status or re-pair")
+    p.add_argument("operation", nargs="?", choices=["status", "repair"], default="status")
+    p = sub.add_parser("power", help="Power-down mode: status, sleep or wake")
+    p.add_argument("operation", nargs="?", choices=["status", "sleep", "wake"], default="status")
+    sub.add_parser("help", help="List commands")
     sub.add_parser("status", help="Host readiness, controller telemetry and firmware versions")
     p = sub.add_parser("check", help="Check host/controller or deployment")
     p.add_argument("target", nargs="?", choices=["status", "deploy-status"], default="status")
@@ -594,15 +794,40 @@ def parser():
     p = sub.add_parser("restart", help="Restart a service on a stopped bot")
     p.add_argument("service", choices=sorted(SERVICES))
     p.add_argument("--offline", action="store_true", help="Bot is stopped but the local API is unavailable")
-    p = sub.add_parser("logs", help="Read systemd logs")
-    p.add_argument("service", nargs="?", choices=sorted(SERVICES), default="console")
+    p = sub.add_parser("logs", help="Controller log (default) or a service's log")
+    p.add_argument("service", nargs="?", choices=["controller"] + sorted(SERVICES), default="controller")
     p.add_argument("--follow", "-f", action="store_true")
     p.add_argument("--lines", "-n", type=int, default=60)
     return result
 
 
+COMMAND_LIST = [
+    ("status", "everything at a glance"), ("stop", "stop the motors"), ("logs [-f]", "controller log (logs console / deploy / ...)"),
+    ("services", "service states"), ("params list [GROUP|KEY]", "settings"), ("params set KEY VALUE --save", "change a setting"),
+    ("firmware-status", "controller firmware"), ("deploy-status [--watch]", "software update progress"),
+    ("doctor", "diagnostics summary + report file"), ("calibration imu|trim|tof|camera", "calibrations"),
+    ("gamepad [repair]", "gamepad status / forget and re-pair"), ("power [sleep|wake]", "power down to stop heating / wake up"), ("restart SERVICE", "restart a service"), ("backup / restore", "firmware and settings backups"),
+]
+
+
+def print_help(launcher):
+    print(c("2PyBot", "acc") + " robot commands\n")
+    print("  " + c(launcher.ljust(42), "info") + "open the full-screen interface (no command)")
+    for cmd, text in COMMAND_LIST:
+        print("  " + c((launcher + " " + cmd).ljust(42), "info") + text)
+    print("\nAdd " + c("--json", "info") + " for raw data. Details: " + launcher + " <command> --help")
+
+
 def main(argv=None):
+    global JSON_MODE
     args = parser().parse_args(argv)
+    JSON_MODE = args.json
+    if args.command in (None, "tui", "help"):
+        if args.command == "tui" or (args.command is None and args.launcher == "2pybot" and sys.stdout.isatty()):
+            import bot_tui
+            return bot_tui.main(args.api or "http://127.0.0.1:8080")
+        print_help(args.launcher)
+        return 0
     try:
         Bot(args).run()
         return 0
@@ -610,7 +835,7 @@ def main(argv=None):
         print("\nStopped watching; accepted worker jobs continue.", file=sys.stderr)
         return 130
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print("bot: " + str(error), file=sys.stderr)
+        print(c("2pybot: " + str(error), "err"), file=sys.stderr)
         return 2
 
 

@@ -70,16 +70,45 @@ bool M0601Port::sendMode(uint8_t mode) {
 }
 
 void M0601Port::decode(const uint8_t* f) {
-    feedback.mode = f[1];
+    // Mode changes need two agreeing replies (a rebooted driver repeats its
+    // new mode in every reply, so this costs ~2.5 ms; a lone corrupt frame is ignored).
+    if (!feedback.frames || f[1] == feedback.mode) { feedback.mode = f[1]; modeCandidate = 0; }
+    else if (f[1] == modeCandidate) { feedback.mode = f[1]; modeCandidate = 0; }
+    else modeCandidate = f[1];
     feedback.currentA = m0601::rawToAmps((int16_t)((f[2] << 8) | f[3]));
     feedback.rpm = (int16_t)((f[4] << 8) | f[5]);
     if (pending == QUERY) feedback.tempC = f[6];
     else if (pending == DRIVE) {
         feedback.pos16 = (uint16_t)((f[6] << 8) | f[7]);
         feedback.posValid = true; ++feedback.posFrames;
+        // The driver samples position when it handles the request, so the
+        // request send time is the sample time. Reply arrival jitters with
+        // UART/loop timing and, scaled by wheel speed, made velocity noisy.
+        feedback.sampleUs = sentUs;
     } // AMBIGUOUS: DRIVE/QUERY layout unknown, keep common fields only
-    feedback.fault = f[8]; feedback.rxMs = millis(); ++feedback.frames;
+    const uint8_t raw = f[8];
+    feedback.rawFault = raw;
+    if (!raw) {
+        // A fault seen in fewer than FAULT_CONFIRM replies was a corrupt frame.
+        if (faultCount && faultCount < m0601::FAULT_CONFIRM) {
+            ++feedback.transientFaults; feedback.lastTransient = faultCandidate;
+        }
+        faultCandidate = 0; faultCount = 0; feedback.fault = 0;
+    } else if (raw == faultCandidate) {
+        if (faultCount < 255) ++faultCount;
+        if (faultCount >= m0601::FAULT_CONFIRM) feedback.fault = raw;
+    } else {
+        faultCandidate = raw; faultCount = 1;
+        if (m0601::FAULT_CONFIRM <= 1) feedback.fault = raw;
+    }
+    memcpy(feedback.lastFrame, f, m0601::FRAME_LEN);
+    feedback.rxMs = millis(); ++feedback.frames;
     pending = NONE;
+}
+
+bool M0601Port::plausible(const uint8_t* f) {
+    const int16_t rpm = (int16_t)((f[4] << 8) | f[5]);
+    return !(f[8] & ~m0601::FAULT_MASK) && rpm <= m0601::RPM_PLAUSIBLE && rpm >= -m0601::RPM_PLAUSIBLE;
 }
 
 void M0601Port::service() {
@@ -87,7 +116,15 @@ void M0601Port::service() {
     while (serial.available() && length < sizeof(buffer)) buffer[length++] = (uint8_t)serial.read();
     while (length >= m0601::FRAME_LEN) {
         const bool header = buffer[0] == motorId && buffer[1] >= 1 && buffer[1] <= 3;
-        if (header && m0601::crc8(buffer, 9) == buffer[9]) {
+        const bool crcOk = header && m0601::crc8(buffer, 9) == buffer[9];
+        if (crcOk && !plausible(buffer)) {
+            // Passed the 8-bit CRC by chance (misaligned window). Resync by one
+            // byte exactly like a CRC failure; never decode it.
+            ++feedback.implausible;
+            memmove(buffer, buffer + 1, --length); ++feedback.dropped;
+            continue;
+        }
+        if (crcOk) {
             // Unsolicited/duplicate/late frames must not be decoded as the
             // next transaction's layout. Only one request can be outstanding.
             if (pending != NONE) decode(buffer);

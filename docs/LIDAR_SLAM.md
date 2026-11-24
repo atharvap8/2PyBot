@@ -1,6 +1,6 @@
 # Lidar mapping (RPLIDAR C1) — standalone, no ROS
 
-Open **http://10.42.0.1:6970/** (or the console at `/slam/`). The page walks you
+Open **http://10.42.0.1:8080/slam/** (single console port). The page walks you
 through five steps: check the lidar, check the wheels, make a map, save it, use it.
 
 ![Live mapping](images/slam/3_mapping_live.png)
@@ -57,12 +57,13 @@ console and system-map STOP routes). The lidar and SLAM threads start with the
 console service and the C1 is sent STOP when the service shuts down.
 
 ## Settings (environment)
-`BOT_SLAM_PORT` (6970, 0 = only `/slam/`), `BOT_LIDAR_PORT` (`/dev/ttyAS4`),
-`BOT_LIDAR_BAUD` (460800), `BOT_MAPS_DIR` (`~/.2pybot/maps`), `BOT_LIDAR=0` to
+`BOT_SLAM_PORT` (0 = only `/slam/`; set a port to re-enable a separate server), `BOT_LIDAR_PORT` (`/dev/ttyAS4`),
+`BOT_LIDAR_BAUD` (460800), `BOT_LIDAR_RPM` (1200 = 20 Hz on the C1M1R2; 600 = 10 Hz),
+`BOT_MAPS_DIR` (`~/.2pybot/maps`), `BOT_LIDAR=0` to
 leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py`.
 
 ## Try it without the robot
-`cd software/radxa/console && python -m console.slam_demo` → http://localhost:6970/
+`cd software/radxa/console && python -m console.slam_demo` → `localhost:6970` (set `BOT_SLAM_PORT`)
 
 ## Hardware findings
 - 460800 on UART4 needs the 96 MHz clock overlay above (verified).
@@ -70,6 +71,27 @@ leave the lidar off. Mount numbers and thresholds: `DEFAULTS` in `slam/engine.py
   motor-speed command (`0xA8`); the driver sends it automatically after the first
   empty SCAN (verified, ~1.5 s delay at connect).
 
+## Floor clipping and de-skew
+The scan plane is 0.265 m above the floor (measured, upright). Pitch lowers only
+the forward/backward beams: a beam at azimuth φ dips `atan(tan θ·cos φ)`, so each
+beam is clipped at `0.265 / tan(dip + spread + 0.75°)`; side and rising beams keep
+full range. Whole scans are skipped only above 12° lean or 60°/s rocking. Every
+point is moved to the mid-scan robot pose using odometry (de-skew).
+
+## Pose fusion
+`slam/fusion.py` keeps [x, y, yaw] with a covariance. Wheel distance + gyro yaw
+predict it at every scan; noise grows with distance, turning and detected slip
+(gyro yaw rate disagreeing with the wheels). A scan match corrects it with a
+covariance from the matcher's score surface, only if the score is good and it
+passes a 99 % Mahalanobis gate. `/api/state` → `fusion` shows updates, rejected
+matches and the 1σ uncertainty.
+
+## ToF 3D layer
+`slam/tof_layer.py` projects the VL53L5CX 8×8 frame (0.21 m above the floor)
+into the map: points 4–50 cm high are low obstacles (orange), returns more than
+6 cm below the floor are drop-offs (red). The sensor's down-tilt is estimated from
+floor returns in the bottom rows while the robot balances steadily
+(`tof.tilt_confident`). It is kept separate from the lidar map.
+
 ## Not verified on hardware yet
-1. `lidar_height` (0.26 m) and `lidar_y` (−0.031 m) come from the CAD assembly;
-   the optical window height on the C1 head is not measured.
+1. `lidar_y` (−0.031 m) comes from the CAD assembly.

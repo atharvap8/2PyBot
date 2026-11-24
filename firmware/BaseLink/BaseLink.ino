@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.3.0, experimental front-bumper self-uprighting
+ *  BaseLink.ino — 2PyBot v5.0.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -33,10 +33,13 @@
  */
 
 #include "config.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 #include "params.h"
 #include "autotune.h"
 #include "terrain.h"
 #include "tof_guard.h"
+#include "bubble_guard.h"
 #include "startup_gate.h"
 #include "auto_climb.h"
 #include "descent_guard.h"
@@ -123,12 +126,21 @@ uint32_t radxaLastRx = 0;
 float    radxaFwd = 0.0f, radxaSteer = 0.0f;
 uint8_t  radxaEn = 0, radxaEnPrev = 0;
 ToFGuard tofGuard;
+BubbleGuard bubbleGuard;   // lidar safety bubble from the Radxa (BG)
+uint32_t hfUntilMs = 0;    // HF,<s> fast diagnostic stream deadline
+uint8_t ledLatchedErr = 0; // last disarm cause shown on the ring for 10 s
+uint32_t ledLatchedMs = 0;
+int ledTestMode = 0;       // LT,<n> ring orientation test (0 = off)
+uint32_t ledTestUntilMs = 0;
+bool sleepMode = false;          // SL,1: power-down (no arming, ring/servos/torch off, no gamepad)
+uint32_t padRepairRestartAt = 0; // BT,FORGET: restart time after the pairing storage is erased
 AutoClimb autoClimb;
 DescentGuard descentGuard;
 NavigationLease navigation;
 float climbXRef=0.0f,climbIntegral=0.0f,climbDriveRef=0.0f,climbRecovery=0.0f;
 bool climbReferenceInitialized=false;
 float requestedDriveV = 0.0f;
+float driveSlewRef = 0.0f;      // braking-rate-limited drive reference (DRVDEC)
 float effectiveDriveV = 0.0f;
 float appliedBalanceScale = 1.0f;
 float wheelTargetL = 0.0f, wheelTargetR = 0.0f;
@@ -142,6 +154,32 @@ uint8_t rxLen = 0;
 
 // Timing
 unsigned long lastLoopUs = 0;
+
+// ---- stall guard: independent of loop(), runs in the esp_timer task ----
+// If loop() stops for 150 ms the drivers would hold their last current, so the
+// guard re-zeroes both motors every 20 ms and restarts the ESP32 after 800 ms.
+// Blocking maintenance commands (gyro calibration, NVS) run only with motors
+// off; they suppress the restart for up to 5 s but still get zero frames.
+volatile uint32_t loopBeatMs = 0;
+volatile bool blockingOp = false;
+volatile bool guardArmed = false;
+static esp_timer_handle_t stallTimer = nullptr;
+static void stallGuard(void*) {
+    if (!guardArmed) return;
+    const uint32_t age = millis() - loopBeatMs;
+    if (age > 150) hub.emergencyZero();
+    if ((age > 800 && !blockingOp) || age > 5000) esp_restart();
+}
+static const char* resetReasonName(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON: return "POWER_ON";   case ESP_RST_SW: return "SOFTWARE";
+        case ESP_RST_PANIC: return "PANIC";        case ESP_RST_INT_WDT: return "INTERRUPT_WATCHDOG";
+        case ESP_RST_TASK_WDT: return "TASK_WATCHDOG"; case ESP_RST_WDT: return "OTHER_WATCHDOG";
+        case ESP_RST_BROWNOUT: return "BROWNOUT";  case ESP_RST_EXT: return "EXTERNAL_PIN";
+        case ESP_RST_DEEPSLEEP: return "DEEP_SLEEP"; case ESP_RST_SDIO: return "SDIO";
+        default: return "UNKNOWN";
+    }
+}
 uint32_t lastOdomMs = 0, lastDbgMs = 0, lastBlinkMs = 0;
 bool ledState = false;
 
@@ -182,6 +220,7 @@ void updateStatusLed() {
     if (statusErrorLatched) mode = status_led::ERROR;
     else if (startupGate.maintenance || AT.mode != AT_IDLE) mode = status_led::MAINTENANCE;
     else if (!startupGate.initialized || (P.bootWait > .5f && !hostBootReady)) mode = status_led::BOOT;
+    else if (sleepMode) mode = status_led::SLEEP;
     else if (hardwareReady && (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || P.drvMode < .5f))
         mode = status_led::ERROR;
     else if (state == STATE_BALANCING) mode = status_led::BALANCING;
@@ -197,7 +236,7 @@ void resetController() {
     descentGuard.reset();
     climbXRef=posM;climbIntegral=climbDriveRef=climbRecovery=0;
     climbReferenceInitialized=false;
-    requestedDriveV=effectiveDriveV=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
+    requestedDriveV=effectiveDriveV=driveSlewRef=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
     appliedSteerSteps=0.0f;
     driveReferenceActive=false;
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
@@ -223,6 +262,11 @@ bool selfRightControlsNeutral() {
 }
 
 void requestEnable(bool localStart) {
+    if (sleepMode) {
+        btgamepad_syncArmed(false);
+        Serial.println("[SLEEP] Robot is powered down; wake it from the console first");
+        return;
+    }
     if (!startupGate.mayArm(P.bootWait > 0.5f)) {
         btgamepad_syncArmed(false);
         Serial.println("[MAIN] Startup is not ready; press START after calibration completes");
@@ -309,7 +353,7 @@ void handleLine(char* line) {
         hostBootReady = true;
         startupGate.acknowledge(true);
         Serial.println("BR!,1");
-        if (startupGate.initialized) Serial.println("BS,READY");
+        if (startupGate.initialized) { Serial.println("BS,READY"); leds_event(LED_EV_READY); }
         return;
     }
     if (!strcmp(line, "BR,0")) {
@@ -336,7 +380,7 @@ void handleLine(char* line) {
         // stop. Keep discovery, E-STOP, host heartbeat and camera usable.
         const bool safe = !strcasecmp(line,"X") || !strcasecmp(line,"P?") ||
             !strcasecmp(line,"S") || !strcasecmp(line,"L") || !strcasecmp(line,"N") ||
-            !strcasecmp(line,"F") || !strncmp(line,"V,",2) || !strncmp(line,"TG,",3) ||
+            !strcasecmp(line,"F") || !strncmp(line,"V,",2) || !strncmp(line,"TG,",3) || !strncmp(line,"BG,",3) ||
             !strncmp(line,"B=",2) || !strncmp(line,"P=",2) || !strncmp(line,"Z=",2);
         if (!safe) { Serial.println("PE,self-uprighting active; SELECT or X aborts"); return; }
     }
@@ -345,7 +389,10 @@ void handleLine(char* line) {
         Serial.println("[MAIN] Auto-tune blocked during firmware maintenance");return;
     }
     if (at_handleLine(line)) return;      // AT,<routine>, only after startup
-    if (params_handleLine(line)) return;
+    blockingOp = (line[0] == 'P' || line[0] == 'p') && (line[1] == 'S' || line[1] == 'L' || line[1] == 'D' || line[1] == 'X' || line[1] == 'N');
+    const bool paramLine = params_handleLine(line);
+    blockingOp = false;
+    if (paramLine) return;
 
     if(!strncmp(line,"AN,",3)) {
         unsigned long owner=0;int en=0;char extra=0;
@@ -378,6 +425,51 @@ void handleLine(char* line) {
         if (sscanf(line + 3, "%d,%f%c", &en, &limit, &extra) != 2 ||
             !tofGuard.update(en, limit, millis()))
             Serial.println("[TOF] Invalid TG command");
+        return;
+    }
+
+    if (!strcmp(line, "BT,FORGET")) {
+        // Re-pair: erase the Bluetooth pairing storage (the same Bluetooth state as
+        // a full flash erase, settings untouched), then restart so it takes effect.
+        if (state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before re-pairing the gamepad"); return; }
+        if (!btgamepad_forget()) { Serial.println("PE,could not clear the Bluetooth storage"); return; }
+        padRepairRestartAt = millis() + 300;
+        Serial.println("[PAD] Re-pair: restarting the controller to finish clearing pairings");
+        return;
+    }
+    if (!strcmp(line, "SL,1") || !strcmp(line, "SL,0")) {
+        const bool on = line[3] == '1';
+        if (on && state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before powering down"); return; }
+        if (on != sleepMode) {
+            sleepMode = on;
+            if (on) { requestDisable("power down"); stopGesture(); payload_torchOff(); }
+            btgamepad_setSleep(on);
+            Serial.printf("[SLEEP] %s\n", on ? "powered down: arming, ring, camera servos, torch and gamepad off"
+                                             : "awake: press START to arm");
+        }
+        Serial.printf("SL!,%d\n", sleepMode ? 1 : 0);
+        return;
+    }
+    if (!strncmp(line, "HF,", 3)) {
+        const int s = atoi(line + 3);
+        hfUntilMs = (s > 0 && s <= 60) ? millis() + (uint32_t)s * 1000u : 0;
+        Serial.printf("[HF] fast stream %s\n", hfUntilMs ? "on" : "off");
+        return;
+    }
+    if (!strncmp(line, "LT,", 3)) {
+        // Ring orientation test: 1 = colour compass, 2 = show the configured front.
+        const int m = atoi(line + 3);
+        ledTestMode = (m >= 0 && m <= 2) ? m : 0;
+        ledTestUntilMs = ledTestMode ? millis() + 120000u : 0;
+        leds_test(ledTestMode);
+        Serial.printf("[LED] test mode %d\n", ledTestMode);
+        return;
+    }
+    if (!strncmp(line, "BG,", 3)) {
+        int en = 0, fl = 0, age = 0; float front = 0, back = 0; char extra = 0;
+        if (sscanf(line + 3, "%d,%f,%f,%d,%d%c", &en, &front, &back, &fl, &age, &extra) != 5 ||
+            !bubbleGuard.update(en, front, back, fl, age, millis(), posM, velF))
+            Serial.println("[BUBBLE] Invalid BG command (expects BG,en,front_m,back_m,flags,age_ms)");
         return;
     }
 
@@ -458,7 +550,9 @@ void handleLine(char* line) {
         case 'C':
             requestDisable("gyro cal");
             status_led::setMode(status_led::BOOT);
+            blockingOp = true;
             if (!imu.calibrateGyro()) statusErrorLatched = true;
+            blockingOp = false;
             updateStatusLed();
             Serial.println("[TUNE] Send 'E' to re-arm.");
             break;
@@ -523,6 +617,18 @@ void runController(float dt) {
     // Full-stick and autonomy targets follow DRIVEV, without free-speed derating.
     float nominalDriveV=navigation.granted?clampf(navigation.velocity,-P.driveVEff,P.driveVEff):cmdFwd*driveScale;
     requestedDriveV = navigation.granted?nominalDriveV:descentGuard.limitReference(nominalDriveV);
+    // Braking-rate limit: releasing the stick at speed must not demand an
+    // instant stop. Recorded fall: reverse 1.17 m/s -> 0 in one step saturated
+    // u (6 m/s^2) and the 2.7 A current limit for 0.6 s and the robot tipped.
+    // Speeding up stays immediate; the bubble cap below still acts at once.
+    if (P.drvDec > 0.0f) {
+        const float step = P.drvDec * dt;
+        const bool braking = fabsf(requestedDriveV) < fabsf(driveSlewRef) || requestedDriveV * driveSlewRef < 0.0f;
+        driveSlewRef = braking ? driveSlewRef + clampf(requestedDriveV - driveSlewRef, -step, step) : requestedDriveV;
+        requestedDriveV = driveSlewRef;
+    } else {
+        driveSlewRef = requestedDriveV;
+    }
     effectiveDriveV=requestedDriveV;
     // An explicitly enabled obstacle guard still takes effect immediately.
     if (!navigation.granted && tofGuard.enabled) {
@@ -530,6 +636,8 @@ void runController(float dt) {
             tofGuard.apply(effectiveDriveV/driveScale,driveScale,millis())*driveScale : 0.0f;
         effectiveDriveV=fminf(effectiveDriveV,boundedRef);
     }
+    // Lidar bubble: both directions, every source including navigation.
+    effectiveDriveV=bubbleGuard.apply(effectiveDriveV,millis(),posM,P.bubMargin,P.bubDecel,P.bubLat,P.bubStale);
     const bool wasAutomatic=autoClimb.active;
     const bool wasLimited=autoClimb.actuatorLimited;
     const bool wasExiting=autoClimb.exitPending;
@@ -579,7 +687,13 @@ void runController(float dt) {
         // robot parks smoothly where it stops.
         xRef = posM + velF * P.brakeLook;
         zInt = 0.0f;
-        uOut = -(k2 * (velF - vIn) + k3t * th + k4t * om);
+        // Speed-error clamp: a stick release at speed still brakes at once, but
+        // the velocity term can no longer take all of u and the motor current
+        // (recorded fall: k2*1.17 m/s asked 8.7 m/s^2, u and 2.7 A saturated
+        // 0.6 s). 0.7 m/s -> at most ~5 m/s^2 from this term, attitude keeps headroom.
+        float velErr = velF - vIn;
+        if (P.velErrMax > 0.0f) velErr = clampf(velErr, -P.velErrMax, P.velErrMax);
+        uOut = -(k2 * velErr + k3t * th + k4t * om);
     } else {
         // Position hold / go-to: full LQI vector. Position error is
         // clamped so a big displacement asks for a gentle walk back,
@@ -609,6 +723,7 @@ void runController(float dt) {
             const float cap=tofGuard.apply(climbDriveRef/P.climbVel,P.climbVel,millis())*P.climbVel;
             climbDriveRef=fminf(climbDriveRef,cap);
         }
+        climbDriveRef=bubbleGuard.apply(climbDriveRef,millis(),posM,P.bubMargin,P.bubDecel,P.bubLat,P.bubStale);
         if(airborne)climbDriveRef=0;
         climbRecovery=0;
         climbXRef+=climbDriveRef*dt;
@@ -651,10 +766,13 @@ void runController(float dt) {
     float baseSteps = vCmd * P.stepsPerM;
 
     // ---- yaw: commanded turn or encoder-differential heading hold ----
-    float steerIn = cmdSteer*(1.0f+autoClimb.blend*(P.climbStr-1.0f));
-    const bool navigationTurning=navigation.granted && fabsf(navigation.yawRate)>.005f;
+    // Positive steer = right wheel faster = CCW (left). The bubble blocks a
+    // commanded turn that would swing a corner into an obstacle.
+    float steerIn = bubbleGuard.limitSteer(cmdSteer*(1.0f+autoClimb.blend*(P.climbStr-1.0f)),millis(),P.bubStale);
+    const float navYaw = bubbleGuard.limitSteer(navigation.yawRate,millis(),P.bubStale);
+    const bool navigationTurning=navigation.granted && fabsf(navYaw)>.005f;
     const bool turning = navigationTurning || fabsf(steerIn) > P.steerDb;
-    const float target = navigationTurning ? navigation.yawRate*P.trackW*P.stepsPerM*.5f : steerIn*P.maxSteerSt;
+    const float target = navigationTurning ? navYaw*P.trackW*P.stepsPerM*.5f : steerIn*P.maxSteerSt;
     const float room = P.maxSpdEff>0 ? fmaxf(0,P.maxSpdEff-fabsf(baseSteps)) : P.maxSteerSt;
     steerSteps = yawControl.update(clampf(target,-P.maxSteerSt,P.maxSteerSt),turning,encDiff,diffRateF,
         lookCmd*(P.lookMaxDeg*DEG_TO_RAD)*P.trackW*P.countsPerM,P.yawKp,P.yawKd,P.yawMaxSt,
@@ -680,20 +798,43 @@ void waitForHostStartup() {
     Serial.println("BS,WAIT_HOST");
     Serial.println("[BOOT] Waiting for Radxa ACK; IMU calibration and device startup are on HOLD");
     uint32_t lastRequest = millis();
+    const uint32_t waitStart = millis();
     while (!startupGate.mayInitialize(P.bootWait > 0.5f)) {
+        // progress: creeps toward 60 % while the Radxa boots (~60-90 s)
+        leds_loading(0.6f * (1.0f - expf(-(millis() - waitStart) / 45000.0f)));
         pollSerial();
         params_service();
         if (millis() - lastRequest >= 1000) {
             Serial.println("BR?,0");
             lastRequest = millis();
         }
+        hub.emergencyZero();  // keep both drivers at zero current while the host boots
+        hub.service(0);
         delay(5);  // yield while waiting; no timeout that starts calibration prematurely
     }
     Serial.println("BS,INITIALIZING");
     Serial.println("[BOOT] Radxa ACK received; starting deferred initialization");
 }
 
+// Ring error code: what currently prevents normal operation, most basic first.
+uint8_t ledErrorCode() {
+    if (startupGate.maintenance) return LED_ERR_MAINT;
+    if (!hub.linkOk(HUB_LINK_TIMEOUT_MS)) return LED_ERR_MOTOR_LINK;
+    if (hub.faultBits()) return LED_ERR_MOTOR_FAULT;
+    if (!hub.modeOk()) return LED_ERR_MOTOR_MODE;
+    if (!imu.sampleFresh()) return LED_ERR_IMU;
+    if (ledLatchedErr && millis() - ledLatchedMs < 10000) return ledLatchedErr;
+    if (!btgamepad_connected()) return LED_ERR_PAD;
+    return LED_ERR_NONE;
+}
+void ledLatch(uint8_t code) { ledLatchedErr = code; ledLatchedMs = millis(); }
+
 void setup() {
+    // Servo signal lines float until payload_begin(), which runs only after the
+    // host handshake and gyro calibration (seconds). A floating line makes an
+    // MG90S jump to random/extreme angles, so drive both LOW (no pulses) now.
+    pinMode(SERVO_YAW_PIN, OUTPUT);  digitalWrite(SERVO_YAW_PIN, LOW);
+    pinMode(SERVO_ZOOM_PIN, OUTPUT); digitalWrite(SERVO_ZOOM_PIN, LOW);
     pinMode(RIGHT_RS485_DE,OUTPUT); digitalWrite(RIGHT_RS485_DE,LOW);
     pinMode(LEFT_RS485_DE,OUTPUT); digitalWrite(LEFT_RS485_DE,LOW);
     const bool statusLedReady = status_led::begin();
@@ -701,26 +842,31 @@ void setup() {
     pinMode(TORCH_PIN, OUTPUT);
     Serial.setTxBufferSize(1024);
     Serial.begin(SERIAL_BAUD);
-    delay(300);
+    // First action: zero both motors. After a crash, brownout or watchdog reset
+    // the drivers may still be applying the previous application's last current.
+    hub.startPorts();
+    hub.emergencyZero();
+    for (int i = 0; i < 60; ++i) { delay(5); hub.emergencyZero(); hub.service(0); }
+    Serial.printf("[BOOT] Reset reason: %s\n", resetReasonName(esp_reset_reason()));
     // GPIO 2 is the torch MOSFET gate; GPIO 32 is the blue status LED.
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.3.0 — experimental SELF-UPRIGHTING");
+    Serial.println("     2PyBot BaseLink v5.0.0");
     Serial.println("==================================================");
 
     params_begin();
+    leds_begin();   // ring off; the loader below runs until start-up is complete
     Serial.println("BR?,0");
     params_dump(); // capability/readback only; does not access IMU or drivers
     waitForHostStartup();
     joySpeedHigh = (P.bootHigh > 0.5f) ? 1 : 0;     // NVS or compiled defaults, before any consumer
-    leds_begin();   // boot swirl plays while sensors settle below
 
     if (!imu.begin()) {
         status_led::setMode(status_led::ERROR);
         Serial.println("BS,ERROR");
         Serial.println("[MAIN] FATAL: IMU init failed — halting");
-        while (true) delay(1000);
+        while (true) { leds_fatalFlash(); delay(20); }   // continuous red flash: fatal
     }
     if (!hub.begin()) {
         Serial.println("[MAIN] Hub link unavailable; arming remains blocked");
@@ -728,12 +874,16 @@ void setup() {
 
     Serial.printf("[MAIN] Settling sensors %d ms — keep robot still\n", STARTUP_SETTLE_MS);
     Serial.println("BS,CALIBRATING");
-    delay(STARTUP_SETTLE_MS);
+    for (uint32_t t0 = millis(); millis() - t0 < STARTUP_SETTLE_MS; ) {
+        leds_loading(0.6f + 0.3f * (millis() - t0) / (float)STARTUP_SETTLE_MS);
+        delay(5);
+    }
+    leds_loading(0.95f);
     if (!imu.calibrateGyro()) {
         status_led::setMode(status_led::ERROR);
         Serial.println("BS,ERROR");
         Serial.println("[MAIN] FATAL: gyro calibration failed — motors remain disabled");
-        while (true) delay(1000);
+        while (true) { leds_fatalFlash(); delay(20); }   // continuous red flash: fatal
     }
 
     btgamepad_begin();
@@ -751,14 +901,27 @@ void setup() {
                   P.countsPerM, P.vNoLoad, P.driveVEff, P.maxDriveV, P.aMax);
     Serial.println("BS,READY");
     Serial.println("[MAIN] Calibration complete; place upright and press local START or serial E to arm.\n");
+    leds_event(LED_EV_READY);
 
     lastLoopUs = micros();
+    loopBeatMs = millis();
+    esp_timer_create_args_t guardArgs = {};
+    guardArgs.callback = stallGuard;
+    guardArgs.dispatch_method = ESP_TIMER_TASK;
+    guardArgs.name = "stall_guard";
+    if (esp_timer_create(&guardArgs, &stallTimer) == ESP_OK && esp_timer_start_periodic(stallTimer, 20000) == ESP_OK) {
+        guardArmed = true;
+        Serial.println("[MAIN] Stall guard armed: motors zeroed after 150 ms, restart after 800 ms of loop stall");
+    } else {
+        Serial.println("[MAIN] Stall guard could not start");
+    }
 }
 
 // ============================================================
 //  MAIN LOOP — fixed 200 Hz
 // ============================================================
 void loop() {
+    loopBeatMs = millis();
     unsigned long nowUs = micros();
     unsigned long elapsed = nowUs - lastLoopUs;
     if (elapsed < LOOP_PERIOD_US) return;
@@ -787,13 +950,22 @@ void loop() {
     float vRaw = (posM-posPrev)/dt;
     posPrev=posM;
     const float aV = 1.0f - expf(-2.0f * PI * 15.0f * dt);
-    velF += aV * (vRaw - velF);
 
     static float diffPrev = 0.0f; static bool diffInit = false;
     encDiff = posR - posL;
     if (!diffInit) { diffPrev = encDiff; diffInit = true; }
     float dRaw = (encDiff - diffPrev) / dt;
     diffPrev = encDiff;
+    if (P.velSrc > 0.5f) {
+        // Hub-sample velocity: each wheel differentiated against its own
+        // request (sample) time. Differencing posM every loop aliased reply
+        // jitter and missed replies into speed noise that grew with speed
+        // (0.02 -> 0.07 m/s rms) and drove a 22 Hz oscillation in climb mode.
+        const float vL = hub.wheelVelL(), vR = hub.wheelVelR();
+        vRaw = 0.5f * (vL + vR) * P.encSign;
+        dRaw = (vR - vL) * P.encSign * P.countsPerM;
+    }
+    velF += aV * (vRaw - velF);
     diffRateF += aV * (dRaw - diffRateF);
 
     // ---- 2. inputs ----
@@ -828,12 +1000,21 @@ void loop() {
     //          D-pad LEFT/RIGHT dims. Deliberately OUTSIDE the state
     //          machine: the camera and light stay usable whether the
     //          robot is balancing, idle, or lying on its side.
-    if (btgamepad_takeTorchToggle()) payload_torchToggle();
+    if (btgamepad_takeTorchToggle() && !sleepMode) payload_torchToggle();
     {
         int8_t tStep = btgamepad_takeTorchStep();
-        if (tStep) payload_torchStep(tStep);
+        if (tStep && !sleepMode) payload_torchStep(tStep);
     }
-    payload_update(dt, joyPanX, joyZoomY);
+    // Asleep: no stick input, so both servos reach their release deadline and go unpowered.
+    payload_update(dt, sleepMode ? 0.0f : joyPanX, sleepMode ? 0.0f : joyZoomY);
+    if (sleepMode && payload_torchIsOn()) payload_torchOff();
+
+    // Re-pair restart (BT,FORGET): motors are already at zero current while idle.
+    if (padRepairRestartAt && (int32_t)(millis() - padRepairRestartAt) >= 0) {
+        if (state == STATE_IDLE) { Serial.flush(); esp_restart(); }
+        padRepairRestartAt = 0;
+        Serial.println("[PAD] Re-pair restart cancelled: robot is not idle");
+    }
 
 
     // Speed-mode edge -> ring cue (blue dash = HIGH, green settle = LOW)
@@ -912,7 +1093,7 @@ void loop() {
             resetController();
             hub.enable();
             state = STATE_BALANCING;
-            leds_event(LED_EV_ARM);
+            leds_event(LED_EV_ARM); ledLatchedErr = 0;
             Serial.println("[MAIN] -> BALANCING");
         }
     } else if (state == STATE_SELF_RIGHTING) {
@@ -929,6 +1110,7 @@ void loop() {
         selfRight.update(pitchF,rateF,hub.wheelVelL(),hub.wheelVelR(),
             hub.getPositionL()/P.countsPerM,hub.getPositionR()/P.countsPerM,dt,millis());
         if (selfRight.phase==SelfRighting::ABORTED) {
+            ledLatch(LED_ERR_SELFRIGHT);
             statusErrorLatched=true;requestDisable("self-righting aborted");
         } else if (selfRight.phase==SelfRighting::HANDED_OFF) {
             // Seed virtual wheel velocity from feedback rather than demanding
@@ -959,7 +1141,7 @@ void loop() {
                 (unsigned long)l.crcErrors, (unsigned long)r.crcErrors);
             requestDisable(reason);
         } else if (fabsf(pitchF) > P.maxTilt || fabsf(rateF) > P.maxRate) {
-            leds_event(LED_EV_FALL);
+            leds_event(LED_EV_FALL); ledLatch(LED_ERR_FELL);
             requestDisable(fabsf(pitchF) > P.maxTilt ? "FELL" : "RATE SPIKE");
         } else {
             runController(dt);
@@ -988,6 +1170,17 @@ void loop() {
         li.gestActive   = (gestSeq != nullptr);
         li.radxaFresh   = radxaFresh;
         li.padConnected = btgamepad_connected();
+        li.rateF        = rateF;
+        li.selfRighting = (state == STATE_SELF_RIGHTING);
+        li.autopilot    = navigation.granted;
+        const bool bubbleLive = bubbleGuard.enabled && bubbleGuard.fresh(millis(), P.bubStale);
+        li.bubbleFront  = bubbleLive && bubbleGuard.fwdCapNow < 0.15f;
+        li.bubbleBack   = bubbleLive && bubbleGuard.revCapNow < 0.15f;
+        li.errorCode    = ledErrorCode();
+        li.fatal        = false;
+        li.loading      = P.bootWait > 0.5f && !hostBootReady;
+        li.sleeping     = sleepMode;
+        if (ledTestMode && (int32_t)(millis() - ledTestUntilMs) >= 0) { ledTestMode = 0; leds_test(0); }
         leds_update(li);
     }
 
@@ -998,7 +1191,7 @@ void loop() {
         lastNavMs=nowMs;
         Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u\n",(unsigned long)nowMs,(unsigned long)navigation.token,
                       (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
-                      (unsigned)btgamepad_connected(),0u);
+                      (unsigned)btgamepad_connected(),sleepMode ? 1u : 0u);
     }
     if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=128) {
         lastOdomMs = nowMs;
@@ -1051,6 +1244,26 @@ void loop() {
             l.rpm,r.rpm,l.tempC,r.tempC,l.fault,r.fault,(unsigned)hub.saturated(),
             (unsigned)hub.linkOk(HUB_LINK_TIMEOUT_MS),(unsigned)hub.modeOk());
     }
+    // Bubble state as the controller sees it (clearance dead-reckoned between scans).
+    static uint32_t lastBubbleMs=0;
+    if (bubbleGuard.enabled && nowMs-lastBubbleMs>=100 && Serial.availableForWrite()>=96) {
+        lastBubbleMs=nowMs;
+        Serial.printf("BB,%lu,%.3f,%.3f,%.3f,%.3f,%u,%u,%.3f,%lu\n",(unsigned long)nowMs,
+            bubbleGuard.frontNow,bubbleGuard.backNow,bubbleGuard.fwdCapNow,bubbleGuard.revCapNow,
+            (unsigned)bubbleGuard.limitedNow,(unsigned)bubbleGuard.flags,velF,(unsigned long)(nowMs-bubbleGuard.lastRx));
+    }
+    // HF,<s>: 100 Hz wheel/current stream for vibration diagnosis (bounded burst).
+    if (hfUntilMs && (int32_t)(nowMs-hfUntilMs) < 0 && Serial.availableForWrite()>=160) {
+        static uint32_t lastHfMs=0;
+        if (nowMs-lastHfMs>=10) {
+            lastHfMs=nowMs;
+            const auto& l=hub.left().fb(); const auto& r=hub.right().fb();
+            Serial.printf("HV,%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%.2f,%.1f,%.3f,%.3f,%.3f,%u,%u,%lu,%lu\n",
+                (unsigned long)nowMs,hub.wheelVelL(),hub.wheelVelR(),hub.currentCmdL(),hub.currentCmdR(),
+                l.currentA,r.currentA,l.rpm,r.rpm,pitchF,rateF,velF,vCmd,effectiveDriveV,
+                (unsigned)climbMode,(unsigned)hub.saturated(),(unsigned long)l.timeouts,(unsigned long)r.timeouts);
+        }
+    } else if (hfUntilMs && (int32_t)(nowMs-hfUntilMs) >= 0) { hfUntilMs=0; Serial.println("[HF] fast stream off"); }
     static uint32_t lastSelfRightMs=0;
     if (nowMs-lastSelfRightMs>=50 && Serial.availableForWrite()>=224) {
         lastSelfRightMs=nowMs;

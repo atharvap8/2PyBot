@@ -15,18 +15,27 @@ import time
 
 import numpy as np
 
+from .bubble import Bubble
+from .fusion import PoseFilter
 from .grid import OccupancyGrid
+from .tof_layer import ToFLayer
 from .odom_core import Attitude, DSample, Odometry, OSample, axis_name, parse_line
 
 # Mount (robot frame: x forward, y left). Lidar centre is 31 mm right of the
 # centreline and on the axle line (assembly A1); 0 deg mark faces forward.
 DEFAULTS = {
     "lidar_x": 0.0, "lidar_y": -0.031, "lidar_yaw_deg": 0.0,
-    "lidar_height": 0.26,            # scan plane above floor (approx, window not measured)
+    "lidar_height": 0.265,           # measured scan-plane height above floor (owner, upright)
     "self_radius": 0.12,             # guard fence + body
     "min_quality": 5,
     "max_range": 8.0,
-    "max_tilt_deg": 3.0, "max_tilt_rate": 40.0, "plane_tol_deg": 1.0,
+    # Per-beam floor clipping handles normal balancing lean; whole scans are
+    # dropped only for a large lean (resting/falling) or fast rocking.
+    "max_tilt_deg": 12.0, "max_tilt_rate": 60.0, "plane_tol_deg": 0.75,
+    "deskew": True,
+    "tof_height": 0.21,              # VL53L5CX above the floor (owner, wheel contact to sensor)
+    "tof_x": 0.0,                    # forward offset from the axle (not measured)
+    "tof_y": 0.04,                   # 4 cm LEFT of the centreline (owner-measured)
     "wheel_radius": 0.052, "track": 0.155, "cpr": 4096,
     "yaw_axis": "auto", "encoder_yaw_sign": 1.0,
     "match_points": 200,
@@ -54,16 +63,26 @@ class SlamEngine:
         self.mode = "idle"                     # idle | mapping | localizing
         self.map_name = ""
         self.grid = OccupancyGrid()
-        self.pose = np.zeros(3)                # map frame
+        self.pose = np.zeros(3)                # map frame (published copy of filter.mu)
+        self.filter = PoseFilter()
+        self.tof_layer = ToFLayer(height=self.cfg["tof_height"], x_offset=self.cfg["tof_x"], y_offset=self.cfg["tof_y"])
+        self.tof_source = None                 # console ToF supervisor (history deque), set by server
         self._odom_ref = None                  # odom pose at the last processed scan
         self._last_map_pose = None
         self.path = collections.deque(maxlen=3000)
         self.scan_pts = np.zeros((0, 2))
-        self.gate = {"passed": 0, "tilt": 0, "rate": 0, "no_robot": 0, "usable_range": 0.0}
+        self.bubble = Bubble()
+        self.bubble_pts = np.zeros((0, 2))
+        self.labels = []                       # [{"name", "x", "y"}] map-frame area labels
+        self.plan = []                         # [[x, y], ...] current autonomous path (set by the mission)
+        self.goal = None                       # {"name", "x", "y"} current autonomous goal
+        self.gate = {"passed": 0, "tilt": 0, "rate": 0, "no_robot": 0, "usable_range": 0.0, "floor_clipped": 0}
         self.match = {"score": 0.0, "ok": False, "lost": 0}
         self.message = "Waiting for the lidar."
         self.tests = {}
         self._need_find = False
+        self._extend_pending = False
+        self._ok_streak = 0
         self._last_find = 0.0
         self._find_lock = threading.Lock()
         self._scan_q = collections.deque(maxlen=2)
@@ -72,6 +91,9 @@ class SlamEngine:
 
     def start(self):
         self._thread.start()
+
+    def robot_live(self):
+        return time.monotonic() - self.last_o < 1.0
 
     def shutdown(self):
         self._stop.set()
@@ -120,8 +142,45 @@ class SlamEngine:
         a = np.radians(-np.asarray(scan["angle_deg"], float)) + math.radians(c["lidar_yaw_deg"])
         r = np.asarray(scan["dist_mm"], float) / 1000.0
         q = np.asarray(scan["quality"], float)
+        # Points arrive in rotation order; their fraction of the sweep gives
+        # each one's capture time between scan t0 and t1 (used for de-skew).
+        frac = np.linspace(0.0, 1.0, len(r)) if len(r) > 1 else np.zeros(len(r))
         keep = (q >= c["min_quality"]) & (r >= c["self_radius"])
-        return a[keep], r[keep]
+        return a[keep], r[keep], frac[keep]
+
+    def _floor_limit(self, a, tilt_deg, spread_deg):
+        """Per-beam range before the tilted scan plane reaches the floor.
+
+        Forward pitch lowers forward beams by atan(tan(tilt)*cos(azimuth)); side
+        beams stay level and rearward beams rise, so they keep full range.
+        """
+        c = self.cfg
+        dip = np.degrees(np.arctan(math.tan(math.radians(tilt_deg)) * np.cos(a)))
+        down = dip + spread_deg + c["plane_tol_deg"]
+        limit = np.full(len(a), float(c["max_range"]))
+        hit = down > 1e-3
+        limit[hit] = np.minimum(limit[hit], c["lidar_height"] / np.tan(np.radians(down[hit])))
+        return limit
+
+    def _deskew(self, pts, frac, t0, t1):
+        """Express every point in the robot frame at mid-scan using odometry."""
+        knots = np.linspace(t0, t1, 5)
+        poses = [self._odom_at(t) for t in knots]
+        if any(p is None for p in poses):
+            return pts
+        poses = np.array(poses)
+        mid = self._odom_at(0.5 * (t0 + t1))
+        tq = frac * 4.0
+        x = np.interp(tq, np.arange(5), poses[:, 0])
+        y = np.interp(tq, np.arange(5), poses[:, 1])
+        th = np.interp(tq, np.arange(5), np.unwrap(poses[:, 2]))
+        # pose_i relative to mid, in the mid robot frame
+        cm, sm = math.cos(mid[2]), math.sin(mid[2])
+        dx, dy = x - mid[0], y - mid[1]
+        rx, ry = cm * dx + sm * dy, -sm * dx + cm * dy
+        dth = th - mid[2]
+        cd, sd = np.cos(dth), np.sin(dth)
+        return np.c_[rx + cd * pts[:, 0] - sd * pts[:, 1], ry + sd * pts[:, 0] + cd * pts[:, 1]]
 
     def _gate(self, t0, t1, robot_live):
         c = self.cfg
@@ -132,20 +191,23 @@ class SlamEngine:
         win = [x for x in hist if t0 - 0.05 <= x[0] <= t1 + 0.05]
         if not win:
             return None
-        dev = max(abs(x[1]) for x in win)
+        devs = [x[1] for x in win]
         rate = max(abs(x[2]) for x in win)
-        if dev > c["max_tilt_deg"]:
+        if max(abs(d) for d in devs) > c["max_tilt_deg"]:
             self.gate["tilt"] += 1
             return "tilt"
         if rate > c["max_tilt_rate"]:
             self.gate["rate"] += 1
             return "rate"
-        return dev
+        # Signed mean lean during the sweep plus its spread as extra margin.
+        mean = sum(devs) / len(devs)
+        return mean, max(abs(d - mean) for d in devs)
 
     # ------------------------------------------------------------- worker
     def _worker(self):
         while not self._stop.is_set():
             self._update_rates()
+            self._process_tof()
             if not self._scan_q:
                 time.sleep(0.01)
                 continue
@@ -154,6 +216,29 @@ class SlamEngine:
                 self._process(scan)
             except Exception as e:  # keep the loop alive, show the reason
                 self.message = f"Processing error: {e}"
+
+    def _process_tof(self):
+        src = self.tof_source
+        history = getattr(src, "history", None)
+        if not history:
+            return
+        frame = history[-1]
+        if frame.get("sequence") == self.tof_layer.last_seq:
+            return                                # nothing new: avoid locking at 100 Hz
+        t = frame.get("capture_monotonic_ns", 0) / 1e9
+        with self.lock:
+            pose = self.pose.copy()
+            att = list(self.att_hist)[-25:]
+            balancing = self.att.balancing
+        near = min(att, key=lambda a: abs(a[0] - t)) if att else (t, 0.0, 0.0)
+        steady = balancing and abs(near[1]) < 2.0 and abs(near[2]) < 20.0
+        try:
+            # 3D voxels build up only while mapping (map frame), so a saved map
+            # carries a matching 3D layer.
+            self.tof_layer.update(frame, pose, near[1], steady, t,
+                                  accumulate=self.mode == "mapping" and self.match.get("ok", False))
+        except (KeyError, ValueError, TypeError):
+            pass                                  # malformed frame: skip, keep the loop alive
 
     def _update_rates(self):
         now = time.monotonic()
@@ -164,28 +249,69 @@ class SlamEngine:
                 self.rates[k] = 0
             self._rate_t = now
 
+    def _update_bubble(self, scan, g):
+        """Safety bubble input: every return beyond 3 cm (not the 12 cm SLAM self
+        radius: an obstacle 4 cm in front of the body is 10 cm from the lidar),
+        floor-clipped for the current lean. The body footprint rejects self hits."""
+        c = self.cfg
+        a = np.radians(-np.asarray(scan["angle_deg"], float)) + math.radians(c["lidar_yaw_deg"])
+        r = np.asarray(scan["dist_mm"], float) / 1000.0
+        q = np.asarray(scan["quality"], float)
+        keep = (q >= c["min_quality"]) & (r >= 0.03)
+        a, r = a[keep], r[keep]
+        tilt, spread = g if isinstance(g, tuple) else (g, 0.0)
+        near = r <= self._floor_limit(a, tilt, spread)
+        a, r = a[near], r[near]
+        pts = np.c_[c["lidar_x"] + r * np.cos(a), c["lidar_y"] + r * np.sin(a)]
+        # current speed / yaw rate from wheel+gyro odometry (last ~0.2 s) for the arc corridor
+        v = w = 0.0
+        with self.lock:
+            h = list(self.odom_hist)[-12:]
+        if len(h) >= 2 and h[-1][0] - h[0][0] > 0.05:
+            dt = h[-1][0] - h[0][0]
+            dth = math.atan2(math.sin(h[-1][3] - h[0][3]), math.cos(h[-1][3] - h[0][3]))
+            fwd = (h[-1][1] - h[0][1]) * math.cos(h[-1][3]) + (h[-1][2] - h[0][2]) * math.sin(h[-1][3])
+            v, w = fwd / dt, dth / dt
+        # t0 = oldest point in the sweep: the controller subtracts travel since then (conservative)
+        self.bubble.update(pts, scan["t0"], v, w)
+        with self.lock:
+            self.bubble_pts = pts
+
     def _process(self, scan):
         c = self.cfg
-        a, r = self._scan_points(scan)
+        a, r, frac = self._scan_points(scan)
         robot_live = time.monotonic() - self.last_o < 1.0
         g = self._gate(scan["t0"], scan["t1"], robot_live)
         sensor = np.array([c["lidar_x"], c["lidar_y"]])
         pts_full = np.c_[c["lidar_x"] + r * np.cos(a), c["lidar_y"] + r * np.sin(a)]
         with self.lock:
             self.scan_pts = pts_full                         # radar view shows raw scan
+        if g not in ("tilt", "rate") and g is not None:
+            self._update_bubble(scan, g)
+        else:
+            # diagnostic only (never used for limits): returns near the body, no floor clip
+            c = self.cfg
+            a = np.radians(-np.asarray(scan["angle_deg"], float)) + math.radians(c["lidar_yaw_deg"])
+            r = np.asarray(scan["dist_mm"], float) / 1000.0
+            q = np.asarray(scan["quality"], float)
+            k = (q >= c["min_quality"]) & (r >= 0.03) & (r <= 0.45)
+            self.bubble.diag_near(np.c_[c["lidar_x"] + r[k] * np.cos(a[k]), c["lidar_y"] + r[k] * np.sin(a[k])])
         if g in ("tilt", "rate"):
-            self.message = ("The robot is leaning, so I'm skipping this scan (the laser would hit the floor)."
+            self.message = ("The robot is leaning a lot, so I'm skipping this scan."
                             if g == "tilt" else "The robot is rocking fast, so I'm skipping this scan.")
             return
         if g is None:
             self.gate["no_robot"] += 1
             return
-        tilt = g
-        usable = min(c["max_range"], c["lidar_height"] / math.tan(math.radians(abs(tilt) + c["plane_tol_deg"])))
-        keep = r <= usable
+        tilt, spread = g if isinstance(g, tuple) else (g, 0.0)
+        limit = self._floor_limit(a, tilt, spread)
+        keep = r <= limit
         pts = pts_full[keep]
+        if c["deskew"] and robot_live and len(pts):
+            pts = self._deskew(pts, frac[keep], scan["t0"], scan["t1"])
         self.gate["passed"] += 1
-        self.gate["usable_range"] = usable
+        self.gate["usable_range"] = float(limit.min()) if len(limit) else c["max_range"]
+        self.gate["floor_clipped"] = int((~keep).sum())
         if self.mode == "idle" or len(pts) < 30:
             if self.mode == "idle":
                 self.message = "Lidar is working. Press Start mapping when you're ready."
@@ -197,27 +323,33 @@ class SlamEngine:
         od = self._odom_at(tmid) if robot_live else None
         with self.lock:
             grid = self.grid                                 # load/start may swap it from HTTP threads
-            guess = self.pose.copy()
             if od is not None and self._odom_ref is not None:
-                dx, dy = od[0] - self._odom_ref[0], od[1] - self._odom_ref[1]
+                # odometry increment in the previous robot frame -> filter prediction
+                d0, d1 = od[0] - self._odom_ref[0], od[1] - self._odom_ref[1]
+                cr, sr = math.cos(self._odom_ref[2]), math.sin(self._odom_ref[2])
                 dth = math.atan2(math.sin(od[2] - self._odom_ref[2]), math.cos(od[2] - self._odom_ref[2]))
-                ca, sa = math.cos(self.pose[2] - self._odom_ref[2]), math.sin(self.pose[2] - self._odom_ref[2])
-                guess = self.pose + np.array([ca * dx - sa * dy, sa * dx + ca * dy, dth])
+                slip, self.odom.slip_acc = self.odom.slip_acc, 0.0
+                self.filter.predict(cr * d0 + sr * d1, -sr * d0 + cr * d1, dth, slip)
             self._odom_ref = od
+            guess = self.filter.mu.copy()
 
         if self.mode == "localizing" and self._need_find:
             self._need_find = False
             self.relocalize(wide=True)
-            guess = self.pose.copy()
+            guess = self.filter.mu.copy()
         sub = pts[np.linspace(0, len(pts) - 1, min(len(pts), c["match_points"])).astype(int)]
         first = grid.version == 0
         if first:
             new_pose, score, ok = guess, 0.0, True
         else:
-            new_pose, score = grid.match(sub, guess)
-            ok = score >= (c["min_loc_score"] if self.mode == "localizing" else c["min_match_score"])
-            if not ok:
-                new_pose = guess                             # trust wheels for this scan
+            z, score, cov = grid.match(sub, guess, with_cov=True)
+            good = score >= (c["min_loc_score"] if self.mode == "localizing" else c["min_match_score"])
+            # A good match still has to agree with wheels+gyro (Mahalanobis gate);
+            # otherwise this scan is carried by the odometry prediction alone.
+            ok = good and self.filter.update(z, cov)
+            if not good:
+                self.filter.stats["skipped"] += 1
+            new_pose = self.filter.mu.copy()
         new_pose[2] = math.atan2(math.sin(new_pose[2]), math.cos(new_pose[2]))
         with self.lock:
             self.pose = new_pose
@@ -239,6 +371,12 @@ class SlamEngine:
                 self.relocalize(wide=True)
             self.message = ("Localized: I know where I am on this map." if ok else
                             "I can't match this view to the map. Drive to a mapped area or press Find me.")
+            self._ok_streak = self._ok_streak + 1 if ok else 0
+            if self.mode == "localizing" and self._extend_pending and self._ok_streak >= 8:
+                # Confidently on the old map: keep the pose and draw on top of it.
+                self._extend_pending = False
+                self.start_mapping(fresh=False)
+                self.message = "Extending the loaded map. Drive into new areas, then Save."
 
     # ------------------------------------------------------------- commands
     def start_mapping(self, fresh=True):
@@ -248,12 +386,17 @@ class SlamEngine:
                 self.pose = np.zeros(3)
                 self.path.clear()
                 self.map_name = ""
+                self.labels = []
+                self.tof_layer.clear_voxels()
+            self._extend_pending = False
+            self.filter.reset(self.pose, sigma_xy=0.01, sigma_th=math.radians(0.5))
             self._odom_ref = None
             self._last_map_pose = None
             self.mode = "mapping"
         self.message = "Mapping started."
 
     def stop_mapping(self):
+        self._extend_pending = False
         self.mode = "idle"
         self.message = "Stopped. Save the map if you like it."
 
@@ -290,6 +433,7 @@ class SlamEngine:
                 best, best_s = p, sc
         with self.lock:
             self.pose = best
+            self.filter.reset(best)
             self._odom_ref = None
         return best_s
 
@@ -321,15 +465,111 @@ class SlamEngine:
         # lock on the ESP32 serial reader thread, which must never stall on disk I/O.
         with self.lock:
             g = self.grid.copy()
-        np.savez_compressed(base + ".npz", logodds=g.logodds, touched=g.touched)
-        with open(base + ".png", "wb") as f:
-            f.write(g.png(g.known_bbox()))
+        np.savez_compressed(base + ".npz", logodds=g.logodds, touched=g.touched,
+                            voxels=self.tof_layer.voxel_array(min_hits=1))
+        bbox = g.known_bbox()
+        if bbox is not None:
+            with open(base + ".png", "wb") as f:
+                f.write(g.png(bbox))
+        with self.lock:
+            labels = [dict(lb) for lb in self.labels]
+            pose = [round(float(v), 4) for v in self.pose]
+        old = self._read_meta(name) or {}
         meta = {"name": name, "resolution": g.res, "origin": g.origin,
-                "size_cells": g.n, "saved": time.time(), "start_pose": [0, 0, 0]}
-        with open(base + ".json", "w") as f:
-            json.dump(meta, f, indent=1)
+                "size_cells": g.n, "saved": time.time(), "created": old.get("created", time.time()),
+                "start_pose": [0, 0, 0], "last_pose": pose, "labels": labels,
+                "png_bbox": None if bbox is None else [int(v) for v in bbox],
+                "revision": int(old.get("revision", 0)) + 1}
+        self._write_meta(name, meta)
         self.map_name = name
         return meta
+
+    def _read_meta(self, name):
+        try:
+            with open(os.path.join(self.maps_dir, name + ".json")) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def _write_meta(self, name, meta):
+        path = os.path.join(self.maps_dir, name + ".json")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(meta, f, indent=1)
+        os.replace(tmp, path)
+
+    # ------------------------------------------------------------- area labels
+    def _persist_labels(self):
+        """Labels belong to the map: write them into a saved map's JSON at once."""
+        if not self.map_name:
+            return
+        meta = self._read_meta(self.map_name)
+        if meta is not None:
+            with self.lock:
+                meta["labels"] = [dict(lb) for lb in self.labels]
+            self._write_meta(self.map_name, meta)
+
+    def add_label(self, name, x, y):
+        name = str(name).strip()
+        if not 1 <= len(name) <= 32 or any(ch in name for ch in "<>\"'&"):
+            raise ValueError("Label: 1-32 characters, no < > \" ' &")
+        x, y = float(x), float(y)
+        g = self.grid
+        if not (math.isfinite(x) and math.isfinite(y) and g.inside(*g.to_cell(x, y))):
+            raise ValueError("Label must be inside the map area")
+        with self.lock:
+            self.labels = [lb for lb in self.labels if lb["name"].lower() != name.lower()]
+            self.labels.append({"name": name, "x": round(x, 3), "y": round(y, 3)})
+        self._persist_labels()
+        return self.labels
+
+    def remove_label(self, name):
+        with self.lock:
+            before = len(self.labels)
+            self.labels = [lb for lb in self.labels if lb["name"].lower() != str(name).strip().lower()]
+            changed = len(self.labels) != before
+        if changed:
+            self._persist_labels()
+        return changed
+
+    def label(self, name):
+        with self.lock:
+            for lb in self.labels:
+                if lb["name"].lower() == str(name).strip().lower():
+                    return dict(lb)
+        return None
+
+    # ------------------------------------------------------------- map correction
+    def erase(self, x, y, radius):
+        """Map correction: forget a disc (back to unknown) so mapping redraws it,
+        e.g. a moved sofa or a ghost wall. Works while mapping or on a loaded map."""
+        x, y, radius = float(x), float(y), float(radius)
+        if not all(math.isfinite(v) for v in (x, y, radius)) or not 0.04 <= radius <= 1.5:
+            raise ValueError("Erase radius must be 0.04-1.5 m")
+        with self.lock:
+            g = self.grid
+            r0, c0 = g.to_cell(x - radius, y - radius)
+            r1, c1 = g.to_cell(x + radius, y + radius)
+            r0, c0 = max(0, int(r0)), max(0, int(c0))
+            r1, c1 = min(g.n - 1, int(r1)), min(g.n - 1, int(c1))
+            if r1 < r0 or c1 < c0:
+                return 0
+            rows, cols = np.mgrid[r0:r1 + 1, c0:c1 + 1]
+            cx = g.origin + (cols + 0.5) * g.res
+            cy = g.origin + (rows + 0.5) * g.res
+            disc = np.hypot(cx - x, cy - y) <= radius
+            g.logodds[rows[disc], cols[disc]] = 0.0
+            g.touched[rows[disc], cols[disc]] = False
+            g._field = None                      # scan-match field is rebuilt from the edited grid
+            g.version += 1
+            return int(disc.sum())
+
+    def extend(self, name):
+        """Load a saved map, find the robot on it, then keep mapping on top of it
+        (new rooms are added, changed areas are re-drawn). Save to keep it."""
+        self.load(name)
+        self._extend_pending = True
+        self.message = "Map loaded for extending. Finding the robot first; mapping resumes once it is localized."
 
     def list_maps(self):
         if not os.path.isdir(self.maps_dir):
@@ -344,17 +584,43 @@ class SlamEngine:
                     continue
         return out
 
+    def delete_map(self, name):
+        if not SAFE_NAME.match(name or ""):
+            raise ValueError("bad map name")
+        removed = 0
+        for ext in (".npz", ".png", ".json"):
+            try:
+                os.remove(os.path.join(self.maps_dir, name + ext))
+                removed += 1
+            except FileNotFoundError:
+                pass
+        if self.map_name == name:
+            self.map_name = ""
+        return removed
+
+    def snapshot(self):
+        """(grid copy, pose, mode, match ok) for planners, taken under the lock."""
+        with self.lock:
+            return self.grid.copy(), self.pose.copy(), self.mode, bool(self.match.get("ok"))
+
     def load(self, name):
         if not SAFE_NAME.match(name or ""):
             raise ValueError("bad map name")
         data = np.load(os.path.join(self.maps_dir, name + ".npz"))
+        self.tof_layer.load_voxels(data["voxels"] if "voxels" in data.files else np.zeros((0, 4), np.int32))
         g = OccupancyGrid()
         g.logodds[:] = data["logodds"]
         g.touched[:] = data["touched"]
         g.version = 1
+        meta = self._read_meta(name) or {}
         with self.lock:
             self.grid = g
+            self.labels = [{"name": str(lb["name"]), "x": float(lb["x"]), "y": float(lb["y"])}
+                           for lb in meta.get("labels", []) if isinstance(lb, dict) and "name" in lb]
+            self._extend_pending = False
+            self._ok_streak = 0
             self.pose = np.zeros(3)                 # assumes the robot starts where mapping started
+            self.filter.reset(self.pose, sigma_xy=0.5, sigma_th=math.radians(30))
             self.path.clear()
             self._odom_ref = None
             self.map_name = name
@@ -376,16 +642,41 @@ class SlamEngine:
                                    "track_eff": self.odom.track / self.odom.detected[2]}
                                   if self.odom.detected else None)}
             att = {"dev": self.att.dev, "rate": self.att.rate, "balancing": self.att.balancing}
+            labels = [dict(lb) for lb in self.labels]
+            plan = [list(p) for p in self.plan]
+            goal = None if self.goal is None else dict(self.goal)
         return {
             "mode": self.mode, "map_name": self.map_name, "message": self.message,
             "lidar": lidar_status, "rates": self.rate_hz,
             "robot_live": now - self.last_o < 1.0, "odom": od, "attitude": att,
             "pose": pose, "path": path, "scan": scan, "gate": dict(self.gate), "match": dict(self.match),
+            "fusion": dict(self.filter.stats, sigma=self.filter.sigma()),
+            "tof": self.tof_layer.state(),
             "map_version": self.grid.version,
+            "labels": labels, "extending": self._extend_pending,
+            "bubble": self.bubble.status(now),
+            "plan": plan, "goal": goal,
             "tests": {k: self.test_result(k) for k in self.tests},
             "settings": self.cfg,
         }
 
+    def scene3d(self, max_cells=40000):
+        """Tilted-map scene: the same 2D occupancy grid as wall and floor cells
+        (integer indices), robot pose and path. The viewer raises walls a little
+        and shows it from a 45-degree corner camera."""
+        with self.lock:
+            g = self.grid
+            walls = np.argwhere(g.logodds > 0.6)                      # (row=y, col=x)
+            floor = np.argwhere((g.logodds < -0.4) & g.touched)
+            pose = self.pose.tolist()
+            path = list(self.path)[-1500:]
+        if len(walls) > max_cells:
+            walls = walls[np.linspace(0, len(walls) - 1, max_cells).astype(int)]
+        if len(floor) > max_cells:
+            floor = floor[np.linspace(0, len(floor) - 1, max_cells).astype(int)]
+        return {"grid_res": g.res, "grid_origin": g.origin,
+                "walls": walls[:, ::-1].tolist(), "floor": floor[:, ::-1].tolist(),
+                "pose": pose, "path": path, "version": g.version}
     def map_png(self):
         with self.lock:                          # copy only; encode off the lock (see save())
             g = self.grid.copy()

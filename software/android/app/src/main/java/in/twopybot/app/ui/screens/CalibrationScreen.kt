@@ -59,7 +59,8 @@ fun CalibrationScreen(vm: BotViewModel, page: String = "/ui/calibration.html", b
         }
     }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal=8.dp),horizontalArrangement=Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().height(if(`in`.twopybot.app.ui.isCompactHeight()) 34.dp else 42.dp).padding(horizontal=8.dp),
+            horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
             TextButton(onClick=onBack,contentPadding=PaddingValues(horizontal=8.dp,vertical=0.dp)) { Text(backLabel,style=MaterialTheme.typography.labelLarge) }
             Row {
                 TextButton(onClick={error=null;loading=true;web?.reload()},contentPadding=PaddingValues(horizontal=8.dp,vertical=0.dp)) { Text("Reload",style=MaterialTheme.typography.labelLarge) }
@@ -70,7 +71,7 @@ fun CalibrationScreen(vm: BotViewModel, page: String = "/ui/calibration.html", b
         AndroidView(modifier=Modifier.fillMaxSize(),factory={ c ->
             WebView(c).apply {
                 layoutParams=ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.MATCH_PARENT)
-                setBackgroundColor(0xff090c10.toInt())
+                setBackgroundColor(0xff141210.toInt())
                 settings.javaScriptEnabled=true
                 settings.domStorageEnabled=true
                 settings.allowFileAccess=false

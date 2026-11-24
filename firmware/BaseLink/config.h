@@ -1,4 +1,4 @@
-/* 2PyBot v4.3.0 experimental self-uprighting: ESP32 + M0601 BLDC hubs.
+/* 2PyBot v5.0.0: ESP32 + M0601 BLDC hubs.
  * Control state is robot-forward SI; the wire layer applies motor polarity.
  * Pinout and geometry follow the supplied BaseLinkHub program.
  */
@@ -132,7 +132,7 @@
 
 #define LED_RING_PIN        15
 #define LED_RING_COUNT      16
-#define LED_FRONT_INDEX     7.5f
+#define LED_FRONT_INDEX     9.0f   // owner-confirmed with LT,1 / LT,2 (ring re-mounted)
 #define LED_DIR_CW          1
 #define LED_MAX_BRIGHT      200
 #define LED_FPS             50

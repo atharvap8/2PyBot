@@ -24,6 +24,7 @@ export const API = {
   paramAction(a)      { return API.post('/api/params/' + a); },
   command(line)       { return API.post('/api/command', { line }); },
   estop()             { return API.post('/api/estop').then(() => msg('E-STOP sent')); },
+  power(mode)         { return API.post('/api/power', { mode }); },
   status()            { return API.get('/api/status'); },
 };
 window.API = API;
@@ -174,6 +175,8 @@ function connectWS() {
       state.params = Object.fromEntries(m.params.map(p => [p.key, p]));
       state.derived = m.derived || {};
       document.dispatchEvent(new CustomEvent('params'));
+    } else if (m.type === 'visual_pair') {
+      paintVisualPair(m.visual_pair);
     } else if (m.type === 'param_msg' || m.type === 'log') {
       msg(m.text, /PE,|ERROR|FAIL/.test(m.text));
       document.dispatchEvent(new CustomEvent('logline', { detail: m.text }));
@@ -188,7 +191,7 @@ function paintHeader() {
   document.getElementById('dot').classList.toggle('ok', !t.stale);
   const waiting = state.derived.BOOTGATE === 1 && !t.host_ready;
    const startup = {WAIT_HOST:'WAIT RADXA ACK',INITIALIZING:'INITIALIZING',CALIBRATING:'IMU CALIBRATION',ERROR:'STARTUP ERROR'}[t.startup_state];
-   const st = startup || (t.balancing ? 'BALANCING' : (t.stale ? 'NO LINK' : (waiting ? 'BOOT WAIT' : 'IDLE')));
+   const st = startup || (t.balancing ? 'BALANCING' : (t.stale ? 'NO LINK' : (waiting ? 'BOOT WAIT' : (t.asleep ? 'ASLEEP' : 'IDLE'))));
   const cs = document.getElementById('cState');
   cs.textContent = st;
   cs.className = 'chip' + (t.stale ? ' bad' : (t.balancing ? '' : ' warn'));
@@ -197,6 +200,64 @@ function paintHeader() {
   const rx = document.getElementById('cRx');
   rx.textContent = `${(t.rx_hz ?? 0).toFixed(0)} Hz`;
   rx.className = 'chip' + ((t.rx_hz ?? 0) < 30 ? ' warn' : '');
+}
+
+// ---------------- visual re-pair ----------------
+// Shows a progress banner while the gamepad is being held in front of the camera.
+let vpTimer = null;
+function paintVisualPair(vp) {
+  if (!vp) return;
+  let bar = document.getElementById('vpbar');
+  const active = vp.enabled && ['watching', 'seen', 'triggered'].includes(vp.state) && (vp.hits > 0 || vp.state === 'triggered');
+  if (!active) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div'); bar.id = 'vpbar'; bar.className = 'vpbar';
+    bar.innerHTML = '<span class="t"></span><div class="track"><div class="fill"></div></div>';
+    (document.getElementById('sleepbar') || document.querySelector('header.top')).after(bar);
+  }
+  const fire = vp.state === 'triggered';
+  bar.classList.toggle('fire', fire);
+  bar.querySelector('.t').textContent = fire
+    ? 'Gamepad recognised: clearing pairings and restarting. Hold HOME + A on the pad.'
+    : `Hold the gamepad face-on to the camera… ${Math.round(vp.progress * 100)}%`;
+  bar.querySelector('.fill').style.width = Math.round((fire ? 1 : vp.progress) * 100) + '%';
+  clearTimeout(vpTimer);
+  vpTimer = setTimeout(() => { const b = document.getElementById('vpbar'); if (b) b.remove(); }, fire ? 12000 : 4000);
+}
+
+// ---------------- power-down ----------------
+// Camera, lidar, depth sensor and the controller's outputs off so the robot
+// does not heat while unused. The console and Wi-Fi stay up to wake it.
+let power = { asleep: false };
+function paintPower() {
+  const b = document.getElementById('pwr');
+  if (!b) return;
+  b.textContent = power.busy ? (power.asleep ? 'Powering down…' : 'Waking…') : (power.asleep ? 'Wake up' : 'Power down');
+  b.classList.toggle('asleep', !!power.asleep);
+  b.disabled = !!power.busy;
+  let bar = document.getElementById('sleepbar');
+  if (power.asleep && !bar) {
+    bar = document.createElement('div'); bar.id = 'sleepbar'; bar.className = 'sleepbar';
+    document.querySelector('header.top').after(bar);
+  }
+  if (bar) {
+    bar.hidden = !power.asleep;
+    const mins = Math.round((power.asleep_s || 0) / 60);
+    bar.textContent = `Powered down${mins ? ' for ' + mins + ' min' : ''}: camera, lidar, depth sensor, ring, servos, torch and gamepad are off. ` +
+      'Press Wake up to use the robot.' + (power.controller_supported === false ? ' (Controller firmware older than 4.7.7: only the host side is off.)' : '');
+  }
+}
+async function refreshPower() {
+  try { power = await API.get('/api/power'); paintPower(); } catch (e) { /* console restarting */ }
+}
+async function togglePower() {
+  const sleep = !power.asleep;
+  if (sleep && !confirm('Power down the robot?\n\nCamera, lidar, depth sensor, LED ring, servos, torch and the gamepad switch off ' +
+                        'and the robot cannot be armed. Wake it again from this console.')) return;
+  power = { ...power, busy: true, asleep: sleep }; paintPower();
+  try { power = await API.power(sleep ? 'sleep' : 'wake'); msg(sleep ? 'Powered down' : 'Awake: camera and sensors starting'); }
+  catch (e) { msg(e.message, true); }
+  refreshPower();
 }
 
 // ---------------- boot ----------------
@@ -210,6 +271,8 @@ const TAB_FILES = ['telemetry', 'vision', 'camera', 'calibration', 'objects', 'b
   }
   buildNav();
   connectWS();
+  document.getElementById('pwr')?.addEventListener('click', togglePower);
+  refreshPower(); setInterval(refreshPower, 3000);
   try { await refreshParams(); } catch (e) { msg('waiting for ESP32…', true); }
   document.addEventListener('params', () => {
     paintHeader();

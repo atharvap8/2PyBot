@@ -17,6 +17,35 @@ import serial
 
 from .config import SERIAL_PORT, SERIAL_BAUD, ENCODER_CPR
 
+import logging
+import logging.handlers
+import os
+
+
+def _controller_logger():
+    """Persistent controller log (falls, faults, resets, gamepad, link loss).
+
+    Survives reboots so incidents can be diagnosed afterwards:
+    /var/lib/2pybot/logs/controller.log, 5 x 4 MB rotation."""
+    log = logging.getLogger("2pybot.controller")
+    if log.handlers:
+        return log
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    directory = os.environ.get("BOT_LOG_DIR", "/var/lib/2pybot/logs")
+    try:
+        os.makedirs(directory, exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(os.path.join(directory, "controller.log"),
+                                                       maxBytes=4_000_000, backupCount=5)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+        log.addHandler(handler)
+    except OSError:
+        log.addHandler(logging.NullHandler())   # read-only/dev machine: keep the console running
+    return log
+
+
+CONTROLLER_LOG = _controller_logger()
+
 
 class Param:
     __slots__ = ("key", "value", "lo", "hi", "group", "desc", "dirty")
@@ -55,6 +84,8 @@ class SerialLink:
         }
         self.debug = {}                       # latest D-line fields
         self.hub = {}                         # HM: raw motor feedback + forward-frame commands
+        self.bubble = {}                      # BB: controller-side safety bubble
+        self._rec = None; self._rec_until = 0.0; self._rec_path = None
         self.path = collections.deque(maxlen=3000)   # (x, y) for the map
         self._pose = [0.0, 0.0, 0.0]          # x, y, theta (rad)
         self._prev_enc = None
@@ -68,9 +99,30 @@ class SerialLink:
         self._line_listeners=[]
 
     # ---------------- lifecycle ----------------
+    @staticmethod
+    def _port_candidates():
+        """Configured port first. If the CP2102 dropped off USB and came back
+        under another name (ttyUSB1 while the old node was still held, or only
+        the udev /dev/2pybot link), find it instead of retrying a dead path."""
+        import glob
+        found = [SERIAL_PORT, "/dev/2pybot"]
+        found += sorted(glob.glob("/dev/serial/by-id/*CP210*") + glob.glob("/dev/serial/by-id/*Silicon_Labs*"))
+        found += sorted(glob.glob("/dev/ttyUSB*"))
+        out = []
+        for path in found:
+            real = os.path.realpath(path)
+            if os.path.exists(path) and real not in [os.path.realpath(p) for p in out]:
+                out.append(path)
+        return out
+
     def open(self):
+        candidates = self._port_candidates()
+        if not candidates:
+            raise FileNotFoundError(f"{SERIAL_PORT} is gone and no CP210x/ttyUSB device is present "
+                                    "(controller USB disconnected: check cable/5 V; see dmesg)")
+        port = candidates[0]
         s = serial.Serial()
-        s.port, s.baudrate, s.timeout = SERIAL_PORT, SERIAL_BAUD, 0
+        s.port, s.baudrate, s.timeout = port, SERIAL_BAUD, 0
         s.dtr = False          # never reset the ESP32 by connecting
         s.rts = False
         s.exclusive = True
@@ -87,7 +139,8 @@ class SerialLink:
         self.hub.clear()
         self.tel["host_ready"] = False
         self.connected = True
-        self._log(f"[console] opened {SERIAL_PORT} @ {SERIAL_BAUD}")
+        self._log(f"[console] opened {port} @ {SERIAL_BAUD}" + ("" if port == SERIAL_PORT else f" ({SERIAL_PORT} missing)"))
+        self._last_open_error = ""
 
     def close(self):
         with self._write_lock:
@@ -244,7 +297,15 @@ class SerialLink:
 
     # ---------------- inbound ----------------
     def _log(self, text):
+        if text.count("\ufffd") > 4:
+            # ESP32 boot ROM output at 115200 read at our baud: keep only the
+            # real message that follows the garbage (e.g. "[BOOT] Reset reason").
+            tail = text[text.rfind("\ufffd") + 1:]
+            start = tail.find("[")
+            text = tail[start:] if start >= 0 else "[console] (boot ROM noise dropped)"
         self.log.append({"t": time.time(), "text": text})
+        if not text.startswith("[PAD] btn="):          # button-state chatter is not worth keeping
+            CONTROLLER_LOG.info(text)
 
     def _publish(self, msg):
         for q in list(self._subs):
@@ -311,19 +372,61 @@ class SerialLink:
                 fn(line,t)
             except Exception:
                 pass
+    # ---------------- raw recorder (diagnostics) ----------------
+    def record_start(self, seconds, label="rec"):
+        """Write every raw controller line with a host timestamp for `seconds`."""
+        seconds = max(1.0, min(120.0, float(seconds)))
+        directory = os.environ.get("BOT_LOG_DIR", "/var/lib/2pybot/logs")
+        os.makedirs(directory, exist_ok=True)
+        safe = "".join(ch for ch in str(label) if ch.isalnum() or ch in "-_")[:40] or "rec"
+        path = os.path.join(directory, time.strftime(f"{safe}-%Y%m%d-%H%M%S.log"))
+        self.record_stop()
+        self._rec = open(path, "w", buffering=1 << 16)
+        self._rec_until = time.monotonic() + seconds
+        self._rec_path = path
+        self._log(f"[console] recording raw controller lines for {seconds:.0f} s -> {path}")
+        return path
+
+    def record_stop(self):
+        rec = getattr(self, "_rec", None)
+        self._rec = None
+        if rec:
+            try:rec.close()
+            except OSError:pass
+
+    def record_status(self):
+        active = getattr(self, "_rec", None) is not None
+        return {"active": active, "path": getattr(self, "_rec_path", None),
+                "remaining_s": round(max(0.0, self._rec_until - time.monotonic()), 1) if active else 0}
+
+    def _record(self, line):
+        rec = getattr(self, "_rec", None)
+        if rec is None:
+            return
+        if time.monotonic() > self._rec_until:
+            self.record_stop()
+            return
+        try:rec.write(f"{time.monotonic():.4f} {line}\n")
+        except OSError:self.record_stop()
+
     def _handle(self, line: str):
         if not line:
             return
+        self._record(line)
         self._mirror(line)
         try:
             if line.startswith("AN!,") or line.startswith("AN?,"):
                 self.nav.update(token=int(line[4:]),state=1 if line.startswith("AN!") else 9,last_rx=time.time(),received_monotonic=time.monotonic())
                 return
             if line.startswith("NR,"):
-                _,ms,token,state,sequence,age,pad,_reserved=line.split(",")
+                _,ms,token,state,sequence,age,pad,sleep=line.split(",")
                 self.nav={"ms":int(ms),"token":int(token),"state":int(state),"sequence":int(sequence),
                            "age_ms":int(age),"pad":bool(int(pad)),"last_rx":time.time(),"received_monotonic":time.monotonic()}
+                self.tel["asleep"]=sleep=="1"   # 4.7.7+: controller power-down state (was always 0)
                 self._publish({"type":"navigation","nav":self.nav})
+                return
+            if line in ("SL!,1","SL!,0"):
+                self.tel["asleep"]=line.endswith("1")
                 return
             if line in ("FU!,1","FU!,0"):
                 self.tel["firmware_lock"]=line.endswith("1")
@@ -389,6 +492,17 @@ class SerialLink:
                 self._publish({"type":"self_righting","status":status})
                 return
 
+            if line.startswith("BB,"):
+                # controller-side bubble: clearance dead-reckoned between scans, live caps
+                fields=line.split(",")[1:]
+                if len(fields)!=9:return
+                try:values=[float(v) for v in fields]
+                except ValueError:return
+                self.bubble=dict(zip(("ms","front_m","back_m","fwd_cap","rev_cap","limiting","flags","velocity","bg_age_ms"),values))
+                self.bubble["received_monotonic"]=time.monotonic()
+                return
+            if line.startswith("HV,"):
+                return                                    # fast diagnostic stream: recorder/listeners only
             if line.startswith("HM,"):
                 fields=line.split(",")[1:]
                 if len(fields) not in (14,16):return
@@ -471,7 +585,10 @@ class SerialLink:
                     self.request_dump()
                     next_dump = time.monotonic() + 2
                 except Exception as e:
-                    self._log(f"[console] serial unavailable: {e}")
+                    # Log each distinct failure once (it retries every 3 s).
+                    if str(e) != getattr(self, "_last_open_error", ""):
+                        self._log(f"[console] serial unavailable: {e}")
+                        self._last_open_error = str(e)
                     self.close()
                     self.ser = None
                     next_open = time.monotonic() + 3
@@ -507,7 +624,12 @@ class SerialLink:
             now = time.time()
             if now - last_tel >= 0.1:         # 10 Hz telemetry push
                 last_tel = now
+                was_stale = self.tel.get("stale", True)
                 self.tel["stale"] = not self.connected or (now - self.tel["last_rx"]) > 1.0
+                if self.tel["stale"] != was_stale and not self._serial_paused:
+                    # Link edges are the key evidence after a hang or reset.
+                    self._log("[console] controller telemetry " + ("LOST" if self.tel["stale"] else "restored")
+                              + f" (balancing={self.tel.get('balancing')}, last pitch={self.tel.get('pitch')})")
                 if self.tel["stale"]:
                     self.tel["rx_hz"] = 0.0
                 self._publish({"type": "telemetry", "tel": self.tel,

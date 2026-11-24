@@ -27,3 +27,8 @@ fun pane(): Pane {
 @Composable
 @ReadOnlyComposable
 fun isLandscape(): Boolean = pane() != Pane.PORTRAIT
+
+/** Phone held sideways: about 360-400 dp of height, so every pixel of height counts. */
+@Composable
+@ReadOnlyComposable
+fun isCompactHeight(): Boolean = LocalConfiguration.current.screenHeightDp < 480

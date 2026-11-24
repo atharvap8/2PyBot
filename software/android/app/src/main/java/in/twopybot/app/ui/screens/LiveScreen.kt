@@ -41,8 +41,8 @@ fun LiveScreen(vm: BotViewModel) {
     // ---- pieces, so portrait and landscape can arrange the same content ----
     // Keep the native video renderer alive when rotation moves it between panes.
     val videoPane = remember(vm.video) { movableContentOf<Modifier> { mod ->
-        Box(mod.clip(RoundedCornerShape(16.dp)).background(Ink)
-               .border(1.dp, Line, RoundedCornerShape(16.dp))) {
+        Box(mod.clip(RoundedCornerShape(10.dp)).background(Ink)
+               .border(1.dp, Line, RoundedCornerShape(10.dp))) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { c ->
@@ -72,7 +72,7 @@ fun LiveScreen(vm: BotViewModel) {
                     onClick = { vm.startVideo() },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = Cyan.copy(alpha = .85f), contentColor = Ink)
+                        containerColor = Cyan, contentColor = Ink)
                 ) { Text(if (videoState == "connected") "Reconnect" else "Connect", fontSize = 12.sp) }
                 FilledTonalButton(
                     onClick = { vm.stopVideo() },
@@ -123,7 +123,7 @@ fun LiveScreen(vm: BotViewModel) {
     }
 
     AdaptiveWorkspace(portraitRatio=16f/9f,primary=videoPane,tools={
-        WorkspaceTitle("Live view","Camera-first control workspace")
+        if(!`in`.twopybot.app.ui.isCompactHeight()) WorkspaceTitle("Live view","Camera-first control workspace")
         StatusStrip(tel,conn,unsaved)
         Spacer(Modifier.height(4.dp))
         numbers()

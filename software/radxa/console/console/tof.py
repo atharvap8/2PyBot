@@ -17,6 +17,7 @@ class ToF:
         self.received = None
         self.error = ""
         self.state = "starting"
+        self.paused = False         # console power-down
         self.guard_enabled = False  # never persisted; explicit opt-in each startup
         self.stop_m = 0.20
         self.slow_m = 0.80
@@ -145,7 +146,7 @@ class ToF:
         active = bool(self.guard_enabled and supported and link.connected and not link.tel.get("stale", True))
         cap = math.floor(max(0.0, cap) * 1000) / 1000
         return {
-            "state": self.state, "error": self.error,
+            "state": self.state, "error": self.error, "hint": self.hint(self.error) if self.error else "",
             "bus": int(os.environ.get("BOT_TOF_BUS", "7")),
             "address": hex(int(os.environ.get("BOT_TOF_ADDRESS", "0x29"), 0)),
             "ranging_hz": int(os.environ.get("BOT_TOF_HZ", "10")),
@@ -216,10 +217,27 @@ class ToF:
         os.replace(temporary, self.calibration_file)
         self.range_offset_m, self.range_calibrated, self.calibration_error = offset, True, ""
 
+    @staticmethod
+    def hint(error):
+        """Plain-language next step for common worker failures."""
+        text = error.lower()
+        if any(code in text for code in ("errno 22", "errno 121", "errno 6", "errno 5", "no vl53l5cx")):
+            return "Sensor is not answering on I2C: check 3.3 V, GND and that the SDA/SCL connector is fully seated."
+        if "errno 2" in text or "no such file" in text:
+            return "I2C bus device is missing: enable the TWI7 overlay."
+        if "timed out" in text or "no fresh depth" in text:
+            return "Sensor stopped streaming; it will be restarted automatically."
+        return ""
+
     async def acquire(self):
         worker = str(Path(__file__).with_name("tof_worker.py"))
+        failures = 0
         try:
             while True:
+                if self.paused:
+                    self.state, self.error = "sleeping", ""
+                    await asyncio.sleep(1)
+                    continue
                 try:
                     self.state = "starting"
                     self.process = await asyncio.create_subprocess_exec(
@@ -241,9 +259,25 @@ class ToF:
                     self.state, self.error = "error", str(exc) or "Depth worker timed out"
                 finally:
                     await self.stop()
-                await asyncio.sleep(5)
+                if self.paused:
+                    self.state, self.error, failures = "sleeping", "", 0
+                    continue
+                # Back off while the sensor is absent instead of hammering the
+                # bus every 5 s; a session that reached ranging resets it.
+                failures = 0 if self.received is not None and time.monotonic() - self.received < 10 else failures + 1
+                await asyncio.sleep(min(30, 5 * 2 ** max(0, failures - 1)))
         finally:
             await self.stop()
+
+    async def pause(self, paused):
+        """Power-down: stop ranging (the worker stops the sensor on SIGTERM) and stay stopped."""
+        self.paused = bool(paused)
+        if self.paused:
+            await self.stop()
+            self.frame, self.received = {}, None
+            self.state, self.error = "sleeping", ""
+        elif self.state == "sleeping":
+            self.state = "starting"
 
     async def stop(self):
         proc, self.process = self.process, None

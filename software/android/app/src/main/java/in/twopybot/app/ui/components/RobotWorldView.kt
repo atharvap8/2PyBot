@@ -27,7 +27,7 @@ internal data class WorldInput(
 /** A real depth-buffered GLES world: shaded triangles, no CAD edge/wireframe pass. */
 internal class RobotWorldView(context: Context, onError: (String) -> Unit,
                               private val onExplore: () -> Unit) : GLSurfaceView(context) {
-    private val world = WorldRenderer(context) { message -> post { onError(message) } }
+    private val world = WorldRenderer(context, { message -> post { onError(message) } }) { requestRender() }
     private var lastX = 0f
     private var lastY = 0f
     private var lastCount = 0
@@ -44,7 +44,9 @@ internal class RobotWorldView(context: Context, onError: (String) -> Unit,
         setEGLConfigChooser(8, 8, 8, 0, 24, 0)
         preserveEGLContextOnPause = true
         setRenderer(world)
-        renderMode = RENDERMODE_CONTINUOUSLY
+        // On demand: frames continue only while motion is still being smoothed
+        // or the user is touching; an idle scene costs no GPU/battery.
+        renderMode = RENDERMODE_WHEN_DIRTY
         contentDescription = "3D robot world. One finger orbits, two fingers pan, pinch zooms."
     }
 
@@ -55,10 +57,12 @@ internal class RobotWorldView(context: Context, onError: (String) -> Unit,
         }
         world.input = input
         if (reset != resetToken) { resetToken = reset; world.camera = WorldCamera() }
+        world.keepAlive(400)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         pinch.onTouchEvent(event)
+        world.keepAlive(300)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -95,7 +99,10 @@ internal class RobotWorldView(context: Context, onError: (String) -> Unit,
 
 private data class GpuMesh(val name: String, val buffer: Int, val count: Int, val color: FloatArray)
 
-private class WorldRenderer(private val context: Context, private val onError: (String) -> Unit) : GLSurfaceView.Renderer {
+private class WorldRenderer(private val context: Context, private val onError: (String) -> Unit,
+                            private val again: () -> Unit) : GLSurfaceView.Renderer {
+    @Volatile private var activeUntil = 0L
+    fun keepAlive(ms: Long) { activeUntil = maxOf(activeUntil, System.nanoTime() / 1_000_000 + ms); again() }
     @Volatile var input = WorldInput()
     @Volatile var camera = WorldCamera()
     @Volatile var pose = WorldPose(); private set
@@ -131,7 +138,7 @@ private class WorldRenderer(private val context: Context, private val onError: (
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         try {
-            GL.glClearColor(.028f, .037f, .052f, 1f)
+            GL.glClearColor(.059f, .051f, .047f, 1f)
             GL.glEnable(GL.GL_DEPTH_TEST)
             GL.glDisable(GL.GL_CULL_FACE) // includes the CAD's thin/open printed surfaces
             program = link(VERTEX_SHADER, FRAGMENT_SHADER)
@@ -147,12 +154,12 @@ private class WorldRenderer(private val context: Context, private val onError: (
             val raw = context.assets.open("robot-world-model.json").bufferedReader().use { it.readText() }
             val source = JSONObject(raw).getJSONArray("parts")
             parts = (0 until source.length()).map { mesh(source.getJSONObject(it)) }
-            floor = upload("floor", plane(150f), floatArrayOf(.055f,.065f,.083f,1f))
+            floor = upload("floor", plane(150f), floatArrayOf(.086f,.075f,.067f,1f))
             shadow = upload("shadow", plane(1f, true), floatArrayOf(0f,0f,0f,.55f))
-            guidance = upload("forward-guide",WorldReferenceGeometry.ribbon(),floatArrayOf(.06f,.49f,.83f,.65f))
-            arrow = upload("front-arrow",WorldReferenceGeometry.forwardArrow(),floatArrayOf(.37f,.80f,1f,.72f))
-            shoulders = listOf(-1f,1f).map { upload("reference-edge",WorldReferenceGeometry.shoulder(it),floatArrayOf(.38f,.44f,.53f,.24f)) }
-            arcs = listOf(.5f,1f,1.5f,2f).map { upload("range-reference",WorldReferenceGeometry.rangeArc(it),floatArrayOf(.29f,.40f,.53f,.22f)) }
+            guidance = upload("forward-guide",WorldReferenceGeometry.ribbon(),floatArrayOf(.94f,.54f,.29f,.55f))
+            arrow = upload("front-arrow",WorldReferenceGeometry.forwardArrow(),floatArrayOf(.94f,.54f,.29f,.8f))
+            shoulders = listOf(-1f,1f).map { upload("reference-edge",WorldReferenceGeometry.shoulder(it),floatArrayOf(.45f,.41f,.37f,.24f)) }
+            arcs = listOf(.5f,1f,1.5f,2f).map { upload("range-reference",WorldReferenceGeometry.rangeArc(it),floatArrayOf(.40f,.36f,.32f,.22f)) }
             val ids = IntArray(1); GL.glGenBuffers(1,ids,0); dynamicBuffer = ids[0]
             GL.glGenBuffers(1,ids,0); trailBuffer = ids[0]; lastTrail = null
         } catch (e: Exception) { program = 0; onError("3D view: ${e.message}") }
@@ -224,6 +231,7 @@ private class WorldRenderer(private val context: Context, private val onError: (
             draw(GpuMesh("depth",dynamicBuffer,vertices.size/6,floatArrayOf(.96f,.68f,.30f,1f)),4,GL.GL_POINTS)
         }
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER,0)
+        if (System.nanoTime() / 1_000_000 < activeUntil) again()
     }
 
     private fun robotMatrix(pitch: Float, roll: Float = 0f) {
@@ -354,10 +362,10 @@ private class WorldRenderer(private val context: Context, private val onError: (
                 float alpha = uColor.a;
                 if (uKind == 0) {
                     float pool = exp(-0.16*dot(vWorld.xz-uAnchor,vWorld.xz-uAnchor));
-                    color = mix(vec3(0.039,0.047,0.062),vec3(0.068,0.082,0.107),pool);
+                    color = mix(vec3(0.062,0.053,0.047),vec3(0.105,0.092,0.082),pool);
                     vec2 cell = fract(vWorld.xz*1.25)-vec2(0.5);
                     float marker = 1.0-smoothstep(0.012,0.027,length(cell));
-                    color += vec3(0.040,0.045,0.055)*marker;
+                    color += vec3(0.055,0.048,0.042)*marker;
                 } else if (uKind == 1) {
                     vec3 n = normalize(vNormal);
                     vec3 l = normalize(vec3(-0.6,1.2,0.9));
@@ -365,7 +373,7 @@ private class WorldRenderer(private val context: Context, private val onError: (
                     float diffuse = max(dot(n,l),0.0);
                     float specular = pow(max(dot(n,normalize(l+v)),0.0),36.0);
                     color = color * (0.34 + 0.68*diffuse) + vec3(0.28*specular);
-                    color += vec3(0.04,0.10,0.12)*pow(1.0-max(dot(n,v),0.0),3.0);
+                    color += vec3(0.12,0.07,0.04)*pow(1.0-max(dot(n,v),0.0),3.0);
                 } else if (uKind == 2) {
                     alpha *= exp(-3.0*dot(vAux,vAux));
                 } else if (uKind == 4) {
@@ -379,7 +387,7 @@ private class WorldRenderer(private val context: Context, private val onError: (
                     alpha *= 1.0-vAux.y;
                 }
                 float fog = 1.0-exp(-0.012*dot(vEye,vEye));
-                gl_FragColor = vec4(mix(color,vec3(0.028,0.037,0.052),fog),alpha);
+                gl_FragColor = vec4(mix(color,vec3(0.059,0.051,0.047),fog),alpha);
             }
         """
     }

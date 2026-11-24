@@ -96,7 +96,7 @@ fun DrivingScreen(vm: BotViewModel) {
         else -> "STANDBY"
     }
     val scenePane:@Composable (Modifier)->Unit={ modifier ->
-        BoxWithConstraints(modifier.clip(RoundedCornerShape(16.dp)).background(Panel)) {
+        BoxWithConstraints(modifier.clip(RoundedCornerShape(10.dp)).background(Panel)) {
             RobotScene(tel.copy(pitch=tel.pitch-trim),tof,Modifier.fillMaxSize(),trail,follow,reset,{follow=false},debug,connected,pitchSign,guides)
             Row(Modifier.align(Alignment.TopStart).fillMaxWidth().background(Ink.copy(alpha=.7f)).padding(horizontal=14.dp,vertical=10.dp),
                 horizontalArrangement=Arrangement.SpaceBetween) {
@@ -123,18 +123,21 @@ fun DrivingScreen(vm: BotViewModel) {
             }
         }
     }
+    val compact=`in`.twopybot.app.ui.isCompactHeight()
     BoxWithConstraints(Modifier.fillMaxSize().background(Ink)) {
-        val clusterWidth=(maxWidth*.28f).coerceIn(200.dp,260.dp)
-        if(maxWidth>=520.dp) Row(Modifier.fillMaxSize().padding(12.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        val clusterWidth=(maxWidth*.28f).coerceIn(210.dp,260.dp)
+        val gap=if(compact) 8.dp else 12.dp
+        if(maxWidth>=520.dp) Row(Modifier.fillMaxSize().padding(gap),horizontalArrangement=Arrangement.spacedBy(gap)) {
             Column(Modifier.width(clusterWidth).fillMaxHeight()
-                .clip(RoundedCornerShape(16.dp)).background(Panel).verticalScroll(rememberScrollState()).padding(20.dp)) {
+                .clip(RoundedCornerShape(10.dp)).background(Panel).border(1.dp,Line,RoundedCornerShape(10.dp))
+                .verticalScroll(rememberScrollState()).padding(if(compact) 14.dp else 20.dp)) {
                 Text("VELOCITY",color=TextDim,fontSize=10.sp,letterSpacing=1.5.sp)
                 Row(verticalAlignment=Alignment.Bottom) {
-                    Text("%.2f".format(tel.v),style=Mono.copy(fontSize=52.sp,fontWeight=FontWeight.Light),color=TextHi)
-                    Text(" m/s",fontSize=12.sp,color=TextDim,modifier=Modifier.padding(bottom=10.dp))
+                    Text("%.2f".format(tel.v),style=Mono.copy(fontSize=if(compact) 40.sp else 52.sp,fontWeight=FontWeight.Light),color=TextHi)
+                    Text(" m/s",fontSize=12.sp,color=TextDim,modifier=Modifier.padding(bottom=if(compact) 7.dp else 10.dp))
                 }
                 Text(motion,color=if(connected && !tel.stale) Cyan else TextDim,fontSize=11.sp,letterSpacing=1.sp)
-                HorizontalDivider(Modifier.padding(vertical=14.dp),color=Line)
+                HorizontalDivider(Modifier.padding(vertical=if(compact) 8.dp else 14.dp),color=Line)
                 InstrumentRow("Control pitch","%.1f°".format(controlPitch))
                 InstrumentRow("Heading","%.0f°".format(tel.heading))
                 InstrumentRow("Loop","%.1f ms".format((debug["loopMax"]?:0f)/1000))

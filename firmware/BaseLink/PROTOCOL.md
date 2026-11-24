@@ -267,20 +267,57 @@ field only triggers a balancing stop on a 1-to-0 transition. It never arms. A fi
 - `AN,<nonzero-token>,1`: grant only while balancing, local gamepad connected,
   drive sticks neutral and attitude stable. Replies `AN!,<token>` or
   `AN?,<token>`. A cancelled token cannot be reused.
-- `AU,<token>,<sequence>,<forward-m/s>,<yaw-rad/s>`: finite 0–0.60 m/s forward,
-  at most ±0.75 rad/s yaw, monotonically increasing sequence (32-bit wrap supported).
-  The host currently plans at most ±0.45 rad/s. Commands expire after 500 ms.
+- `AU,<token>,<sequence>,<forward-m/s>,<yaw-rad/s>`: finite values, monotonically
+  increasing sequence (32-bit wrap supported). Speed is clamped to ±`DRIVEV`
+  (reverse allowed) and yaw to the `MAXSTR` wheel-speed limit. Lidar missions plan at
+  most ±0.85 rad/s. Commands expire after 500 ms.
 - `AN,<token>,0`: release that lease without disarming. Local drive-stick input,
   disconnect, disarm, unsafe attitude and timeout also revoke it; stale commands
   cannot restore authority. SELECT remains an immediate motor stop.
 
 Separate 10 Hz feedback leaves the 53-field debug schema unchanged:
-`NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<reserved-zero>`.
+`NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<asleep>`.
+The last field was always 0 before 4.7.7; it is now 1 while the controller is powered down (`SL,1`).
 States: 0 off, 1 granted, 2 driving, 3 takeover, 4 timeout, 5 stopped, 6 disabled.
 Camera/torch/payload position and controls do not gate or revoke navigation.
 ToF is advisory for routes: the optional manual-drive guard does not cap a granted
 navigation reference. Native turns use physical yaw units without the gamepad deadband. See
 [route autopilot](../../docs/ROUTE_AUTOPILOT.md) for host supervision policy.
+
+### Lidar safety bubble (4.6.0)
+
+`PR,BUBBLE,1` advertises support. `BG,<en 0|1>,<forward-cap m/s>,<reverse-cap m/s>`
+(caps 0–3) limits the drive reference of every source: gamepad, gestures, host `V`
+and a granted navigation lease, in both directions, including auto-climb. The Radxa
+computes the caps from each lidar scan and the measured body footprint, and sends them
+at 10 Hz. An enabled bubble fails closed: without a fresh `BG` for 500 ms both caps
+are 0 and the robot holds position while balancing. Steering and balance recovery are
+never limited. `BG,0,0,0` releases it. Accepted during self-uprighting. See
+[autonomy](../../docs/AUTONOMY.md).
+
+### Gamepad re-pair (4.7.6, reworked in 4.7.7)
+
+`BT,FORGET` (stopped motors only) clears every gamepad pairing. With `PR,PADREPAIR,2`
+(4.7.8) the controller erases the NVS namespaces `BTstack` (link keys, BLE bonds, BLE
+root keys) and `bp32` (Bluepad32 settings), logs
+`[PAD] Gamepad pairings cleared (BTstack erased, bp32 erased)` and restarts about 0.3 s
+later so BTstack and Bluepad32 reload from the empty storage. Both namespaces already
+exist, so no new namespace is created (4.7.7 tried to create a marker namespace and the
+request was refused, so re-pair failed). This is the Bluetooth
+part of a full flash erase; parameters, PHY calibration and Wi-Fi data are kept. Then
+hold HOME + A on the EVOFOX One S (Android mode; it reports as `Android`). With
+`PR,PADREPAIR,1` (4.7.6) keys were deleted at runtime, which left Bluepad32 4.1's BLE
+state inconsistent with this pad and pairing failed.
+
+### Power-down (4.7.7)
+
+`PR,SLEEP,1` advertises support. `SL,1` (stopped motors only) powers the controller
+down: arming is refused (START, `E`, self-uprighting), the LED ring shows only one
+faint breathing front LED, the blue LED breathes slowly and dimly, the camera servos
+release, the torch is off, and the gamepad is disconnected with new Bluetooth
+connections refused (any input from a reconnecting bonded pad is ignored). `SL,0`
+wakes it. Both reply `SL!,<0|1>`. The state is not stored: the controller always boots
+awake, and the console re-sends `SL,1` while its power-down mode is active.
 
 ## Legacy tuning forms
 

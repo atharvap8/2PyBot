@@ -3,6 +3,253 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 5.0.0: SLAM console refresh, in-browser terminal, visual re-pair
+
+- **Maps page** rebuilt as a single clean panel (Mapping, Saved maps, Edit, Autopilot,
+  Status). The guided check-lidar / check-wheels steps, tips, glossary and advanced
+  panels are gone. The 3D view is the default and shows a simple assembled model of
+  the robot instead of two cubes. Drive view removed.
+- **Maps download, import and 3D export.** Download a map as a portable zip, import a
+  map zip, and export the map as a binary STL for viewing or printing.
+- **In-browser terminal.** A Terminal page runs the full 2pybot TUI over a PTY
+  websocket with a vendored xterm.js.
+- **Deploy page** reworked from a read-only dead end into /deploy/ with live status, a
+  working firmware reflash control and a copyable operator deploy command.
+- **Console navigation** is consistent across Console, System, Maps, Deploy, Terminal
+  and App; the dead-end Autopilot page was dropped.
+- **System map**: the lidar block no longer sits under the inspector; the centre image
+  is the background-removed front photo, tilt corrected.
+- **Visual re-pair (gamepad detection).** Showing the gamepad to the camera for a few
+  seconds, while disarmed and with no pad connected, clears the Bluetooth pairings and
+  restarts into pairing mode. Uses the on-board detector; adds onnxruntime.
+- **Sleep state LEDs** breathe brighter: the status LED and the front ring LED use
+  higher minimum and maximum brightness while powered down.
+- Manual sources moved to docs/manual/src/; the built PDFs stay in docs/manual/.
+
+## 4.7.8: Gamepad re-pair actually clears the pairing
+
+- **Re-pair fixed.** 4.7.7 tried to create a new NVS namespace (`2pb_bt`) to hold a
+  restart marker, and the create call was refused on the robot even with NVS space
+  free, so `BT,FORGET` reported `could not store the re-pair request` and did nothing.
+  Re-pair now erases the two existing namespaces that hold pairing state, `BTstack`
+  (BR/EDR link keys, BLE bonds, BLE root keys) and `bp32` (Bluepad32 settings),
+  directly, then restarts so the stale in-RAM Bluetooth state is dropped. No new
+  namespace is created. Parameters and calibration are untouched.
+
+## 4.7.7: Gamepad re-pair that works; power-down mode
+
+- **Gamepad re-pair fixed.** In 4.7.6 `BT,FORGET` deleted the pairing keys while
+  Bluetooth was running. The controller log then showed
+  `SM_EVENT_PAIRING_COMPLETE: Invalid device` and
+  `uni_bt_le_on_encryption_change: Device not found`, and the pad never paired again;
+  only a full flash erase helped. Re-pair now does the Bluetooth part of that erase
+  properly: the controller stores a marker, restarts, and before Bluetooth starts it
+  erases the NVS namespaces `BTstack` (link keys, BLE bonds) and `bp32` (Bluepad32
+  settings). Parameters and calibration are kept. Capability `PR,PADREPAIR,2`.
+- **Pairing button is HOME + A** (EVOFOX One S Android mode, reported as `Android`), not
+  HOME + B. Fixed in the firmware messages, docs, CLI, TUI, API and system map.
+- **Power-down mode** to stop the robot heating while unused. *Power down* in the
+  console header, `2pybot power sleep|wake`, or TUI Robot page; `POST /api/power`.
+  - Host: camera pipeline stopped, lidar scanning stopped and its motor spun down,
+    depth sensor ranging stopped, object detection and autonomy off.
+  - Controller (`SL,1`/`SL,0`, capability `PR,SLEEP,1`): arming refused, LED ring
+    reduced to one faint breathing front LED, slow dim status LED, camera servos
+    released, torch off, gamepad disconnected and new connections refused.
+  - The Radxa keeps the console and Wi-Fi running, because that is how the robot is
+    woken; Linux suspend would take Wi-Fi down and the board has no wake-on-LAN.
+  - Not persisted: a console restart, deployment or reboot comes back awake.
+  - The system map shows powered-down blocks as ASLEEP instead of errors.
+- `NR` last field (always 0 before) now reports the controller power-down state.
+
+## 4.7.6 — Stops are short again; gamepad re-pair
+
+- **Stops after a stick release were too long.** The 4.7.5 DRVDEC ramp let the drive
+  target fall at only 1.5 m/s², so the robot kept going about 0.35 m from 1 m/s and
+  appeared to shoot ahead or back before stopping.
+  - DRVDEC is off again (0).
+  - The fall it addressed is handled differently. New VERRMAX (0.7 m/s) clamps the
+    speed error in drive mode: braking starts at once and stays strong, but the
+    velocity term can no longer take all of the acceleration and motor current, so
+    the balance terms keep authority.
+- **Bubble** back to the measured braking model (BUBDEC 0.5 m/s², BUBLAT 0.30 s). The
+  stop margin stays at 8 cm, which covers the 3 cm overshoot seen in the recording.
+- **Migration.** New firmware applies these defaults once, replacing values saved by
+  4.7.5 (NVS marker `_brake2`; capability `PR,BRAKEPROFILE,2`). The update worker
+  no longer replays the old values after a flash.
+- **Gamepad re-pair.** New `BT,FORGET` command (disarmed only) clears all bonded pads
+  and accepts a new one. Available as `2pybot gamepad repair` and as *Re-pair gamepad*
+  on the TUI Robot page. Capability `PR,PADREPAIR,1`.
+
+## 4.7.5 — Fixes from the bubble/vibration recording
+
+- **Fall when releasing the stick in fast reverse.**
+  - Recorded: −1.17 m/s, the speed target jumped to 0 in one step, the acceleration
+    command and the 2.7 A current limit saturated for 0.6 s, and the robot tipped backwards.
+  - New DRVDEC (1.5 m/s²) limits how fast the drive target may fall toward zero.
+    Speeding up stays immediate, and the bubble cap still applies at once.
+- **22 Hz vibration, worst in climb mode.** Climb mode showed 6× the normal acceleration
+  noise and hit the limit 17 % of the time. The speed fed to the controller came from
+  differencing averaged position every loop; reply jitter and missed replies made
+  noise that grew with speed (0.02 → 0.07 m/s rms).
+  - New VELSRC=1 uses each motor's sample-timed velocity instead.
+  - VELSRC=0 restores the old method.
+- **Bubble stopped too close.** It stopped 0.6–2.4 cm short of obstacles instead of
+  5 cm, and twice overshot slightly. The model is now more conservative:
+  BUBDEC 0.35 m/s², BUBLAT 0.40 s, BUBMRG 0.08 m.
+
+## Unreleased — 2pybot control centre
+
+- `2pybot` opens a full-screen terminal control centre (curses, Python 3.9 standard
+  library). Pages: dashboard, robot actions, parameters, logs, services, updates,
+  network, system and help. `X` stops the motors from any page.
+- `2pybot <command>` / `bot <command>` print readable coloured tables instead of
+  raw JSON (`--json` keeps the raw data). New commands `services` and
+  `logs [-f]` (controller log by default).
+- `doctor` prints a summary and always saves the full report to a file.
+
+## 4.7.4 — Start-up loader, new fall pattern
+
+- **Start-up loader:** the boot rainbow is gone. From power-on, a white comet spins
+  clockwise while a dim cyan bar fills from the front, until the Radxa reports ready
+  (`BR,1`) and the controller has calibrated. A green fill from the front then
+  confirms ready. The loader returns whenever the Radxa drops out (`BR,0`). It
+  replaces error code 5.
+- **Fall:** one short red flash, then a slow red glow on the side that hit the
+  ground. The 8-LED code with the white marker is gone.
+- **Error codes:** no white front marker. The n red LEDs (counted clockwise from
+  the front) flash on their own.
+
+## 4.7.3 — Cleaner ring motion
+
+- While the comets run, every other LED is off: no base glow, no centre marker.
+- Climb mode: a single violet LED hops one LED at a time toward the travel
+  direction, two hoppers into the front for forward and into the back for reverse,
+  one across the front half for turning. Faster with speed; all other LEDs off.
+  Stopped in climb: the front LED alone, slow pulse.
+
+## 4.7.2 — Motion-based LED ring
+
+- **Colour = state:**
+  - red = errors only (n red LEDs = code n; whole ring = fatal);
+  - violet + white heartbeat = gamepad connected, waiting for START;
+  - green = manual, blue = autopilot;
+  - violet marquee = climb mode;
+  - magenta = safety bubble limiting;
+  - amber blink = pushed.
+- **Motion = direction, faster with the stick:**
+  - forward: comets from both sides run into the front LED;
+  - reverse: comets run into the rear LED;
+  - turning: a comet sweeps the front half (left to right for a right turn).
+- **Climb:** every other LED lit, marching toward the travel direction.
+- **Holding:** breathing ring, a blinking front "eye", and a glow toward the tilt.
+- **Bubble diagnostics:** returns near the body are reported (`near_diag`) even while
+  scans are gated out, to find self-detection.
+
+## 4.7.1 — Settings finally persist
+
+- Every boot logged `PL!,no NVS, using defaults` and every save failed. One NVS
+  entry per parameter (~150 blobs) filled the 20 KB partition together with the
+  Bluetooth bonds.
+- All parameters are now saved as one blob of (key hash, value) records. A save
+  clears the old per-key entries first. Legacy per-key data is still read once.
+- `PN` reports NVS usage per namespace. `PX,<ns>` erases an obsolete namespace;
+  it refuses Bluetooth, PHY and Wi-Fi namespaces.
+- Ring orientation confirmed by the owner: front LED 9, numbered clockwise.
+  This is now the compiled default.
+
+## 4.7.0 — Bubble v2, readable LED ring, servo and wheel-speed fixes
+
+- **Bubble v2.**
+  - The Radxa now sends free distances, `BG,en,front,back,flags,age_ms`, on every
+    scan (~20 Hz) instead of precomputed speed caps.
+  - The controller computes the braking limit every cycle and subtracts its own
+    wheel travel since the scan, so a fast approach is limited by the distance
+    actually left.
+  - Tunable: BUBDEC (0.5 m/s²), BUBLAT (0.30 s), BUBMRG (0.05 m), BUBSTALE (300 ms).
+  - Footprint +1 cm on every side. The corridor follows the current arc while turning.
+  - Isolated single returns are ignored. Commanded turns into an obstacle are blocked.
+  - New `BB` telemetry shows the controller-side clearance and caps.
+- **LED ring.** Each state has its own colour and motion:
+  - waiting to arm: white front LED, blue breathing;
+  - holding: steady green with a bright front;
+  - driving: green arc; autopilot: blue arc;
+  - pushed (external disturbance): amber fast blink;
+  - bubble limiting: red arc front or back;
+  - self-uprighting: orange chase.
+  - **Error codes:** the number of red LEDs that flash. 1 motor link, 2 motor fault,
+    3 motor mode, 4 IMU, 5 waiting for Radxa, 6 maintenance, 7 no gamepad,
+    8 fell, 9 self-uprighting aborted.
+  - Fatal: the whole ring flashes red continuously.
+  - `LT,1` and `LT,2` orientation tests; the new LEDDIR parameter sets the ring direction.
+- **Servo.** Both servo lines are driven low from the first line of `setup()`. They
+  used to float for seconds until the payload started. The camera stick now has to
+  read centred after the gamepad connects before it can move the servos.
+- **Wheel speed.** Measured against when the motor was asked (its sample time)
+  rather than when the reply arrived. The arrival jitter, scaled by wheel speed,
+  made velocity noisy at high speed.
+- **Diagnostics.** `HF,<s>` starts a 100 Hz HV wheel/current stream.
+  `POST /api/debug/record` records raw controller lines. Boot-ROM noise is no
+  longer written to the controller log.
+
+## 4.6.1 — No more false motor faults from corrupt RS485 frames
+
+- The "LEFT fault 0xD1 OVERHEAT" trip was a corrupt reply, not a hot motor. 0xD1
+  sets undefined bits 0x80/0x40, it cleared on the next reply, and the left link
+  had 2094 timeouts and 14 CRC errors. A misaligned 10-byte window passes the 8-bit
+  CRC about 1 time in 256.
+- Replies that pass the CRC but are impossible (fault bits outside 0x1F, |rpm| > 900)
+  are now rejected and resynchronised.
+- A fault disarms only after 3 consecutive replies agree (~7.5 ms). A mode change
+  needs 2 consecutive replies (~2.5 ms).
+- Ignored transient faults are logged, rate-limited. Confirmed faults are logged with
+  temperature, rpm, current and the raw frame.
+- Console: after a controller USB drop, the serial port is found again under
+  `/dev/2pybot`, by-id or any `ttyUSB*`, and the retry message is logged once.
+
+## 4.6.0 — Lidar autonomy: bubble, labels, roaming, map navigation
+
+- Safety bubble from the measured body footprint (R10/L17/F6/B7 cm from the lidar,
+  diagonals triangulated). Forward/reverse caps and turn clearance on every scan.
+  New firmware `BG` command caps all drive sources, including the navigation lease;
+  fails closed. Switch on the Maps page (default on).
+- Map correction: *Extend* a saved map (relocalize, then keep mapping on top), an
+  eraser tool, and map deletion.
+- Area labels: tap the map and name a spot; stored with the map.
+- Missions through the navigation lease: vacuum-style *Roam*, *Go to* a label or a
+  tapped point (A* on the map, re-planning around new obstacles) and *Explore & map*
+  (frontier exploration).
+- *Drive* view: chase-camera reality view with walls, live lidar, bubble, path and labels.
+- See [docs/AUTONOMY.md](docs/AUTONOMY.md). Not yet driven on hardware.
+
+## 4.5.0 — Safety fixes, fusion SLAM merged to main
+
+Merges all work since 4.1.1: self-uprighting, lidar SLAM with
+pose fusion, ToF map layer, single web port, tilted map view, the redesigned Android
+app (portrait and landscape) and the user manual and technical Q&A PDFs.
+
+Safety fixes from the incident review (hang, one wheel at full speed, link loss, falls):
+
+- The M0601 drivers keep their last current setpoint while no frames arrive. The
+  controller now sends zero-current frames from the first milliseconds after any
+  reset (power-on, brownout, panic, watchdog) and throughout the host boot wait.
+- Independent loop stall guard (esp_timer task): zero both motors after 150 ms of loop
+  stall, restart the ESP32 after 800 ms. Blocking maintenance commands, allowed only
+  with motors off, suppress the restart for up to 5 s.
+- Reset reason printed at every boot (`[BOOT] Reset reason: ...`).
+- Controller log persisted on the Radxa (`/var/lib/2pybot/logs/controller.log`,
+  rotating), including telemetry LOST/restored edges, so incidents survive reboots.
+
+## 4.4.0 — Sensing fusion and single web port
+
+- Lidar at 20 Hz (C1M1R2, 1200 rpm); per-beam floor clipping from the measured 0.265 m
+  scan plane; scans de-skewed to the mid-sweep pose; whole scans dropped only above 12° / 60°/s.
+- EKF pose fusion: wheel + gyro prediction, gated lidar scan-match correction with a
+  score-surface covariance, wheel-slip detection.
+- VL53L5CX 3D layer at 0.21 m: low obstacles and drop-offs in the map; mount tilt is
+  estimated from floor returns. Worker retries the first transfer and backs off when absent.
+- Both camera servos detach after their own last command (SVIDLE, default 2 s).
+- One web port (8080): console, /sysmap/ and /slam/ linked, one orange system-map theme.
+
 ## Unreleased — Standalone lidar mapping (no ROS)
 
 - RPLIDAR C1 driver on the 40-pin UART4 (`console/lidar_c1.py`).

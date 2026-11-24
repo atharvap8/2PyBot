@@ -10,9 +10,10 @@
 <header class="top">
   <div class="brand">
     <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="5" fill="currentColor"/><path d="M16 3v6M16 23v6M3 16h6M23 16h6" stroke="currentColor" stroke-width="2"/></svg>
-    <div><b>2PyBot Maps</b><span>Lidar mapping, step by step</span></div>
+    <div><b>2PyBot Maps</b><span>Lidar SLAM</span></div>
   </div>
   <div class="spacer"></div>
+  <nav class="pagelinks"><a href="/">Console</a><a href="/sysmap/">System</a><a class="sel" href="/slam/">Maps</a><a href="/deploy">Deploy</a><a href="/terminal">Terminal</a><a href="/ui/android.apk">App</a></nav>
   <span class="hstat"><i class="dot" id="d-lidar"></i>Lidar <b id="h-lidar">…</b></span>
   <span class="hstat"><i class="dot" id="d-robot"></i>Robot <b id="h-robot">…</b></span>
   <span class="hstat">Mode <b id="h-mode">…</b></span>
@@ -20,119 +21,109 @@
 </header>
 
 <main class="layout">
-  <!-- ======================= steps ======================= -->
-  <aside class="steps" id="steps">
-    <section class="step" data-step="1">
-      <h2><span class="num">1</span>Check the lidar</h2>
-      <p>The lidar spins and measures distances all around. You should see the room's outline on the right.</p>
-      <ul class="checks">
-        <li id="c-lidar-conn">Lidar connected</li>
-        <li id="c-lidar-health">Lidar health is good</li>
-        <li id="c-lidar-rate">About 10 scans per second</li>
-      </ul>
-      <div class="hint" id="h-step1"></div>
-    </section>
-
-    <section class="step" data-step="2">
-      <h2><span class="num">2</span>Check the wheels</h2>
-      <p>SLAM uses the wheels and the gyro to guess how far the robot moved. Two quick tests prove they're right. The robot can be off: just push it by hand.</p>
-      <ul class="checks">
-        <li id="c-robot">Robot data is arriving</li>
-        <li id="c-axis">Gyro figured out ("spin the robot a few times")</li>
-      </ul>
-      <div class="test">
-        <button class="btn" data-test="push">Start push test</button>
-        <span id="t-push">Push it 1 m straight ahead.</span>
-      </div>
-      <div class="test">
-        <button class="btn" data-test="turn">Start turn test</button>
-        <span id="t-turn">Turn it left about 90°.</span>
-      </div>
-    </section>
-
-    <section class="step" data-step="3">
-      <h2><span class="num">3</span>Make a map</h2>
-      <p>Press start, then drive around slowly with the gamepad. The map grows as you go. Finish by driving back to where you started: that lets SLAM line everything up.</p>
+  <aside class="steps" id="panel">
+    <section class="step">
+      <h2>Mapping</h2>
       <div class="row">
         <button class="btn primary" id="b-start">Start mapping</button>
         <button class="btn" id="b-stop">Stop</button>
       </div>
-      <p class="tips">Tips: walk-speed or slower · avoid big empty spaces · don't lift the robot while mapping.</p>
-    </section>
-
-    <section class="step" data-step="4">
-      <h2><span class="num">4</span>Save it</h2>
-      <p>Give the map a short name like <i>living_room</i>.</p>
       <div class="row">
-        <input id="map-name" placeholder="living_room" maxlength="40" autocomplete="off">
-        <button class="btn primary" id="b-save">Save map</button>
+        <input id="map-name" placeholder="map name" maxlength="40" autocomplete="off">
+        <button class="btn primary" id="b-save">Save</button>
       </div>
-      <div class="hint" id="h-save"></div>
-    </section>
-
-    <section class="step" data-step="5">
-      <h2><span class="num">5</span>Use a saved map</h2>
-      <p>Load a map, put the robot where you started mapping, and it will show where it is. Lost? Press <b>Find me</b>.</p>
-      <div class="row">
-        <select id="map-list"><option value="">No maps yet</option></select>
-        <button class="btn" id="b-load">Load</button>
-        <button class="btn" id="b-find">Find me</button>
-      </div>
-    </section>
-  </aside>
-
-  <!-- ======================= view ======================= -->
-  <section class="view">
-    <div class="viewbar">
-      <div class="seg" role="tablist">
-        <button id="v-map" aria-selected="true">Map</button>
-        <button id="v-radar" aria-selected="false">Radar</button>
-      </div>
-      <span class="sub" id="view-note">Scroll or pinch to zoom · drag to move</span>
-      <div class="spacer"></div>
-      <button class="btn small" id="b-center">Center on robot</button>
-    </div>
-    <canvas id="cv"></canvas>
-    <div class="say" id="say">Connecting…</div>
-  </section>
-
-  <!-- ======================= status ======================= -->
-  <aside class="side">
-    <div class="card">
-      <h3>How it's going</h3>
       <div class="meter"><span>Scan quality</span><div class="bar"><i id="m-scan"></i></div><b id="m-scan-v">–</b></div>
       <div class="meter"><span>Map match</span><div class="bar"><i id="m-match"></i></div><b id="m-match-v">–</b></div>
       <div class="meter"><span>Robot tilt</span><div class="bar"><i id="m-tilt"></i></div><b id="m-tilt-v">–</b></div>
-      <p class="sub">Scans taken while the robot leans more than 3° are skipped, because the laser would hit the floor.</p>
-    </div>
-    <div class="card kv">
-      <h3>Numbers</h3>
-      <div><span>Position</span><b id="n-pose">–</b></div>
-      <div><span>Distance from start (wheels only)</span><b id="n-odom">–</b></div>
-      <div><span>Usable range now</span><b id="n-range">–</b></div>
-      <div><span>Scans used / skipped</span><b id="n-gate">–</b></div>
-      <div><span>Points per scan</span><b id="n-pts">–</b></div>
-      <div><span>Lidar model / firmware</span><b id="n-fw">–</b></div>
-    </div>
-    <details class="card">
-      <summary>What do these words mean?</summary>
-      <dl class="gloss">
-        <dt>Scan</dt><dd>One full spin of the lidar: hundreds of distance dots around the robot.</dd>
-        <dt>Odometry</dt><dd>The robot's own guess of how it moved, from wheel turns and the gyro. It slowly drifts.</dd>
-        <dt>Pose</dt><dd>Where the robot is (x, y) and which way it faces.</dd>
-        <dt>Occupancy grid</dt><dd>The map: a grid of 5 cm squares, each white (free), black (wall) or grey (unknown).</dd>
-        <dt>Scan matching</dt><dd>Sliding the new scan over the map until it fits. This corrects the drift.</dd>
-        <dt>Loop closure</dt><dd>Coming back to a place you've already mapped, so the map lines up again.</dd>
-        <dt>Localization</dt><dd>Using a saved map to find where the robot is, without changing the map.</dd>
-      </dl>
-    </details>
-    <details class="card">
-      <summary>Advanced</summary>
-      <div class="kv small" id="adv"></div>
-      <p class="sub">Change these with environment variables or <code>slam/engine.py</code> DEFAULTS.</p>
-    </details>
+    </section>
+
+    <section class="step">
+      <h2>Saved maps</h2>
+      <div class="row"><select id="map-list"><option value="">No maps yet</option></select></div>
+      <div class="row">
+        <button class="btn" id="b-load">Load</button>
+        <button class="btn" id="b-extend">Extend</button>
+        <button class="btn" id="b-find">Find me</button>
+        <button class="btn danger small" id="b-delete">Delete</button>
+      </div>
+      <div class="row">
+        <button class="btn small" id="b-zip">Download</button>
+        <button class="btn small" id="b-stl">Export 3D (STL)</button>
+        <button class="btn small" id="b-import">Import</button>
+        <input type="file" id="imp-file" accept=".zip" hidden>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Edit map</h2>
+      <div class="row">
+        <button class="btn tool" data-tool="erase" id="t-erase">Erase</button>
+        <select id="erase-r" title="Eraser size"><option value="0.15">15 cm</option><option value="0.3" selected>30 cm</option><option value="0.6">60 cm</option></select>
+        <button class="btn tool" data-tool="label" id="t-label">Label</button>
+      </div>
+      <ul class="labels" id="label-list"></ul>
+    </section>
+
+    <section class="step auto">
+      <h2>Autopilot <span class="pill" id="m-pill">–</span></h2>
+      <div class="auto-card" id="m-card">
+        <div class="auto-main" id="m-title">Not ready</div>
+        <div class="auto-sub" id="m-detail">Waiting for the robot…</div>
+        <div class="auto-bar" id="m-bar" hidden><i id="m-bar-fill"></i></div>
+      </div>
+      <div id="m-setup">
+        <div class="seg kinds" role="tablist">
+          <button data-kind="goto" aria-selected="true">Go to</button>
+          <button data-kind="roam" aria-selected="false">Roam</button>
+          <button data-kind="explore" aria-selected="false">Explore</button>
+        </div>
+        <div class="kind-opts" data-for="goto">
+          <select id="goal-label"><option value="">Choose a place…</option></select>
+          <button class="btn tool" data-tool="goal" id="t-goal" title="Tap the map to pick a spot">Pick on map</button>
+        </div>
+        <div class="auto-params">
+          <label>Speed <select id="m-speed"><option value="0.15">Slow</option><option value="0.25" selected>Normal</option><option value="0.4">Fast</option></select></label>
+          <label class="kind-opts" data-for="roam explore">For <select id="m-time"><option value="120">2 min</option><option value="600" selected>10 min</option><option value="1800">30 min</option></select></label>
+        </div>
+      </div>
+      <div class="auto-actions">
+        <button class="btn primary big" id="b-mstart">Start</button>
+        <button class="btn big" id="b-mpause" hidden>Pause</button>
+        <button class="btn primary big" id="b-mresume" hidden>Resume</button>
+        <button class="btn danger big" id="b-mstop" hidden>Stop</button>
+      </div>
+      <div class="auto-safety" id="bubble-box">
+        <i class="dot" id="bubble-dot"></i><span id="bubble-text">Safety bubble</span>
+        <label class="switch" title="Also limit gamepad driving with the lidar bubble"><input type="checkbox" id="bubble-on"> Gamepad too</label>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Status</h2>
+      <div class="meter"><span>Position</span><b id="n-pose" style="grid-column:2/4;text-align:right">–</b></div>
+      <div class="meter"><span>Drift (wheels)</span><b id="n-odom" style="grid-column:2/4;text-align:right">–</b></div>
+      <div class="meter"><span>Usable range</span><b id="n-range" style="grid-column:2/4;text-align:right">–</b></div>
+    </section>
   </aside>
+
+  <section class="view">
+    <div class="viewbar">
+      <div class="seg" role="tablist">
+        <button id="v-3d" aria-selected="true">3D</button>
+        <button id="v-map" aria-selected="false">Map</button>
+        <button id="v-radar" aria-selected="false">Radar</button>
+      </div>
+      <span class="sub" id="view-note">45° corner view · drag to rotate · pinch or scroll to zoom</span>
+      <div class="spacer"></div>
+      <button class="btn small" id="b-center">Center on robot</button>
+    </div>
+    <canvas id="cv" hidden></canvas>
+    <canvas id="cv3"></canvas>
+    <div class="legend3d" id="legend3d"><span><i style="background:#efe9e3"></i>Walls</span><span><i style="background:#2e2823;border:1px solid #4a4038"></i>Floor</span><span><i style="background:#f08a4b"></i>Robot / path</span><b id="stat3d"></b></div>
+    <div class="say" id="say">Connecting…</div>
+  </section>
 </main>
+<script src="static/slam3d.js"></script>
 <script src="static/slam.js"></script>
 </body>
 </html>

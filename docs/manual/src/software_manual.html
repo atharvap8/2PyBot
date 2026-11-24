@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>2PyBot Software Manual</title>
+<link rel="stylesheet" href="manual.css"></head><body>
+<span class="doccode">SW-2PB-003 Rev 4.7</span>
+
+<section class="cover">
+  <div class="brand">{{logo}}</div>
+  <div class="code">SW-2PB-003</div>
+  <div class="hero">{{hero:photo_quarter_right}}</div>
+  <div class="floor"></div>
+  <div class="title">2PyBot</div>
+  <div class="kind">Software manual</div>
+  <div class="sub">How the controller firmware, the host console, the mapping and autonomy stack, the apps, the terminal tools and the deployment pipeline are built, how they talk to each other, and how to change them safely.</div>
+  <div class="meta"><div><b>SW-2PB-003</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.8 · Host software 4.7.8</div></div>
+</section>
+
+<h1 id="toc">Contents</h1>
+<div class="toc">
+  <a href="#s1">1 About this manual</a>
+  <a href="#s2">2 System architecture</a>
+  <a href="#s3">3 Repository layout</a>
+  <a href="#s4">4 Controller firmware</a>
+  <a class="l2" href="#s4-4">4.4 Balance controller</a>
+  <a class="l2" href="#s4-5">4.5 Hub motor link</a>
+  <a class="l2" href="#s4-6">4.6 Safety layers</a>
+  <a class="l2" href="#s4-7">4.7 Parameters and storage</a>
+  <a href="#s5">5 Serial protocol</a>
+  <a href="#s6">6 Host console</a>
+  <a class="l2" href="#s6-5">6.5 Mapping and localization</a>
+  <a class="l2" href="#s6-7">6.7 Autonomy</a>
+  <a href="#s7">7 Web interface</a>
+  <a href="#s8">8 Android application</a>
+  <a href="#s9">9 Terminal tools</a>
+  <a href="#s10">10 Build and deployment pipeline</a>
+  <a href="#s11">11 Development workflow</a>
+  <a href="#s12">12 Extending the system</a>
+  <a href="#s13">13 Diagnostics and debugging</a>
+  <a href="#sA">Appendix A Files, ports and variables</a>
+  <a href="#sR">Revision history</a>
+</div>
+
+<h1 id="s1"><span class="no">1</span>About this manual</h1>
+<p class="lead">This manual is for anyone who reads, modifies or extends the 2PyBot software. It explains what each part does and why, where the code lives, and the rules that keep changes safe on a machine that moves by itself.</p>
+<p>It describes the repository at firmware BaseLink 4.7.8 and host software 4.7.8, branch <code>feature/lidar-autonomy</code>. File paths are relative to the repository root. Day-to-day operation is covered in the user manual (UM-2PB-001); hardware in the hardware manual (HW-2PB-004).</p>
+<h2>1.1 Ground rules</h2>
+<ul>
+<li><b>The controller owns motion.</b> Everything that can move a wheel runs on the ESP32. The host may stop the robot but can never arm it.</li>
+<li><b>Fail safe, not fail silent.</b> Every link has a timeout; losing a signal stops or holds the robot rather than continuing on stale data.</li>
+<li><b>Measure, then change.</b> Control changes are driven by recordings (section 13), not by feel alone.</li>
+<li><b>Physical tests are operator initiated.</b> No build, script or deployment arms or drives the robot.</li>
+</ul>
+
+<h1 id="s2"><span class="no">2</span>System architecture</h1>
+<p>2PyBot is split into three layers with clearly separated responsibilities and timing requirements.</p>
+<div class="blocks">
+<div><b>Controller (ESP32, BaseLink)</b><span>200 Hz balance loop, motor current over RS485, IMU fusion, gamepad (Bluepad32), LED ring, camera servos, torch, safety limits, parameter storage.</span></div>
+<div><b>Host (Radxa Cubie A7A, Linux)</b><span>Console server (FastAPI), serial link, SLAM, safety bubble, autonomy, camera pipeline, depth sensor, system map, firmware worker, deployment, hotspot.</span></div>
+<div><b>Clients</b><span>Browsers (console, maps, system map), the Android app, the <code>2pybot</code> terminal tools and GitHub CI.</span></div>
+</div>
+<svg class="diagram" viewBox="0 0 700 250" font-family="Segoe UI, sans-serif" font-size="11">
+  <defs><marker id="a1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a7f74"/></marker></defs>
+  <rect x="250" y="15" width="200" height="90" rx="8" fill="#221e1a" stroke="#f08a4b"/><text x="350" y="40" text-anchor="middle" fill="#fff4ea" font-size="13" font-weight="600">Host · Radxa</text>
+  <text x="350" y="60" text-anchor="middle" fill="#b3a99e">console · SLAM · bubble · autonomy</text><text x="350" y="78" text-anchor="middle" fill="#b3a99e">camera · ToF · deploy · firmware worker</text>
+  <rect x="250" y="150" width="200" height="85" rx="8" fill="#221e1a" stroke="#f08a4b"/><text x="350" y="175" text-anchor="middle" fill="#fff4ea" font-size="13" font-weight="600">Controller · ESP32</text>
+  <text x="350" y="195" text-anchor="middle" fill="#b3a99e">balance 200 Hz · motors · gamepad</text><text x="350" y="213" text-anchor="middle" fill="#b3a99e">LED ring · servos · safety</text>
+  <line x1="350" y1="105" x2="350" y2="150" stroke="#f08a4b" stroke-width="2.5"/><text x="358" y="132" fill="#b3a99e">USB serial 460800 · ASCII lines</text>
+  <g fill="#1b1815" stroke="#3a332d"><rect x="20" y="15" width="170" height="30" rx="5"/><rect x="20" y="55" width="170" height="30" rx="5"/><rect x="20" y="95" width="170" height="30" rx="5"/>
+  <rect x="510" y="15" width="170" height="30" rx="5"/><rect x="510" y="55" width="170" height="30" rx="5"/><rect x="510" y="95" width="170" height="30" rx="5"/>
+  <rect x="20" y="165" width="170" height="30" rx="5"/><rect x="510" y="150" width="170" height="30" rx="5"/><rect x="510" y="190" width="170" height="30" rx="5"/></g>
+  <g fill="#ece5dd"><text x="105" y="34" text-anchor="middle">Camera IMX708 (CSI)</text><text x="105" y="74" text-anchor="middle">Lidar C1 (UART4)</text><text x="105" y="114" text-anchor="middle">ToF VL53L5CX (I2C-7)</text>
+  <text x="595" y="34" text-anchor="middle">Browsers · app (Wi-Fi)</text><text x="595" y="74" text-anchor="middle">2pybot CLI / TUI (SSH)</text><text x="595" y="114" text-anchor="middle">GitHub CI bundles</text>
+  <text x="105" y="184" text-anchor="middle">IMU + compass (I2C)</text><text x="595" y="169" text-anchor="middle">M0601 hubs (RS485 ×2)</text><text x="595" y="209" text-anchor="middle">Gamepad (Bluetooth)</text></g>
+  <g stroke="#8a7f74" stroke-width="1.3" fill="none" marker-end="url(#a1)"><path d="M190 30 H250"/><path d="M190 70 H250"/><path d="M190 110 H250"/><path d="M510 30 H450"/><path d="M510 70 H450"/><path d="M510 110 H450"/><path d="M190 180 H250"/><path d="M450 165 H510"/><path d="M510 205 H450"/></g>
+</svg>
+<p class="cap"><b>Figure 1.</b> Software layers and the interfaces between them.</p>
+<h2>2.1 Data flows</h2>
+<table><thead><tr><th style="width:26%">Flow</th><th>Path</th></tr></thead><tbody>
+<tr><td>Driving by gamepad</td><td>Gamepad → Bluetooth → ESP32 (no host involved).</td></tr>
+<tr><td>Telemetry</td><td>ESP32 → USB serial → <code>SerialLink</code> → WebSocket and REST → clients; also SLAM, bubble and the controller log.</td></tr>
+<tr><td>Safety bubble</td><td>Lidar → SLAM engine (bubble geometry) → <code>BubbleGuard</code> → <code>BG</code> line → ESP32 speed limit every loop.</td></tr>
+<tr><td>Autonomy</td><td>Planner on the host → navigation lease <code>AN</code>/<code>AU</code> lines at 20 Hz → ESP32 drive reference.</td></tr>
+<tr><td>Video</td><td>IMX708 → ISP → Cedar H.264 encoder → RTSP → MediaMTX → WebRTC (WHEP) → browser or app.</td></tr>
+<tr><td>Updates</td><td>Push → GitHub Actions bundle → robot downloads the bundle for that exact commit → host release + firmware flash.</td></tr>
+</tbody></table>
+
+<h1 id="s3"><span class="no">3</span>Repository layout</h1>
+<table><thead><tr><th style="width:34%">Path</th><th>Contents</th></tr></thead><tbody>
+<tr><td><code>firmware/BaseLink/</code></td><td>Controller firmware (Arduino, ESP32 with the Bluepad32 core).</td></tr>
+<tr><td><code>firmware/BaseLink/PROTOCOL.md</code></td><td>Authoritative serial protocol reference.</td></tr>
+<tr><td><code>software/radxa/console/console/</code></td><td>Host console package (Python 3.9): server, serial link, SLAM, autonomy, camera, ToF, firmware worker.</td></tr>
+<tr><td><code>software/radxa/console/ui/</code></td><td>Web pages: console, system map, Maps (<code>slam/</code>), autopilot, deployment.</td></tr>
+<tr><td><code>software/radxa/console/native/</code></td><td>C hardware video publisher (<code>2pybot_hwstream</code>).</td></tr>
+<tr><td><code>software/android/</code></td><td>Android app (Kotlin, Jetpack Compose).</td></tr>
+<tr><td><code>scripts/radxa/</code></td><td>Robot-side tools: deployment, boot gate, the <code>2pybot</code> CLI and TUI, systemd units.</td></tr>
+<tr><td><code>scripts/firmware/</code></td><td>Firmware build, toolchain lock, fingerprint, registration.</td></tr>
+<tr><td><code>scripts/versioning.py</code></td><td>Version policy check (<code>VERSION</code> file).</td></tr>
+<tr><td><code>tests/</code></td><td>Native C++ and Python tests (run on explicit opt-in in CI).</td></tr>
+<tr><td><code>docs/</code></td><td>Design notes and these manuals (<code>docs/manual/</code>).</td></tr>
+<tr><td><code>hardware/</code>, <code>models/</code></td><td>CAD, dynamics data and 3D models used by the viewers.</td></tr>
+<tr><td><code>.github/workflows/</code></td><td>CI: firmware, Android, bundle, lint, docs, release.</td></tr>
+</tbody></table>
+
+<h1 id="s4"><span class="no">4</span>Controller firmware</h1>
+<h2>4.1 Toolchain and build</h2>
+<p>The firmware builds with Arduino CLI against a locked toolchain (<code>scripts/firmware/toolchain.json</code>): the Bluepad32 ESP32 core 4.1.0 (ESP-IDF 4.4.5) and fixed library versions (ISM6HG256X, QMC5883L, NeoPixelBus). The board uses the <i>Huge APP</i> partition scheme (3 MB application at 0x10000).</p>
+<pre>python scripts/firmware/build.py --output-dir build/BaseLink --require-toolchain-lock</pre>
+<p>The build writes the application image, bootloader, partition table and a <code>manifest.json</code> with version, SHA-256, source commit and a source fingerprint. The firmware version string must equal <code>VERSION</code>; <code>scripts/versioning.py --check</code> enforces it.</p>
+<h2>4.2 The main loop</h2>
+<p><code>loop()</code> in <code>BaseLink.ino</code> runs at a fixed 200 Hz (5 ms). Every cycle performs, in order:</p>
+<ol>
+<li><b>Heartbeat</b> for the stall guard.</li>
+<li><b>Sensors</b>: IMU update and pitch filter, terrain estimate, hub motor feedback, position and speed estimates.</li>
+<li><b>Inputs</b>: serial commands from the host, gamepad (Bluepad32), gestures, torch and camera stick.</li>
+<li><b>Drive arbitration</b>: navigation lease, latched manual priority, host <code>V</code> input, gamepad, then gesture playback and the optional ToF guard.</li>
+<li><b>State machine</b>: IDLE, BALANCING or SELF_RIGHTING; arming, fall and fault checks; <code>runController()</code>.</li>
+<li><b>Motor transmit</b>: one frame to each hub motor immediately after the control calculation.</li>
+<li><b>Housekeeping</b>: status LED, incremental parameter dump, LED ring frame.</li>
+<li><b>Telemetry</b>: <code>O</code> and <code>D</code> at 50 Hz, <code>NR</code>, <code>HM</code> and <code>BB</code> at 10 Hz, <code>SR</code> at 20 Hz, optional <code>HV</code> at 100 Hz.</li>
+</ol>
+<h2>4.3 Module map</h2>
+<table><thead><tr><th style="width:24%">File</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><code>BaseLink.ino</code></td><td>Setup, start-up gate, main loop, command parser, controller, state machine, telemetry, stall guard.</td></tr>
+<tr><td><code>config.h</code></td><td>Pins and compiled defaults. Runtime values live in <code>params</code>.</td></tr>
+<tr><td><code>params.h/.cpp</code></td><td>Parameter table (X-macro), bounds, protocol, NVS blob storage, migrations.</td></tr>
+<tr><td><code>m0601.h/.cpp</code></td><td>One RS485 hub motor: frames, CRC, parser, plausibility, fault confirmation.</td></tr>
+<tr><td><code>hub_drive.h/.cpp</code></td><td>Both wheels: handshake, health, velocity estimate, current allocation, emergency zero.</td></tr>
+<tr><td><code>hub_control.h</code></td><td>Inner current loop: common and differential channels, feed-forward, PI.</td></tr>
+<tr><td><code>imu_sensor.h/.cpp</code></td><td>ISM6HG256X and QMC5883L, gyro calibration, Mahony filter.</td></tr>
+<tr><td><code>bubble_guard.h</code></td><td>Lidar safety bubble: distances to speed limits with dead reckoning.</td></tr>
+<tr><td><code>navigation_lease.h</code></td><td>Autonomy lease: grant, sequence, timeout, takeover.</td></tr>
+<tr><td><code>self_righting.h</code></td><td>Stand-up controller from the front bumper.</td></tr>
+<tr><td><code>auto_climb.h</code>, <code>descent_guard.h</code>, <code>terrain.h</code></td><td>Climb mode detection and blending, descent speed guard, rough-ground estimate.</td></tr>
+<tr><td><code>tof_guard.h</code></td><td>Optional host-computed forward speed cap from the depth sensor.</td></tr>
+<tr><td><code>bt_gamepad.h</code></td><td>Bluepad32 integration, stick shaping, button edges, re-pairing.</td></tr>
+<tr><td><code>led_ring.h/.cpp</code></td><td>LED ring renderer (I2S DMA), state priorities, error codes, tests.</td></tr>
+<tr><td><code>status_led.h</code>, <code>deployment_led.h</code></td><td>Blue status LED patterns.</td></tr>
+<tr><td><code>payload.h</code></td><td>Camera servos (LEDC) and torch with hard duty cap.</td></tr>
+<tr><td><code>startup_gate.h</code></td><td>Host acknowledgement (<code>BR</code>) and maintenance lock (<code>FU</code>).</td></tr>
+<tr><td><code>autotune.h</code></td><td>Guarded automatic tuning experiments.</td></tr>
+</tbody></table>
+
+<h2 id="s4-4">4.4 Balance controller</h2>
+<p>The balance law is a full-state LQR with integral action (LQI) on the linearised wheeled inverted pendulum. The output is a wheel acceleration command <i>u</i>:</p>
+<pre>hold:    u = -(K1·e_x + K2·v + K3·θ + K4·ω + K5·∫e_x)
+driving: u = -(K2·clamp(v - v_ref, ±VERRMAX) + K3·θ + K4·ω)</pre>
+<ul>
+<li><b>States</b>: position error <i>e_x</i> (clamped to <code>EXCLAMP</code>), wheel speed <i>v</i>, body pitch θ, pitch rate ω and the integral of position error.</li>
+<li><b>Default gains</b>: K1 −7.32, K2 −7.45, K3 −42.95, K4 −6.69, K5 −2.11.</li>
+<li><b>Driving</b>: the position terms are dropped and the speed error is clamped by <code>VERRMAX</code> (0.7 m/s), so a stick release brakes at once but the velocity term can take at most about 5 m/s². The hold point is dragged along at <code>BRAKELK</code> × speed ahead.</li>
+<li><b>Hold</b>: when the reference is inside the deadband and the speed below 0.05 m/s, the full LQI vector holds the current point. <b>Stiff hold</b> uses the separate gain set S1 to S5.</li>
+<li><b>Climb</b>: a separate gain set C1 to C5 with its own position reference and integral, blended in and out over 0.75 s.</li>
+<li><b>Saturation</b>: <i>u</i> is clamped to ±6 m/s². When speed or current saturates, the hold point bleeds toward the robot and the integral decays, so attitude regains authority (balance before position).</li>
+<li><b>Speed estimate</b>: with <code>VELSRC</code> = 1 the controller uses each wheel's sample-timed velocity from <code>hub_drive</code>, filtered at 15 Hz.</li>
+</ul>
+<p>The acceleration is integrated into a wheel speed command for the inner loop in <code>hub_control.h</code>, which converts it to motor current: mass feed-forward plus a velocity PI in the common channel, a separate PI for steering, and balance-first allocation of the current limit.</p>
+
+<h2 id="s4-5">4.5 Hub motor link</h2>
+<p>Each M0601 has its own RS485 bus at 115200 baud. Every 5 ms cycle sends exactly one 10-byte frame to each motor and never waits for the previous reply.</p>
+<table><thead><tr><th style="width:20%">Frame</th><th>Bytes</th></tr></thead><tbody>
+<tr><td>Drive (0x64)</td><td>id, 0x64, current high, current low, 0, 0, accel, brake, 0, CRC8. Current ±32767 = ±8 A.</td></tr>
+<tr><td>Query (0x74)</td><td>id, 0x74, 0 × 7, CRC8. Reply carries temperature.</td></tr>
+<tr><td>Mode (0xA0)</td><td>id, 0xA0, 0 × 7, mode byte (vendor format, no CRC).</td></tr>
+<tr><td>Reply</td><td>id, mode, current, rpm, position (drive) or temperature (query), fault, CRC8.</td></tr>
+</tbody></table>
+<ul>
+<li><b>CRC</b>: CRC-8 (polynomial 0x8C reflected). Because an 8-bit CRC passes about one corrupt window in 256, replies that are impossible are rejected as well: fault bits outside 0x1F or more than 900 rpm.</li>
+<li><b>Confirmation</b>: a fault must repeat in three consecutive replies (about 15 ms) and a mode change in two before they count. Ignored faults are logged.</li>
+<li><b>Velocity</b>: the 16-bit position in every drive reply is unwrapped and differentiated against the request send time, then filtered at 30 Hz.</li>
+<li><b>Health</b>: a wheel is healthy with a fresh reply, current mode, valid position and no confirmed fault. Otherwise the controller disarms and keeps sending zero current.</li>
+</ul>
+
+<h2 id="s4-6">4.6 Safety layers</h2>
+<table><thead><tr><th style="width:24%">Layer</th><th>Behaviour</th></tr></thead><tbody>
+<tr><td>Zero from power-on</td><td>The first lines of <code>setup()</code> start both RS485 ports and send zero-current frames, and keep doing so during the host wait. The M0601 holds its last setpoint otherwise.</td></tr>
+<tr><td>Stall guard</td><td>An <code>esp_timer</code> task checks the loop heartbeat every 20 ms: zero current after 150 ms of stall, restart after 800 ms (5 s while a blocking maintenance command runs with motors off).</td></tr>
+<tr><td>Fall and rate</td><td>Disarm beyond <code>MAXTILT</code> (55°) or <code>MAXRATE</code> (450°/s).</td></tr>
+<tr><td>Motor health</td><td>Disarm on link loss, wrong mode or a confirmed fault (section 4.5).</td></tr>
+<tr><td>Loop overrun</td><td>Disarm if a cycle takes longer than 20 ms.</td></tr>
+<tr><td>Safety bubble</td><td><code>BG</code> distances become speed limits every cycle for every drive source; fail closed after <code>BUBSTALE</code> (300 ms).</td></tr>
+<tr><td>Navigation lease</td><td>Autonomy only through a granted lease; 500 ms timeout; any stick movement takes over.</td></tr>
+<tr><td>Arming</td><td>Only local START or serial <code>E</code> on USB; never a network command or the lease.</td></tr>
+<tr><td>Reset reason</td><td>Printed at every boot and kept in the host's persistent controller log.</td></tr>
+</tbody></table>
+<h3>Bubble guard in detail</h3>
+<p>On each <code>BG</code> line the guard stores the distances corrected for the scan age and the current position. Every cycle it subtracts the distance travelled since then and limits the drive reference to the braking speed:</p>
+<pre>v_max = sqrt((a·t)² + 2·a·(d - m)) - a·t      a = BUBDEC, t = BUBLAT, m = BUBMRG</pre>
+<p>A commanded turn is zeroed if the turn flags block that direction. The limit applies after the drive arbitration, the ToF guard and inside climb mode.</p>
+
+<h2 id="s4-7">4.7 Parameters and storage</h2>
+<p>Every tunable is declared once in <code>PARAM_TABLE</code> (<code>params.h</code>) with key, default, minimum, maximum, group and description. The same table generates the RAM struct, bounds checks, the protocol dump and storage. Values with equal minimum and maximum are fixed.</p>
+<ul>
+<li><b>Storage</b>: all values are saved as one NVS blob of (FNV-1a key hash, value) records. A save clears the namespace, writes the blob and markers, reopens read-only and compares byte for byte before replying <code>PS!,saved</code>.</li>
+<li><b>Migrations</b>: one-time markers (<code>_cur5s</code>, <code>_input3</code>, <code>_brake2</code>) let a new firmware replace specific saved values with new defaults. The firmware worker honours matching capability flags (for example <code>PR,BRAKEPROFILE,2</code>).</li>
+<li><b>Diagnostics</b>: <code>PN</code> lists NVS usage per namespace; <code>PX,ns</code> erases an obsolete namespace (never Bluetooth, PHY or Wi-Fi).</li>
+</ul>
+<h2>4.8 LED ring engine</h2>
+<p><code>led_ring.cpp</code> renders at <code>LEDFPS</code> through I2S DMA and skips a frame rather than wait. One state wins each frame, in priority order: test pattern, fatal, start-up loader, fall, error code, self-uprighting, gesture, pushed, armed animations, ready heartbeat. Angles are converted to LED indices with <code>LEDFRONT</code> and <code>LEDDIR</code>.</p>
+<h2>4.9 Start-up sequence</h2>
+<ol>
+<li>Zero the motors, print the reset reason, load parameters, start the loader animation.</li>
+<li>Wait for the host acknowledgement <code>BR,1</code> (the host sends it when its camera and hotspot are up). Motors stay at zero.</li>
+<li>Initialise the IMU and motors, settle for 3 s, calibrate the gyro.</li>
+<li>Start the gamepad and payload, report <code>BS,READY</code>, arm the stall guard. The robot waits for START.</li>
+</ol>
+
+<h1 id="s5"><span class="no">5</span>Serial protocol</h1>
+<p>USB serial at 460800 baud, ASCII lines ending in a newline. The full reference is <code>firmware/BaseLink/PROTOCOL.md</code>.</p>
+<h2>5.1 Controller to host</h2>
+<table><thead><tr><th style="width:15%">Record</th><th style="width:12%">Rate</th><th>Content</th></tr></thead><tbody>
+<tr><td><code>O</code></td><td>50 Hz</td><td>ms, encoder counts left and right, raw pitch, compass yaw, gyro x, y, z</td></tr>
+<tr><td><code>D</code></td><td>50 Hz</td><td>53 controller fields: pitch, rate, u, speed, position error, speed command, steer, saturation, loop time, modes, references, climb and descent state</td></tr>
+<tr><td><code>HM</code></td><td>10 Hz</td><td>Motor current commands and feedback, rpm, temperatures, faults, link and mode</td></tr>
+<tr><td><code>BB</code></td><td>10 Hz</td><td>Bubble as the controller sees it: clearance front and back, caps, flags, BG age</td></tr>
+<tr><td><code>NR</code></td><td>10 Hz</td><td>Navigation lease: token, state, sequence, command age, gamepad connected, powered down</td></tr>
+<tr><td><code>SR</code></td><td>20 Hz</td><td>Self-uprighting phase, reason, timing, wheel travel</td></tr>
+<tr><td><code>HV</code></td><td>100 Hz</td><td>Fast wheel stream after <code>HF,s</code>: per-wheel speed, current command and feedback, rpm, pitch, rate, references</td></tr>
+<tr><td><code>P#</code>, <code>P</code>, <code>PR</code>, <code>P.</code></td><td>On request</td><td>Parameter dump: count, rows, derived capabilities, end</td></tr>
+<tr><td><code>BS</code>, <code>BR!</code>, <code>[TAG] text</code></td><td>Events</td><td>Start-up state, acknowledgements, human-readable log lines</td></tr>
+</tbody></table>
+<h2>5.2 Host to controller</h2>
+<table><thead><tr><th style="width:30%">Command</th><th>Effect</th></tr></thead><tbody>
+<tr><td><code>X</code></td><td>Stop: disarm, zero current</td></tr>
+<tr><td><code>E</code></td><td>Arm request (USB console only; the console never sends it)</td></tr>
+<tr><td><code>V,f,s,en</code></td><td>Host drive input (−1 to 1); may stop, never arm</td></tr>
+<tr><td><code>AN,token,1|0</code> / <code>AU,token,seq,v,w</code></td><td>Navigation lease grant or release / drive command (m/s, rad/s)</td></tr>
+<tr><td><code>BG,en,front,back,flags,age</code></td><td>Bubble distances (m), turn flags, scan age (ms)</td></tr>
+<tr><td><code>TG,en,limit</code></td><td>Optional ToF forward cap (m/s)</td></tr>
+<tr><td><code>P?</code>, <code>P,KEY,VALUE</code>, <code>PS</code>, <code>PL</code>, <code>PD</code>, <code>PN</code>, <code>PX,ns</code></td><td>Parameter dump, set, save, load, defaults, NVS report, namespace erase</td></tr>
+<tr><td><code>BR,1</code> / <code>BR,0</code></td><td>Host ready / not ready (start-up gate)</td></tr>
+<tr><td><code>FU,1</code> / <code>FU,0</code></td><td>Firmware maintenance lock</td></tr>
+<tr><td><code>AC,0</code> / <code>AC,1</code></td><td>Automatic climb off / on</td></tr>
+<tr><td><code>N</code>, <code>P=deg</code>, <code>Z=deg</code>, <code>B=pct</code></td><td>Centre camera, pan, zoom, torch</td></tr>
+<tr><td><code>C</code></td><td>Gyro calibration (disarmed)</td></tr>
+<tr><td><code>LT,n</code></td><td>LED ring test (1 compass, 2 front check, 0 off)</td></tr>
+<tr><td><code>HF,s</code></td><td>100 Hz <code>HV</code> stream for s seconds</td></tr>
+<tr><td><code>BT,FORGET</code></td><td>Clear all gamepad pairings (disarmed): erases the Bluetooth storage, then restarts</td></tr>
+<tr><td><code>SL,1</code> / <code>SL,0</code></td><td>Power down (disarmed) / wake; reply <code>SL!,0|1</code></td></tr>
+</tbody></table>
+
+<h1 id="s6"><span class="no">6</span>Host console</h1>
+<h2>6.1 Services</h2>
+<table><thead><tr><th style="width:34%">systemd unit</th><th>Role</th></tr></thead><tbody>
+<tr><td><code>2pybot-console</code></td><td>The console process: API, WebSocket, serial link, SLAM, bubble, autonomy, ToF, system map.</td></tr>
+<tr><td><code>2pybot-mediamtx</code></td><td>Video server: RTSP in, WebRTC (WHEP) out on port 8889.</td></tr>
+<tr><td><code>2pybot-imx708</code></td><td>Camera power-up.</td></tr>
+<tr><td><code>2pybot-firmware</code></td><td>Firmware worker: flashing and rollback, isolated from the API.</td></tr>
+<tr><td><code>2pybot-boot-gate</code></td><td>Holds the ESP32 in reset until the host is up.</td></tr>
+<tr><td><code>2pybot-hotspot</code></td><td>Robot Wi-Fi hotspot (10.42.0.1).</td></tr>
+<tr><td><code>2pybot-deploy</code> (+ path, timer)</td><td>Applies a requested commit.</td></tr>
+</tbody></table>
+<p>The console runs from an immutable release directory (<code>/var/lib/2pybot-deploy/current</code>) with its own virtual environment, on Python 3.9.</p>
+<h2>6.2 Process structure</h2>
+<p><code>console/server.py</code> creates a FastAPI app on port 8080 and starts these concurrent tasks: <code>link.run()</code> (serial reader), camera supervisor, ToF acquisition and publisher, calibration, object detection, firmware monitor, autonomy loop (20 Hz), host readiness publisher, camera restore and the bubble publisher. The SLAM engine and the lidar driver run in their own threads. The system map and Maps pages are mounted as sub-applications at <code>/sysmap</code> and <code>/slam</code>.</p>
+<h2>6.3 Serial link</h2>
+<p><code>serial_link.py</code> is the only code that touches the controller port. It opens it exclusively without resetting the ESP32, parses every record into <code>tel</code>, <code>debug</code>, <code>hub</code>, <code>nav</code>, <code>bubble</code> and the parameter table, publishes to WebSocket subscribers, and feeds raw <code>O</code>/<code>D</code> lines to line listeners (SLAM).</p>
+<ul>
+<li><b>Controller log</b>: every log line goes to <code>/var/lib/2pybot/logs/controller.log</code> (5 × 4 MB rotation), including telemetry LOST and restored edges. Boot ROM noise is stripped.</li>
+<li><b>Recorder</b>: <code>record_start(seconds)</code> writes every raw line with a host timestamp for analysis.</li>
+<li><b>Port discovery</b>: if <code>/dev/ttyUSB0</code> disappears, it also tries <code>/dev/2pybot</code>, serial by-id links and other <code>ttyUSB</code> devices.</li>
+<li><b>Parameter operations</b>: serialised; a write waits for the controller acknowledgement; a save waits for the verified reply and re-reads the table.</li>
+</ul>
+<h2>6.4 HTTP API (selection)</h2>
+<table><thead><tr><th style="width:38%">Endpoint</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>GET /api/status</code>, <code>GET /api/ready</code></td><td>Telemetry snapshot; host readiness</td></tr>
+<tr><td><code>POST /api/estop</code></td><td>Stop (also stops autonomy)</td></tr>
+<tr><td><code>GET /api/params</code>, <code>POST /api/params/set</code>, <code>POST /api/params/save|load|defaults</code></td><td>Settings</td></tr>
+<tr><td><code>GET|POST /api/bubble</code></td><td>Bubble status; gamepad limiting on or off</td></tr>
+<tr><td><code>POST /api/autonomy/mission/start</code>, <code>GET /api/autonomy/mission</code></td><td>Lidar missions</td></tr>
+<tr><td><code>POST /api/autonomy/heartbeat|pause|resume|stop</code></td><td>Mission supervision</td></tr>
+<tr><td><code>POST /api/gamepad/repair</code></td><td>Clear all gamepad pairings (controller restarts)</td></tr>
+<tr><td><code>GET|POST /api/power</code></td><td>Power-down mode: status, <code>{"mode":"sleep"|"wake"}</code></td></tr>
+<tr><td><code>POST /api/led/test</code>, <code>POST /api/debug/record</code></td><td>LED test; raw recording</td></tr>
+<tr><td><code>GET /api/firmware/status</code>, <code>/api/deployment/status</code></td><td>Firmware and deployment</td></tr>
+<tr><td><code>/slam/api/*</code></td><td>Maps: state, scene, mapping, maps, labels, erase, extend, relocalize</td></tr>
+<tr><td><code>WS /ws</code>, <code>WS /slam/ws</code></td><td>Telemetry and Maps state pushes</td></tr>
+</tbody></table>
+<p>A middleware refuses every changing request while firmware maintenance is active, except stop and recovery endpoints.</p>
+
+<h2 id="s6-5">6.5 Mapping and localization</h2>
+<p>The SLAM engine (<code>console/slam/</code>) is a compact 2D SLAM in numpy, without ROS.</p>
+<table><thead><tr><th style="width:24%">File</th><th>Role</th></tr></thead><tbody>
+<tr><td><code>lidar_c1.py</code></td><td>RPLIDAR C1 driver on UART4: start scan, set 20 Hz after the scan starts, emit one sweep per rotation.</td></tr>
+<tr><td><code>slam/odom_core.py</code></td><td>Wheel and gyro odometry from <code>O</code> lines, gyro axis detection, slip accumulation.</td></tr>
+<tr><td><code>slam/engine.py</code></td><td>Scan gating by lean, per-beam floor clipping, de-skew, matching, mapping, relocalization, maps, labels, bubble input.</td></tr>
+<tr><td><code>slam/grid.py</code></td><td>40 m × 40 m log-odds grid at 5 cm, correlative matcher on a blurred likelihood field.</td></tr>
+<tr><td><code>slam/fusion.py</code></td><td>EKF on x, y, yaw: odometry prediction, match correction behind a Mahalanobis gate.</td></tr>
+<tr><td><code>slam/tof_layer.py</code></td><td>Depth sensor obstacles and drop-offs in map coordinates.</td></tr>
+<tr><td><code>slam/planner.py</code></td><td>A* path planning and frontier search for autonomy.</td></tr>
+<tr><td><code>slam/bubble.py</code></td><td>Safety bubble geometry per scan.</td></tr>
+</tbody></table>
+<p>Maps are saved to <code>~/.2pybot/maps</code> as <code>NAME.npz</code> (grid and 3D voxels), <code>NAME.png</code> and <code>NAME.json</code> (resolution, origin, labels, revision). Loading switches to localization and runs a global search; Extend resumes mapping once eight consecutive scans match.</p>
+<h2>6.6 Safety bubble on the host</h2>
+<p>For every usable scan, <code>slam/bubble.py</code> removes points on the body (footprint from the lidar centre: front 7, back 8, right 11, left 18 cm including 1 cm growth), rejects isolated points without a neighbour within 6 cm or a match in the previous scan, and computes the free distance inside the corridor swept along the current arc (curvature from measured speed and yaw rate). It also tests rotations of ±0.12 to 0.60 rad for turn clearance and the free travel for 24 headings. <code>bubble_guard.py</code> sends the result as <code>BG</code> on every new scan.</p>
+
+<h2 id="s6-7">6.7 Autonomy</h2>
+<p><code>autonomy.py</code> owns the lease and supervision; <code>missions.py</code> contains the planners.</p>
+<ul>
+<li><b>Lease</b>: <code>AN</code> with a random token; granted only while balancing with the gamepad connected and sticks centred. <code>AU</code> commands at 20 Hz with an increasing sequence.</li>
+<li><b>Supervision</b>: the page sends a heartbeat at least every 3 s; feedback older than 0.35 s, a takeover, a lost balance or a hidden page pauses or stops the mission.</li>
+<li><b>Roam</b>: reactive states cruise, choose, turn and back up, using the bubble's free travel per heading and a visited-cell map.</li>
+<li><b>Go to</b>: A* on a 10 cm cost map (robot radius 17 cm, extra cost within 45 cm of walls, unknown space blocked), line-of-sight smoothing, pure pursuit on the SLAM pose, re-planning around new lidar obstacles after 2 s blocked.</li>
+<li><b>Explore</b>: repeated Go to toward the nearest reachable frontier until none remain.</li>
+<li><b>Teach and replay</b>: records commanded speed and turn rate and replays them on the original timing.</li>
+</ul>
+<h2>6.8 Camera, depth sensor, system map</h2>
+<ul>
+<li><b>Camera</b>: <code>native/2pybot_hwstream</code> captures NV12 from the IMX708, encodes H.264 on the Cedar engine and publishes to MediaMTX; <code>stream.py</code> supervises it. A JPEG snapshot is written once per second. Lens calibration lives in <code>calibration*.py</code>.</li>
+<li><b>Depth sensor</b>: <code>tof_worker.py</code> runs ST's driver in a separate process through ctypes so a driver hang cannot block the console; <code>tof.py</code> builds the corridor guard.</li>
+<li><b>System map</b>: <code>sysmap_health.py</code> judges every block from its own evidence and suppresses alarms downstream of a failed link.</li>
+</ul>
+<h2>6.9 Power-down mode</h2>
+<p><code>power.py</code> switches off what heats the robot while it is unused. Asleep, the camera pipeline is paused (the stream supervisor does not restart it), the lidar driver is stopped and its motor speed set to zero, the depth worker is stopped (it stops ranging on exit) and not restarted, object detection and autonomy are switched off, and the controller is sent <code>SL,1</code>. A 1 Hz task re-sends the wanted state after a controller reset. Host readiness ignores the camera while asleep, so a controller restart still passes its start-up gate. The Radxa does not suspend: Wi-Fi would go down and the board has no wake-on-LAN, so the console must stay up to wake the robot. The state is not persisted, so deployments and their health checks always start awake.</p>
+<h3>Gamepad re-pair</h3>
+<p>Bluepad32 4.1 keeps pairing state in two NVS namespaces: <code>BTstack</code> (link keys, BLE bonds, BLE root keys) and <code>bp32</code> (its settings). Deleting keys through the library at runtime left its BLE state inconsistent with the EVOFOX pad. <code>BT,FORGET</code> therefore erases both namespaces directly and restarts, so BTstack and Bluepad32 reload from empty storage. This is the Bluetooth part of a full flash erase, without touching parameters or calibration.</p>
+<h2>6.10 Firmware worker</h2>
+<p>The worker flashes with esptool through its own process. It snapshots live tuning, backs up the boot and NVS region, verifies the installed image as a rollback copy, writes only the application at 0x10000, verifies it, confirms boot and NVS are unchanged, boots the controller and restores tuning. Any failure writes back the previous image. Host-side state such as the camera profile is checked but can only add a warning.</p>
+
+<h1 id="s7"><span class="no">7</span>Web interface</h1>
+<table><thead><tr><th style="width:30%">Files</th><th>Page</th></tr></thead><tbody>
+<tr><td><code>ui/index.html</code>, <code>app.js</code>, <code>tabs/*.js</code></td><td>Console: telemetry, driving view, camera, calibration, settings, log.</td></tr>
+<tr><td><code>ui/sysmap/</code></td><td>System map.</td></tr>
+<tr><td><code>ui/slam/index.html</code>, <code>slam.js</code>, <code>slam3d.js</code>, <code>drive.js</code></td><td>Maps: guide steps, Map, Radar, 3D and Drive views, autonomy card.</td></tr>
+<tr><td><code>ui/autonomy.html</code>, <code>deployment.html</code>, <code>firmware.html</code></td><td>Autopilot, deployment and firmware pages.</td></tr>
+</tbody></table>
+<p>All pages are plain JavaScript without a build step or external assets, so they work on the offline hotspot. The <b>Drive</b> view (<code>drive.js</code>) plays the camera over WHEP and projects lidar points, the bubble and the planned path into the image with the calibrated fisheye model and an adjustable camera mount.</p>
+
+<h1 id="s8"><span class="no">8</span>Android application</h1>
+<p>The app (<code>software/android</code>) is Kotlin with Jetpack Compose, built in CI and signed with a stable key so updates install over older versions.</p>
+<table><thead><tr><th style="width:30%">Package</th><th>Contents</th></tr></thead><tbody>
+<tr><td><code>data/BotRepository.kt</code></td><td>HTTP and WebSocket client, telemetry state.</td></tr>
+<tr><td><code>vm/BotViewModel.kt</code></td><td>Screen state and actions.</td></tr>
+<tr><td><code>net/WhepClient.kt</code>, <code>LiveVideoSession.kt</code></td><td>WebRTC video with reconnect.</td></tr>
+<tr><td><code>ui/AppShell.kt</code>, <code>ui/screens/*</code></td><td>Workspaces: Drive, Live, Maps, System, More.</td></tr>
+<tr><td><code>ui/components/RobotWorldView.kt</code></td><td>OpenGL 3D robot view rendered on demand.</td></tr>
+</tbody></table>
+<p>High-rate values are collected only by the composables that show them, and only the selected workspace is composed, so video, OpenGL and web views never run together.</p>
+
+<h1 id="s9"><span class="no">9</span>Terminal tools</h1>
+<table><thead><tr><th style="width:28%">File</th><th>Role</th></tr></thead><tbody>
+<tr><td><code>scripts/radxa/bot_cli.py</code></td><td>Commands (<code>2pybot status</code>, <code>params</code>, <code>logs</code>, <code>gamepad</code>, <code>deploy-status</code>, backups and recovery). Readable tables by default, <code>--json</code> for raw data.</td></tr>
+<tr><td><code>scripts/radxa/bot_view.py</code></td><td>Shared data collection and formatting for the CLI and TUI.</td></tr>
+<tr><td><code>scripts/radxa/bot_tui.py</code></td><td>Full-screen control centre (curses, standard library only).</td></tr>
+<tr><td><code>scripts/radxa/install_bot_cli.py</code></td><td>Installs the <code>bot</code> and <code>2pybot</code> launchers and the command environment.</td></tr>
+</tbody></table>
+<p>The TUI polls the console API once per second in a background thread, decodes raw escape sequences so arrow keys work in any terminal, and runs external commands (service restarts, updates, <code>nmtui</code>) by suspending the screen.</p>
+
+<h1 id="s10"><span class="no">10</span>Build and deployment pipeline</h1>
+<h2>10.1 Continuous integration</h2>
+<table><thead><tr><th style="width:26%">Workflow</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>bot-bundle.yml</code></td><td>On every push to main, feature, hardware or bot branches: builds firmware and APK, packages the commit bundle and publishes release <code>bot-COMMIT</code>.</td></tr>
+<tr><td><code>firmware-ci.yml</code></td><td>Compiles the firmware and checks the partition layout.</td></tr>
+<tr><td><code>android.yml</code></td><td>Builds the app.</td></tr>
+<tr><td><code>python-lint.yml</code>, <code>docs-check.yml</code></td><td>Python lint, documentation link check.</td></tr>
+<tr><td><code>release.yml</code></td><td>Tagged releases with firmware and APKs.</td></tr>
+</tbody></table>
+<p>Tests run only when the repository variable <code>BOT_RUN_TESTS</code> is <code>true</code>.</p>
+<h2>10.2 Commit bundle</h2>
+<p>The bundle (schema 2, about 0.5 MB) contains the firmware image, its manifest, the Android manifest and <code>bundle.json</code> with SHA-256 checksums. The APK (about 60 MB) is a separate release asset, so deployments do not wait for it.</p>
+<h2>10.3 Deploying a branch</h2>
+<pre>git fetch origin BRANCH &amp;&amp; git show FETCH_HEAD:scripts/radxa/deploy_branch.py | sudo python3 - BRANCH</pre>
+<ol>
+<li><code>deploy_branch.py</code> checks the robot is stopped and idle, fast-forwards the checkout, writes the request and starts the deploy unit.</li>
+<li><code>deploy.py</code> plans what changed, downloads and verifies the bundle, stages an immutable release from <code>git archive</code>, prepares the environment, takes the maintenance lock, switches the release, restarts services and flashes the firmware through the worker.</li>
+<li>It waits for the controller to report READY, records the result and, if the app changed, starts a background unit that downloads and publishes the APK.</li>
+</ol>
+
+<h1 id="s11"><span class="no">11</span>Development workflow</h1>
+<ul>
+<li><b>Branches</b>: work on feature branches; <code>main</code> holds released states.</li>
+<li><b>Version</b>: bump <code>VERSION</code> and the firmware banner together; <code>python scripts/versioning.py --check</code>.</li>
+<li><b>Before every commit</b>: compile the firmware, run <code>ruff check --select F,E9</code>, parse Python for 3.9, check JavaScript with <code>node --check</code>.</li>
+<li><b>Changelog</b>: every user-visible change gets an entry in <code>CHANGELOG.md</code>.</li>
+<li><b>Hardware tests</b>: done by the operator, never by scripts. Record data (section 13) for every control change.</li>
+</ul>
+<pre>python scripts/firmware/build.py --output-dir build/BaseLink --require-toolchain-lock
+ruff check --select F,E9 software/radxa/console/console scripts/radxa
+python scripts/versioning.py --check</pre>
+
+<h1 id="s12"><span class="no">12</span>Extending the system</h1>
+<h2>12.1 Add a controller parameter</h2>
+<ol>
+<li>Add an <code>X(field, "KEY", default, min, max, "GROUP", "description")</code> row to <code>PARAM_TABLE</code>.</li>
+<li>Read it as <code>P.field</code> in the code. It appears in the console, app and TUI automatically.</li>
+<li>If an existing saved value must be replaced, add a migration marker (section 4.7).</li>
+</ol>
+<h2>12.2 Add a serial command</h2>
+<ol>
+<li>Parse it in <code>handleLine()</code> before the generic handlers, refuse it in unsafe states, reply or log.</li>
+<li>Advertise support with a new <code>PR</code> capability row in <code>params.cpp</code>.</li>
+<li>Document it in <code>PROTOCOL.md</code> and this manual.</li>
+</ol>
+<h2>12.3 Add an API endpoint and a TUI action</h2>
+<ol>
+<li>Add the route in <code>server.py</code>; check controller connection, armed state and capability; send through <code>link.send()</code>.</li>
+<li>Add a CLI subcommand in <code>bot_cli.py</code> and, if useful, an action on a TUI page in <code>bot_tui.py</code>.</li>
+</ol>
+<h2>12.4 Add an LED state</h2>
+<p>Add an input to <code>LedInputs</code>, fill it in the loop, and draw it in <code>leds_update()</code> at the right priority. Keep red for errors and keep every other LED off during direction animations.</p>
+<h2>12.5 Add an autonomy mission</h2>
+<p>Write a planner class in <code>missions.py</code> with <code>step(now, dt, pose, bubble, depth_cap, measured_v)</code> returning a <code>Step</code>, register its kind in <code>Autonomy.start_task()</code>, and add it to the step 8 card. Never send motion from the planner directly: <code>Autonomy</code> applies the bubble and owns the lease.</p>
+
+<h1 id="s13"><span class="no">13</span>Diagnostics and debugging</h1>
+<table><thead><tr><th style="width:30%">Tool</th><th>Use</th></tr></thead><tbody>
+<tr><td>Controller log</td><td><code>2pybot logs -f</code> or <code>/var/lib/2pybot/logs/controller.log</code>: falls, faults, resets, link edges, all firmware messages.</td></tr>
+<tr><td>Raw recording</td><td><code>POST /api/debug/record</code> (TUI: Robot → Record 30 s) with the 100 Hz <code>HV</code> stream: speed noise, oscillation frequency, saturation, link timeouts.</td></tr>
+<tr><td>System map</td><td>Root cause of a failed link at a glance.</td></tr>
+<tr><td><code>2pybot doctor</code></td><td>Summary and a full report file with telemetry, settings, services, USB and network.</td></tr>
+<tr><td><code>PN</code></td><td>Settings storage usage.</td></tr>
+<tr><td><code>journalctl -u 2pybot-console</code></td><td>Host service logs (also in the TUI Logs page).</td></tr>
+</tbody></table>
+<div class="box tip"><b class="t">Tip</b>For a control problem, record 30 s while reproducing it, then compare the speed noise, the dominant frequency of <i>u</i> and the saturation flags by speed band before and after a change.</div>
+
+<h1 id="sA"><span class="no">Appendix A</span>Files, ports and variables</h1>
+<table><thead><tr><th style="width:42%">Item</th><th>Value</th></tr></thead><tbody>
+<tr><td>Console</td><td>port 8080 (HTTP and WebSocket)</td></tr>
+<tr><td>Video</td><td>8889 WebRTC (WHEP), 8554 RTSP (local), 9997 MediaMTX API (local)</td></tr>
+<tr><td>Controller serial</td><td><code>/dev/ttyUSB0</code>, 460800 baud</td></tr>
+<tr><td>Lidar</td><td><code>/dev/ttyAS4</code>, 460800 baud</td></tr>
+<tr><td>Depth sensor</td><td>I2C bus 7, address 0x29</td></tr>
+<tr><td>Controller log</td><td><code>/var/lib/2pybot/logs/controller.log</code></td></tr>
+<tr><td>Maps</td><td><code>~/.2pybot/maps</code> (<code>BOT_MAPS_DIR</code>)</td></tr>
+<tr><td>Routes</td><td><code>/var/lib/2pybot/autonomy</code> (<code>BOT_AUTONOMY_DIR</code>)</td></tr>
+<tr><td>Bubble switch</td><td><code>/var/lib/2pybot/bubble.json</code></td></tr>
+<tr><td>Deployment state</td><td><code>/var/lib/2pybot-deploy</code>, <code>/etc/2pybot-deploy.json</code></td></tr>
+<tr><td>Firmware builds and jobs</td><td><code>/var/lib/2pybot/firmware</code></td></tr>
+<tr><td>CLI configuration</td><td><code>/etc/2pybot-cli.json</code></td></tr>
+</tbody></table>
+
+<h1 id="sR">Revision history</h1>
+<table><thead><tr><th style="width:18%">Date</th><th style="width:12%">Revision</th><th>Changes</th></tr></thead><tbody>
+<tr><td>November 2026</td><td>4.7</td><td>First edition, for firmware and host 4.7.8.</td></tr>
+</tbody></table>
+<h2>Important notice</h2>
+<p class="legal">This manual describes a development platform under active change. Where the code and this manual disagree, the code and <code>PROTOCOL.md</code> are authoritative.</p>
+</body></html>

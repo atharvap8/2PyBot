@@ -217,6 +217,117 @@ async def autonomy_pause():autonomy.pause();return autonomy.status()
 async def autonomy_stop():autonomy.stop();return autonomy.status()
 
 
+class MissionInput(BaseModel):
+    kind: str                       # roam | goto | explore
+    speed_mps: Optional[float]=None
+    duration_s: Optional[float]=None
+    goal: Optional[dict]=None       # {"label": name} or {"x": m, "y": m, "name": str}
+
+
+@app.post("/api/autonomy/mission/start")
+async def autonomy_mission(body: MissionInput):
+    try:return await autonomy.start_task(body.kind,body.speed_mps,body.duration_s,body.goal)
+    except ValueError as error:raise HTTPException(409,str(error)) from error
+
+
+@app.get("/api/autonomy/mission")
+async def autonomy_mission_status():
+    m=autonomy.mission
+    return {"mission":None if not m else {k:v for k,v in m.items() if k not in ("points","samples","origin")},
+            "blocked_reasons":{k:autonomy.mission_prerequisites(k) for k in ("roam","goto","explore")},
+            "bubble":bubble_guard.status()}
+
+
+class RecordInput(BaseModel):
+    seconds: float = 20
+    label: str = "rec"
+    fast: bool = True               # also ask the controller for the 100 Hz HV stream
+
+
+@app.post("/api/debug/record")
+def debug_record(body: RecordInput):
+    path=link.record_start(body.seconds,body.label)
+    if body.fast:link.send(f"HF,{int(min(60,max(1,body.seconds)))}")
+    return {"ok":True,"path":path}
+
+
+@app.get("/api/debug/record")
+def debug_record_status():return link.record_status()
+
+
+@app.post("/api/gamepad/repair")
+def gamepad_repair():
+    """Clear every gamepad pairing on the controller so a pad can pair again (HOME + A)."""
+    if not link.connected or link.tel.get("stale",True):raise HTTPException(409,"Controller is not connected")
+    if link.tel.get("balancing") or link.tel.get("self_righting"):raise HTTPException(409,"Press SELECT to stop the motors first")
+    if power.asleep:raise HTTPException(409,"The robot is powered down; wake it first")
+    version=link.derived.get("PADREPAIR")
+    if version not in (1,2):raise HTTPException(409,"Controller firmware is too old for re-pairing (needs 4.7.6)")
+    if not link.send("BT,FORGET"):raise HTTPException(503,"Serial command unavailable")
+    if version==2:
+        # 4.7.7+: the controller restarts and wipes its Bluetooth storage before Bluetooth starts.
+        return {"ok":True,"restart":True,"message":"The controller restarts to clear all pairings (about 10 s). "
+                "When the ring shows ready, hold HOME + A on the gamepad until it connects."}
+    return {"ok":True,"restart":False,"message":"Pairing keys cleared. Hold HOME + A on the gamepad until it connects."}
+
+
+class PowerInput(BaseModel):
+    mode: str
+
+
+@app.get("/api/power")
+def power_status():
+    return power.status()
+
+
+class VisualPairInput(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/visual_pair")
+def visual_pair_status():
+    return visual_pair.status()
+
+
+@app.post("/api/visual_pair")
+def visual_pair_set(body: VisualPairInput):
+    """Enable or disable showing the gamepad to the camera to clear pairings."""
+    return visual_pair.set_enabled(body.enabled)
+
+
+@app.post("/api/power")
+async def power_set(body: PowerInput):
+    """Power-down mode: camera, lidar, depth sensor and controller outputs off; wake from the console."""
+    if body.mode not in ("sleep", "wake"):
+        raise HTTPException(400, "mode must be sleep or wake")
+    try:
+        return await (power.sleep() if body.mode == "sleep" else power.wake())
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+class LedTestInput(BaseModel):
+    mode: int                       # 0 off, 1 colour compass, 2 configured front
+
+
+@app.post("/api/led/test")
+def led_test(body: LedTestInput):
+    if body.mode not in (0,1,2):raise HTTPException(400,"mode must be 0, 1 or 2")
+    return {"ok":bool(link.send(f"LT,{body.mode}"))}
+
+
+class BubbleInput(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/bubble")
+def bubble_status():return bubble_guard.status()
+
+
+@app.post("/api/bubble")
+def bubble_set(body: BubbleInput):return bubble_guard.set_enabled(body.enabled)
+
+
 @app.middleware("http")
 async def firmware_mutation_gate(request,call_next):
     internal=request.url.path.startswith("/api/internal/deployment/")
@@ -289,10 +400,14 @@ async def _startup():
                                    asyncio.create_task(detector.run()),
                                    asyncio.create_task(firmware.monitor()),
                                    asyncio.create_task(autonomy.run()),
-                                  asyncio.create_task(publish_ready(link, host_ready))]
+                                  asyncio.create_task(publish_ready(link, host_ready)),
+                                  asyncio.create_task(power.run()),
+                                  asyncio.create_task(visual_pair.run())]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
+    app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
-    if os.environ.get("BOT_LIDAR", "1") != "0":
+    power.lidar_enabled = os.environ.get("BOT_LIDAR", "1") != "0"
+    if power.lidar_enabled:
         lidar.start()
 
 
@@ -327,7 +442,11 @@ def status():
 
 @app.get("/api/ready")
 def host_ready():
-    return readiness(stream.streamer.status(), SNAPSHOT_PATH, HOTSPOT_ADDRESS)
+    ready = readiness(stream.streamer.status(), SNAPSHOT_PATH, HOTSPOT_ADDRESS)
+    if power.asleep:
+        # Camera off on purpose: the host is still ready to release the controller's start-up gate.
+        ready = dict(ready, ready=bool(ready["hotspot"]), asleep=True)
+    return ready
 
 
 @app.get("/api/params")
@@ -578,7 +697,8 @@ async def ws(sock: WebSocket):
 # Imported here because create_app needs estop() and host_ready() from above.
 from . import sysmap
 
-sysmap_app = sysmap.create_app(link, tof, stream.streamer, host_ready, estop)
+sysmap_app = sysmap.create_app(link, tof, stream.streamer, host_ready, estop,
+                               lidar_status=lambda: dict(lidar.status, slam_hz=slam_engine.rate_hz.get("scan", 0.0)))
 
 
 @app.get("/sysmap")
@@ -595,11 +715,19 @@ app.mount("/sysmap", sysmap_app, name="sysmap")
 from . import slam_app
 from .lidar_c1 import LidarC1
 from .slam.engine import SlamEngine
-from .config import LIDAR_PORT, LIDAR_BAUD, MAPS_DIR, SLAM_PORT
+from .config import LIDAR_PORT, LIDAR_BAUD, LIDAR_RPM, MAPS_DIR, SLAM_PORT
 
 slam_engine = SlamEngine(MAPS_DIR)
-lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan)
+slam_engine.tof_source = tof                     # read-only: latest depth frames for the 3D layer
+lidar = LidarC1(LIDAR_PORT, LIDAR_BAUD, on_scan=slam_engine.on_scan, rpm=LIDAR_RPM)
 link.add_line_listener(slam_engine.on_line)      # read-only raw O/D lines
+autonomy.slam = slam_engine                      # map pose + safety bubble for lidar missions
+from .bubble_guard import BubbleGuard
+bubble_guard = BubbleGuard(slam_engine, link)    # BG caps to the controller (started in _startup)
+from .power import Power
+power = Power(link, stream.streamer, lidar, tof, autonomy, detector, link._log)   # console power-down mode
+from .visual_pair import VisualPair
+visual_pair = VisualPair(link, power, log=link._log)   # show the gamepad to the camera to re-pair
 # Threads start in _startup(), not at import: the deployer's import check
 # must not open /dev/ttyAS4 next to the running console.
 slam_web = slam_app.create_app(slam_engine, lidar, estop)
@@ -648,6 +776,31 @@ if os.path.isdir(UI_DIR):
         return FileResponse(path,media_type='application/json')
 
     app.mount("/ui", StaticFiles(directory=UI_DIR), name="ui")
+
+
+@app.get("/deploy")
+def deploy_redirect():
+    return RedirectResponse("/deploy/")
+
+
+@app.get("/deploy/")
+def deploy_page():
+    return FileResponse(os.path.join(UI_DIR, "deployment.html"))
+
+
+@app.get("/terminal")
+def terminal_redirect():
+    return RedirectResponse("/terminal/")
+
+
+@app.get("/terminal/")
+def terminal_page():
+    return FileResponse(os.path.join(UI_DIR, "terminal.html"))
+
+
+from . import webterm  # noqa: E402
+
+webterm.register(app, enabled=os.environ.get("BOT_TERMINAL", "1") != "0")
 
 
 @app.get("/")
