@@ -400,7 +400,8 @@ class Bot:
     def diagnostics(self):
         report = {"created_at": datetime.now(timezone.utc).isoformat(), "repo": str(self.repo)}
         for name, path in [("status", "/api/status"), ("firmware", "/api/firmware/status"),
-                           ("deployment", "/api/deployment/status"), ("params", "/api/params"), ("log", "/api/log?n=100")]:
+                           ("deployment", "/api/deployment/status"), ("params", "/api/params"),
+                           ("doctor", "/api/doctor"), ("log", "/api/log?n=100")]:
             try:
                 report[name] = self.api(path, timeout=3)
             except RuntimeError as error:
@@ -426,6 +427,17 @@ class Bot:
             self.status()
         except RuntimeError as error:
             print(c(str(error), "err"))
+        cases = (report.get("doctor") or {}).get("cases") or []
+        if cases:
+            print(c("\nDoctor found {} issue(s):".format(len(cases)), "warn"))
+            for case in cases:
+                tone = {"critical": "err", "warn": "warn", "info": "dim"}.get(case.get("severity"), "warn")
+                print("  " + c("[{}] {}".format(str(case.get("severity", "")).upper(), case.get("title", "")), tone))
+                print("    " + str(case.get("cause", "")))
+                for rec in case.get("recoveries", []):
+                    print("    -> {}{}".format(rec.get("label", ""), c(" (" + rec.get("safety", "") + ")", "dim")))
+        elif isinstance(report.get("doctor"), dict):
+            print(c("\nDoctor: no active issues.", "ok"))
         counts, last = V.event_summary()
         V.print_sections([("Last 24 hours", [(k, str(v) + (("   last " + last[k]) if k in last else ""), "warn" if v else "dim")
                                              for k, v in counts.items()])], COLOUR)
