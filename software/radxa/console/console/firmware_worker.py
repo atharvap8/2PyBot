@@ -230,12 +230,25 @@ class Worker:
             count=self.boot(snapshot)
             for filename,digest in snapshot.get("calibration",{}).items():
                 if hashlib.sha256(Path(filename).read_bytes()).hexdigest()!=digest:raise RuntimeError("Camera calibration changed")
-            if api("/api/camera/controls").get("colour_profile")!=snapshot.get("camera_profile"):
-                raise RuntimeError("Camera profile changed")
+            # The camera colour profile is host state, not controller firmware. It can
+            # read differently for a moment while the camera service restarts, which
+            # once rolled back a verified flash. Re-check briefly; a lasting mismatch
+            # is reported as a warning, never a reason to restore old firmware.
+            camera_warning=""
+            deadline=time.monotonic()+10
+            while True:
+                try:profile=api("/api/camera/controls").get("colour_profile")
+                except Exception:profile="<unavailable>"  # noqa: BLE001
+                if profile==snapshot.get("camera_profile"):break
+                if time.monotonic()>deadline:
+                    camera_warning="Camera colour profile reads %r (was %r); check the camera page"%(profile,snapshot.get("camera_profile"))
+                    break
+                time.sleep(1)
             atomic_json(self.root/"installed.json",{"build_id":build["build_id"],"verified_at":time.time()})
-            self.progress("complete",100,"Firmware verified; reconnecting controller. Local START is required.",
+            self.progress("complete",100,"Firmware verified; reconnecting controller. Local START is required."+
+                          (" Warning: "+camera_warning if camera_warning else ""),
                           status="succeeded",params_preserved=count,application_only=True,boot_nvs_unchanged=True,
-                          image_verified=True,rolled_back=False)
+                          image_verified=True,rolled_back=False,warning=camera_warning)
         except Exception as error:self.recover(snapshot,rollback,written,str(error))
     def recover(self,snapshot,rollback,written,error):
         try:
