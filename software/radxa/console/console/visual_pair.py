@@ -80,15 +80,20 @@ class VisualPair:
             return True
         if not self.model_path.is_file():
             return False
-        import onnxruntime as ort
-        from .object_detection import decode_outputs
-        opts = ort.SessionOptions()
-        opts.intra_op_num_threads = 1
-        opts.inter_op_num_threads = 1
-        self.session = ort.InferenceSession(str(self.model_path), sess_options=opts,
-                                            providers=["CPUExecutionProvider"])
-        self._decode = decode_outputs
-        return True
+        try:
+            import onnxruntime as ort
+            from .object_detection import decode_outputs
+            opts = ort.SessionOptions()
+            opts.intra_op_num_threads = 1
+            opts.inter_op_num_threads = 1
+            self.session = ort.InferenceSession(str(self.model_path), sess_options=opts,
+                                                providers=["CPUExecutionProvider"])
+            self._decode = decode_outputs
+            return True
+        except Exception as exc:  # noqa: BLE001 -- report instead of killing the loop
+            self.log("[visual-pair] model load failed: %r" % exc)
+            self.message = "model load failed: " + str(exc)[-160:]
+            return False
 
     def _detect(self):
         """Best qualifying candidate score on the current snapshot, or 0.0."""
@@ -156,39 +161,41 @@ class VisualPair:
         loop = asyncio.get_running_loop()
         while True:
             await asyncio.sleep(POLL_S)
-            now = time.monotonic()
-            if now < self.cooldown_until:
-                self.state = "cooldown"
-                continue
-            open_, reason = self.gate()
-            if not open_:
-                if self.hits:
-                    self.hits.clear()
-                self.state = "idle"
-                self.message = reason
-                continue
-            if not self._ensure_session():
-                self.state = "unavailable"
-                self.message = "detector model not installed"
-                continue
             try:
-                score, note = await loop.run_in_executor(None, self._detect)
-            except Exception as exc:  # noqa: BLE001 -- perception must never crash the console
+                await self._tick(loop)
+            except Exception as exc:  # noqa: BLE001 -- the loop must never die silently
                 self.state = "unavailable"
                 self.message = str(exc)[-200:]
-                continue
-            self.last_seen_score = score
-            self.hits = [t for t in self.hits if now - t <= WINDOW_S]
-            if score >= SCORE_MIN:
-                self.hits.append(now)
-                self.state = "seen"
-                self.message = note or f"gamepad in view ({score:.2f})"
-            else:
-                self.state = "watching"
-                self.message = note or "show the gamepad face-on, whole pad in view"
-            span = (self.hits[-1] - self.hits[0]) if len(self.hits) >= 2 else 0.0
-            ready = (len(self.hits) >= HITS_NEEDED and span >= SPAN_NEEDED
-                     and now - self.hits[-1] <= RECENT_S)
-            self.link._publish({"type": "visual_pair", "visual_pair": self.status()})
-            if ready:
-                self._trigger()
+                self.log("[visual-pair] loop error: %r" % exc)
+
+    async def _tick(self, loop):
+        now = time.monotonic()
+        if now < self.cooldown_until:
+            self.state = "cooldown"
+            return
+        open_, reason = self.gate()
+        if not open_:
+            if self.hits:
+                self.hits.clear()
+            self.state = "idle"
+            self.message = reason
+            return
+        if not self._ensure_session():
+            self.state = "unavailable"
+            return
+        score, note = await loop.run_in_executor(None, self._detect)
+        self.last_seen_score = score
+        self.hits = [t for t in self.hits if now - t <= WINDOW_S]
+        if score >= SCORE_MIN:
+            self.hits.append(now)
+            self.state = "seen"
+            self.message = note or f"gamepad in view ({score:.2f})"
+        else:
+            self.state = "watching"
+            self.message = note or "show the gamepad face-on, whole pad in view"
+        span = (self.hits[-1] - self.hits[0]) if len(self.hits) >= 2 else 0.0
+        ready = (len(self.hits) >= HITS_NEEDED and span >= SPAN_NEEDED
+                 and now - self.hits[-1] <= RECENT_S)
+        self.link._publish({"type": "visual_pair", "visual_pair": self.status()})
+        if ready:
+            self._trigger()
