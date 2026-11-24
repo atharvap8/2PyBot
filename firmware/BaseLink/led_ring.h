@@ -60,6 +60,7 @@ struct LedInputs {
     uint8_t errorCode;   // LED_ERR_*
     bool  fatal;         // latched error: whole ring flashes red continuously
     bool  loading;       // Radxa not ready (BR,0): start-up loader
+    bool  sleeping;      // SL,1 power-down: only a faint breathing front LED
 };
 
 void leds_begin();                       // ring off (no swirl)

@@ -116,11 +116,12 @@ class Streamer:
         self.started_at = 0.0
         self._lock = threading.RLock()
         self.last_error = ""
+        self.paused = False   # console power-down: camera off, supervisor idle
 
     def status(self) -> Dict:
         if self.proc is not None and not self.running and not self.last_error:
             self.last_error = f"{self.encoder} exited with status {self.proc.returncode}; see console service logs"
-        return {"running": self.running, "mode": self.mode, "encoder": self.encoder,
+        return {"running": self.running, "paused": self.paused, "mode": self.mode, "encoder": self.encoder,
                 "bitrate": self.bitrate, "error": self.last_error,
                 "whep": WHEP_URL, "hardware": self.encoder == "cedar_h264",
                 "preset": "ultrafast" if self.encoder == "libx264" else "hardware",
@@ -188,6 +189,8 @@ class Streamer:
 
     def _start(self, width: Optional[int] = None, bitrate: Optional[str] = None):
         self.stop()
+        if self.paused:
+            return False, "camera is powered down; wake the robot first"
         if width is not None:
             self.width = width
         if not HARDWARE_STREAMER.is_file() and not shutil.which("ffmpeg"):
@@ -238,10 +241,20 @@ class Streamer:
                 self.proc.wait()
         self.proc = None
 
+    def pause(self, paused: bool):
+        """Power-down: stop the camera and keep it stopped until resumed."""
+        self.paused = bool(paused)
+        if self.paused:
+            self.stop()
+            self.metrics = {}
+
     async def supervise(self):
         """Restart the pipeline if its encoder dies (camera unplugged, USB reset)."""
         backoff = 2
         while True:
+            if self.paused:
+                await asyncio.sleep(1)
+                continue
             if not self.running:
                 ok, msg = self.start()
                 backoff = 2 if ok else min(30, backoff * 2)

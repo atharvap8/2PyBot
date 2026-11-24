@@ -31,6 +31,9 @@ tables (`2pybot help` lists them; add `--json` for raw data):
 2pybot params list BUBBLE
 2pybot params set BUBDEC 0.6 --save
 2pybot doctor            # summary + full report file
+2pybot gamepad repair    # clear all pairings (controller restarts), then hold HOME + A
+2pybot power sleep       # power down: camera, lidar, ToF, ring, servos, gamepad off
+2pybot power wake        # back on
 ```
 
 `bot` remains as the same command (`bot status` == `2pybot status`).

@@ -231,6 +231,14 @@ void leds_update(const LedInputs& in) {
         showF(); return;
     }
 
+    // ---------- powered down: one faint blue breath on the front LED ----------
+    if (in.sleeping) {
+        eventActive = 0;
+        const float b = 0.02f + 0.08f * (0.5f + 0.5f * sinf(t * 1.05f));
+        setF(cwFromFront(0), 0.0f, 0.15f * b, b);
+        showF(); return;
+    }
+
     // ---------- one-shot events ----------
     if (eventActive) {
         const float e = (now - eventT0) / 1000.0f;

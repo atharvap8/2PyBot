@@ -43,6 +43,7 @@
 
 #include <Bluepad32.h>
 #include <esp_bt.h>
+#include <nvs.h>
 #include "config.h"
 #include "params.h"
 
@@ -127,14 +128,62 @@ static void _onPadDisconnect(ControllerPtr ctl) {
 
 inline bool btgamepad_connected() { return _pad && _pad->isConnected(); }
 
-// Forget all bonded controllers (fixes a pad that will not reconnect, or pairs a
-// new one) and keep accepting new connections. The robot must be disarmed.
-inline void btgamepad_forget() {
-    if (_pad && _pad->isConnected()) _pad->disconnect();
-    BP32.forgetBluetoothKeys();
-    BP32.enableNewBluetoothConnections(true);
+// ---- re-pairing ----
+// Deleting keys at runtime (BP32.forgetBluetoothKeys) left the BLE side of
+// Bluepad32 4.1 inconsistent with this pad ("SM_EVENT_PAIRING_COMPLETE: Invalid
+// device", "uni_bt_le_on_encryption_change: Device not found") and it would not
+// pair again. A full flash erase always worked because it starts BTstack with
+// empty storage. Re-pair therefore does exactly that for Bluetooth only: a
+// marker is stored, the ESP32 restarts, and before Bluetooth starts the two NVS
+// namespaces that hold pairing state are erased:
+//   "BTstack"  BTstack TLV: BR/EDR link keys, LE bonds, LE root keys
+//   "bp32"     Bluepad32 properties (allowlist, GAP settings)
+// Parameters, PHY calibration and Wi-Fi data stay untouched.
+#define PAD_WIPE_NS  "2pb_bt"
+#define PAD_WIPE_KEY "wipe"
+
+static bool _nvsEraseNamespace(const char* ns) {
+    nvs_handle_t h;
+    if (nvs_open(ns, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t e = nvs_erase_all(h);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e == ESP_OK;
+}
+
+inline bool btgamepad_requestWipe() {
+    nvs_handle_t h;
+    if (nvs_open(PAD_WIPE_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t e = nvs_set_u8(h, PAD_WIPE_KEY, 1);
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    return e == ESP_OK;
+}
+
+// Runs in btgamepad_begin() before BP32.setup(); Bluetooth is not running yet.
+static void _wipeIfRequested() {
+    nvs_handle_t h;
+    if (nvs_open(PAD_WIPE_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    uint8_t want = 0;
+    if (nvs_get_u8(h, PAD_WIPE_KEY, &want) == ESP_OK && want) {
+        const bool a = _nvsEraseNamespace("BTstack"), b = _nvsEraseNamespace("bp32");
+        nvs_erase_key(h, PAD_WIPE_KEY);
+        nvs_commit(h);
+        Serial.printf("[PAD] Gamepad pairings cleared (BTstack %s, bp32 %s). Hold HOME + A on the gamepad to pair.\n",
+                      a ? "erased" : "FAILED", b ? "erased" : "FAILED");
+    }
+    nvs_close(h);
+}
+
+// ---- power-down ----
+// Asleep: the pad is disconnected, new connections are refused and any input
+// is ignored. A bonded pad may still reconnect; it can do nothing until wake.
+static bool _sleep = false;
+inline void btgamepad_setSleep(bool on) {
+    _sleep = on;
+    if (on && _pad && _pad->isConnected()) _pad->disconnect();
+    BP32.enableNewBluetoothConnections(!on);
     _calDone = false; _freshConnect = true; _camArmed = false; _camNeutralSince = 0;
-    Serial.println("[PAD] Pairing keys cleared. Put the gamepad in pairing mode (hold HOME + B).");
 }
 
 // esp_power_level_t is 0..7 for -12..+9 dBm in 3 dB steps.
@@ -168,10 +217,11 @@ static void _applyTxPower() {
 }
 
 inline void btgamepad_begin() {
+    _wipeIfRequested();
     BP32.setup(&_onPadConnect, &_onPadDisconnect);
-    // BP32.forgetBluetoothKeys();  // uncomment for ONE flash if pairing misbehaves
+    BP32.enableNewBluetoothConnections(true);
     _applyTxPower();
-    Serial.println("[PAD] Bluepad32 ready — put the EVOFOX One S in pairing mode (Home+B)");
+    Serial.println("[PAD] Bluepad32 ready: to pair, hold HOME + A on the EVOFOX One S (Android mode)");
 }
 
 static inline float _dz(float v) { return (fabsf(v) < P.padDz) ? 0.0f : v; }
@@ -239,7 +289,7 @@ inline void btgamepad_update() {
     BP32.update();
     if (!_txPowerDone) _applyTxPower();
 
-    if (!btgamepad_connected()) {
+    if (!btgamepad_connected() || _sleep) {
         joyForward = 0.0f;
         joySteering = 0.0f;
         joyPanX     = 0.0f;   // rate control -> servos simply hold still

@@ -3,6 +3,31 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.7: Gamepad re-pair that works; power-down mode
+
+- **Gamepad re-pair fixed.** In 4.7.6 `BT,FORGET` deleted the pairing keys while
+  Bluetooth was running. The controller log then showed
+  `SM_EVENT_PAIRING_COMPLETE: Invalid device` and
+  `uni_bt_le_on_encryption_change: Device not found`, and the pad never paired again;
+  only a full flash erase helped. Re-pair now does the Bluetooth part of that erase
+  properly: the controller stores a marker, restarts, and before Bluetooth starts it
+  erases the NVS namespaces `BTstack` (link keys, BLE bonds) and `bp32` (Bluepad32
+  settings). Parameters and calibration are kept. Capability `PR,PADREPAIR,2`.
+- **Pairing button is HOME + A** (EVOFOX One S Android mode, reported as `Android`), not
+  HOME + B. Fixed in the firmware messages, docs, CLI, TUI, API and system map.
+- **Power-down mode** to stop the robot heating while unused. *Power down* in the
+  console header, `2pybot power sleep|wake`, or TUI Robot page; `POST /api/power`.
+  - Host: camera pipeline stopped, lidar scanning stopped and its motor spun down,
+    depth sensor ranging stopped, object detection and autonomy off.
+  - Controller (`SL,1`/`SL,0`, capability `PR,SLEEP,1`): arming refused, LED ring
+    reduced to one faint breathing front LED, slow dim status LED, camera servos
+    released, torch off, gamepad disconnected and new connections refused.
+  - The Radxa keeps the console and Wi-Fi running, because that is how the robot is
+    woken; Linux suspend would take Wi-Fi down and the board has no wake-on-LAN.
+  - Not persisted: a console restart, deployment or reboot comes back awake.
+  - The system map shows powered-down blocks as ASLEEP instead of errors.
+- `NR` last field (always 0 before) now reports the controller power-down state.
+
 ## 4.7.6 — Stops are short again; gamepad re-pair
 
 - **Stops after a stick release were too long.** The 4.7.5 DRVDEC ramp let the drive

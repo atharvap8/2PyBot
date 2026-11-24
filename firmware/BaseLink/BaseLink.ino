@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.7.6
+ *  BaseLink.ino — 2PyBot v4.7.7
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -132,6 +132,8 @@ uint8_t ledLatchedErr = 0; // last disarm cause shown on the ring for 10 s
 uint32_t ledLatchedMs = 0;
 int ledTestMode = 0;       // LT,<n> ring orientation test (0 = off)
 uint32_t ledTestUntilMs = 0;
+bool sleepMode = false;          // SL,1: power-down (no arming, ring/servos/torch off, no gamepad)
+uint32_t padRepairRestartAt = 0; // BT,FORGET: restart time; pairing storage is wiped at the next boot
 AutoClimb autoClimb;
 DescentGuard descentGuard;
 NavigationLease navigation;
@@ -218,6 +220,7 @@ void updateStatusLed() {
     if (statusErrorLatched) mode = status_led::ERROR;
     else if (startupGate.maintenance || AT.mode != AT_IDLE) mode = status_led::MAINTENANCE;
     else if (!startupGate.initialized || (P.bootWait > .5f && !hostBootReady)) mode = status_led::BOOT;
+    else if (sleepMode) mode = status_led::SLEEP;
     else if (hardwareReady && (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || P.drvMode < .5f))
         mode = status_led::ERROR;
     else if (state == STATE_BALANCING) mode = status_led::BALANCING;
@@ -259,6 +262,11 @@ bool selfRightControlsNeutral() {
 }
 
 void requestEnable(bool localStart) {
+    if (sleepMode) {
+        btgamepad_syncArmed(false);
+        Serial.println("[SLEEP] Robot is powered down; wake it from the console first");
+        return;
+    }
     if (!startupGate.mayArm(P.bootWait > 0.5f)) {
         btgamepad_syncArmed(false);
         Serial.println("[MAIN] Startup is not ready; press START after calibration completes");
@@ -421,9 +429,25 @@ void handleLine(char* line) {
     }
 
     if (!strcmp(line, "BT,FORGET")) {
-        // Re-pair: forget every bonded gamepad and accept a new one.
+        // Re-pair: wipe the Bluetooth pairing storage at the next boot (the same
+        // Bluetooth state as a full flash erase, settings untouched), then restart.
         if (state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before re-pairing the gamepad"); return; }
-        btgamepad_forget();
+        if (!btgamepad_requestWipe()) { Serial.println("PE,could not store the re-pair request"); return; }
+        padRepairRestartAt = millis() + 300;
+        Serial.println("[PAD] Re-pair: restarting the controller to clear all gamepad pairings");
+        return;
+    }
+    if (!strcmp(line, "SL,1") || !strcmp(line, "SL,0")) {
+        const bool on = line[3] == '1';
+        if (on && state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before powering down"); return; }
+        if (on != sleepMode) {
+            sleepMode = on;
+            if (on) { requestDisable("power down"); stopGesture(); payload_torchOff(); }
+            btgamepad_setSleep(on);
+            Serial.printf("[SLEEP] %s\n", on ? "powered down: arming, ring, camera servos, torch and gamepad off"
+                                             : "awake: press START to arm");
+        }
+        Serial.printf("SL!,%d\n", sleepMode ? 1 : 0);
         return;
     }
     if (!strncmp(line, "HF,", 3)) {
@@ -828,7 +852,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.7.6");
+    Serial.println("     2PyBot BaseLink v4.7.7");
     Serial.println("==================================================");
 
     params_begin();
@@ -976,12 +1000,21 @@ void loop() {
     //          D-pad LEFT/RIGHT dims. Deliberately OUTSIDE the state
     //          machine: the camera and light stay usable whether the
     //          robot is balancing, idle, or lying on its side.
-    if (btgamepad_takeTorchToggle()) payload_torchToggle();
+    if (btgamepad_takeTorchToggle() && !sleepMode) payload_torchToggle();
     {
         int8_t tStep = btgamepad_takeTorchStep();
-        if (tStep) payload_torchStep(tStep);
+        if (tStep && !sleepMode) payload_torchStep(tStep);
     }
-    payload_update(dt, joyPanX, joyZoomY);
+    // Asleep: no stick input, so both servos reach their release deadline and go unpowered.
+    payload_update(dt, sleepMode ? 0.0f : joyPanX, sleepMode ? 0.0f : joyZoomY);
+    if (sleepMode && payload_torchIsOn()) payload_torchOff();
+
+    // Re-pair restart (BT,FORGET): motors are already at zero current while idle.
+    if (padRepairRestartAt && (int32_t)(millis() - padRepairRestartAt) >= 0) {
+        if (state == STATE_IDLE) { Serial.flush(); esp_restart(); }
+        padRepairRestartAt = 0;
+        Serial.println("[PAD] Re-pair restart cancelled: robot is not idle");
+    }
 
 
     // Speed-mode edge -> ring cue (blue dash = HIGH, green settle = LOW)
@@ -1146,6 +1179,7 @@ void loop() {
         li.errorCode    = ledErrorCode();
         li.fatal        = false;
         li.loading      = P.bootWait > 0.5f && !hostBootReady;
+        li.sleeping     = sleepMode;
         if (ledTestMode && (int32_t)(millis() - ledTestUntilMs) >= 0) { ledTestMode = 0; leds_test(0); }
         leds_update(li);
     }
@@ -1157,7 +1191,7 @@ void loop() {
         lastNavMs=nowMs;
         Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u\n",(unsigned long)nowMs,(unsigned long)navigation.token,
                       (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
-                      (unsigned)btgamepad_connected(),0u);
+                      (unsigned)btgamepad_connected(),sleepMode ? 1u : 0u);
     }
     if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=128) {
         lastOdomMs = nowMs;

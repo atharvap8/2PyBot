@@ -64,6 +64,13 @@ class LidarC1:
         try:
             if self.ser:
                 self.ser.write(bytes([SYNC, CMD_STOP]))
+                # Motor speed 0 so the C1 stops spinning (power-down / shutdown).
+                pkt = bytes([SYNC, CMD_HQ_MOTOR, 2, 0, 0])
+                chk = 0
+                for b in pkt:
+                    chk ^= b
+                self.ser.write(pkt + bytes([chk]))
+                self.ser.flush()
                 self.ser.close()
         except Exception:
             pass

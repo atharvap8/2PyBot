@@ -110,7 +110,7 @@ main { height: calc(100% - 64px); }
 .s-error > .badge, .insp.s-error .badge { color: #fff; background: var(--err); border-color: var(--err); }
 .s-warn .line { color: var(--warn); }
 .s-error .line { color: var(--err); }
-.s-blocked, .s-nodata { opacity: .55; }
+.s-blocked, .s-nodata, .s-sleep { opacity: .55; }
 .blk.s-error, .hub.s-error, .grp.s-error { border-color: var(--err); animation: fault 1.2s steps(1, end) infinite; }
 @keyframes fault { 0% { border-color: var(--err); background: var(--errbg); } 50% { border-color: rgba(255, 77, 109, .35); background: var(--card); } }
 @media (prefers-reduced-motion: reduce) { .s-error { animation: none !important; } }

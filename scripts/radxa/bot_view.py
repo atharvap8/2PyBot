@@ -226,6 +226,8 @@ def robot_state(s):
         return "STARTING (" + str(tel.get("startup_state", "")).lower() + ")", "warn"
     if tel.get("self_righting"):
         return "SELF-UPRIGHTING", "info"
+    if (st.get("host") or {}).get("asleep"):
+        return "POWERED DOWN (wake from console)", "warn"
     m = (s.get("auto") or {}).get("mission") or {}
     if tel.get("balancing"):
         return ("AUTOPILOT: " + m.get("name", "")) if m.get("state") == "running" else "BALANCING", "info"

@@ -257,12 +257,38 @@ def debug_record_status():return link.record_status()
 
 @app.post("/api/gamepad/repair")
 def gamepad_repair():
-    """Forget bonded gamepads on the controller so a pad can pair again (HOME + A)."""
+    """Clear every gamepad pairing on the controller so a pad can pair again (HOME + A)."""
     if not link.connected or link.tel.get("stale",True):raise HTTPException(409,"Controller is not connected")
     if link.tel.get("balancing") or link.tel.get("self_righting"):raise HTTPException(409,"Press SELECT to stop the motors first")
-    if link.derived.get("PADREPAIR")!=1:raise HTTPException(409,"Controller firmware is too old for re-pairing (needs 4.7.6)")
+    if power.asleep:raise HTTPException(409,"The robot is powered down; wake it first")
+    version=link.derived.get("PADREPAIR")
+    if version not in (1,2):raise HTTPException(409,"Controller firmware is too old for re-pairing (needs 4.7.6)")
     if not link.send("BT,FORGET"):raise HTTPException(503,"Serial command unavailable")
-    return {"ok":True,"message":"Pairing keys cleared. Hold HOME + A on the gamepad until it connects."}
+    if version==2:
+        # 4.7.7+: the controller restarts and wipes its Bluetooth storage before Bluetooth starts.
+        return {"ok":True,"restart":True,"message":"The controller restarts to clear all pairings (about 10 s). "
+                "When the ring shows ready, hold HOME + A on the gamepad until it connects."}
+    return {"ok":True,"restart":False,"message":"Pairing keys cleared. Hold HOME + A on the gamepad until it connects."}
+
+
+class PowerInput(BaseModel):
+    mode: str
+
+
+@app.get("/api/power")
+def power_status():
+    return power.status()
+
+
+@app.post("/api/power")
+async def power_set(body: PowerInput):
+    """Power-down mode: camera, lidar, depth sensor and controller outputs off; wake from the console."""
+    if body.mode not in ("sleep", "wake"):
+        raise HTTPException(400, "mode must be sleep or wake")
+    try:
+        return await (power.sleep() if body.mode == "sleep" else power.wake())
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 class LedTestInput(BaseModel):
@@ -359,11 +385,13 @@ async def _startup():
                                    asyncio.create_task(detector.run()),
                                    asyncio.create_task(firmware.monitor()),
                                    asyncio.create_task(autonomy.run()),
-                                  asyncio.create_task(publish_ready(link, host_ready))]
+                                  asyncio.create_task(publish_ready(link, host_ready)),
+                                  asyncio.create_task(power.run())]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
     app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
-    if os.environ.get("BOT_LIDAR", "1") != "0":
+    power.lidar_enabled = os.environ.get("BOT_LIDAR", "1") != "0"
+    if power.lidar_enabled:
         lidar.start()
 
 
@@ -398,7 +426,11 @@ def status():
 
 @app.get("/api/ready")
 def host_ready():
-    return readiness(stream.streamer.status(), SNAPSHOT_PATH, HOTSPOT_ADDRESS)
+    ready = readiness(stream.streamer.status(), SNAPSHOT_PATH, HOTSPOT_ADDRESS)
+    if power.asleep:
+        # Camera off on purpose: the host is still ready to release the controller's start-up gate.
+        ready = dict(ready, ready=bool(ready["hotspot"]), asleep=True)
+    return ready
 
 
 @app.get("/api/params")
@@ -676,6 +708,8 @@ link.add_line_listener(slam_engine.on_line)      # read-only raw O/D lines
 autonomy.slam = slam_engine                      # map pose + safety bubble for lidar missions
 from .bubble_guard import BubbleGuard
 bubble_guard = BubbleGuard(slam_engine, link)    # BG caps to the controller (started in _startup)
+from .power import Power
+power = Power(link, stream.streamer, lidar, tof, autonomy, detector, link._log)   # console power-down mode
 # Threads start in _startup(), not at import: the deployer's import check
 # must not open /dev/ttyAS4 next to the running console.
 slam_web = slam_app.create_app(slam_engine, lidar, estop)

@@ -12,6 +12,7 @@ Status vocabulary (one per node and per wire):
     blocked  cannot be judged because a block upstream has failed
     nodata   no signal has arrived yet (console just started, etc.)
     nofb     output-only hardware: the firmware commands it, nothing reports back
+    sleep    switched off on purpose by the console power-down mode
 
 Root-cause rule: a node only turns red when its own evidence says so. When a
 parent (for example the USB serial link) fails, everything that is only known
@@ -24,8 +25,8 @@ import math
 import re
 import time
 
-OK, WARN, ERROR, BLOCKED, NODATA, NOFB = "ok", "warn", "error", "blocked", "nodata", "nofb"
-RANK = {ERROR: 5, WARN: 4, BLOCKED: 3, NODATA: 2, NOFB: 1, OK: 0}
+OK, WARN, ERROR, BLOCKED, NODATA, NOFB, SLEEP = "ok", "warn", "error", "blocked", "nodata", "nofb", "sleep"
+RANK = {ERROR: 5, WARN: 4, BLOCKED: 3, NODATA: 2, NOFB: 1, SLEEP: 1, OK: 0}
 
 # M0601 fault byte (DDT M0601C-111 manual / firmware hub_drive.cpp)
 FAULT_BITS = ((0x01, "sensor fault"), (0x02, "bus overcurrent"), (0x04, "phase overcurrent"),
@@ -320,6 +321,12 @@ def evaluate(inp):
         "wheel_r": eval_wheel("RIGHT", hub, hub_age, balancing, events),
         "payload": eval_payload(events),
     }
+    if host.get("asleep"):
+        # Power-down mode: these blocks are off on purpose, not failed.
+        off = "Powered down from the console; wake it to restart"
+        for name in ("camera", "tof", "lidar", "gamepad", "payload"):
+            nodes[name] = dict(nodes[name], status=SLEEP, reason=off)
+        nodes["radxa"] = dict(nodes["radxa"], reason="Powered down: console and Wi-Fi only")
 
     # Root-cause suppression, walked top-down so chains collapse correctly.
     for name in ("serial", "esp32", "imu", "compass", "gamepad", "lights",

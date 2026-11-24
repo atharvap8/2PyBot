@@ -11,7 +11,7 @@
   <div class="title">2PyBot</div>
   <div class="kind">Technical questions and answers</div>
   <div class="sub">Design decisions, control theory, interfaces and software architecture, answered for engineers reviewing the robot in person.</div>
-  <div class="meta"><div><b>AN-2PB-002</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.6 · Host software 4.7.6</div></div>
+  <div class="meta"><div><b>AN-2PB-002</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.7 · Host software 4.7.7</div></div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -157,7 +157,10 @@
 <div class="qa"><div class="q"><i>S30</i>Why did deployments become faster?</div><div class="a">
 <p>The commit bundle used to carry the Android APK (37 MB) next to a firmware image of under 1 MB, and the robot downloads GitHub release files at a few tens of kB/s. The APK is now a separate release asset: a deployment downloads only the 0.5 MB bundle, and a transient systemd unit publishes the app afterwards, outside the deployment lock, so a slow link never delays or blocks the next update.</p></div></div>
 <div class="qa"><div class="q"><i>S31</i>How is a gamepad re-paired?</div><div class="a">
-<p>The controller accepts <code>BT,FORGET</code> only while disarmed. It disconnects the current pad, erases every Bluetooth bond with Bluepad32 and keeps accepting new connections. The console exposes it as <code>POST /api/gamepad/repair</code>, the terminal as <code>2pybot gamepad repair</code>, which then waits up to a minute for the pad to connect.</p></div></div>
+<p>The controller accepts <code>BT,FORGET</code> only while disarmed. In 4.7.6 it deleted the keys while Bluetooth was running; the log then showed <code>SM_EVENT_PAIRING_COMPLETE: Invalid device</code> and the pad never paired again, which is why only a full flash erase used to help. Since 4.7.7 it stores a marker and restarts, and before Bluetooth starts it erases the two NVS namespaces that hold pairing state, <code>BTstack</code> and <code>bp32</code>. That is exactly the Bluetooth part of a full erase, while settings and calibration are kept. Then hold HOME + A on the pad (its Android mode, reported as <code>Android</code>). The console exposes it as <code>POST /api/gamepad/repair</code>, the terminal as <code>2pybot gamepad repair</code>, which waits for the restart and then up to a minute for the pad.</p></div></div>
+<div class="qa"><div class="q"><i>S32</i>What does power-down switch off, and why does the Radxa not sleep?</div><div class="a">
+<p>Power-down stops the parts that produce heat without being needed: the camera pipeline (sensor, ISP and hardware encoder), the lidar scan and motor, the depth sensor, object detection and autonomy, and on the controller the LED ring, servos, torch and Bluetooth gamepad link. Arming is refused until it is woken.</p>
+<p>The Radxa itself stays up because it is the only way back: the robot is woken from the console, and a Linux suspend would take Wi-Fi down with it. The board's Wi-Fi has no wake-on-LAN. With the sensors and encoder idle the CPU governor already runs at its lowest clock, so the remaining host load is small.</p></div></div>
 
 <h2 id="s-ops">Deployment, applications and quality</h2>
 <div class="qa"><div class="q"><i>S20</i>How is software deployed to the robot?</div><div class="a">
@@ -174,6 +177,6 @@
 <h2>Revision history</h2>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:14%">Revision</th><th>Changes</th></tr></thead><tbody>
 <tr><td>November 2026</td><td>4.4</td><td>Initial release for firmware and host 4.4.0.</td></tr>
-<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.6: corrupt-frame rejection, stall guard, settings blob, sample-time wheel speed, safety bubble, autonomy, Drive view, LED ring states, braking update, faster deployment and gamepad re-pair; dark layout.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.7: corrupt-frame rejection, stall guard, settings blob, sample-time wheel speed, safety bubble, autonomy, Drive view, LED ring states, braking update, faster deployment, gamepad re-pair and power-down mode; dark layout.</td></tr>
 </tbody></table>
 </body></html>

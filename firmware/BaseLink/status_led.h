@@ -7,7 +7,7 @@
 // through host startup waits, sensor settling/calibration and fatal-error loops.
 // Only this LED's PWM duty is written; no motor, serial or I2C work happens here.
 namespace status_led {
-enum Mode : uint8_t { BOOT, READY, ARMING, BALANCING, STOPPED, MAINTENANCE, ERROR };
+enum Mode : uint8_t { BOOT, READY, ARMING, BALANCING, STOPPED, MAINTENANCE, ERROR, SLEEP };
 static volatile Mode mode = BOOT;
 static esp_timer_handle_t timer = nullptr;
 static bool running = false;
@@ -40,6 +40,13 @@ static void tick(void*) {
         case MAINTENANCE: {
             const uint32_t phase = now%1600;
             brightness = phase < 600 && phase%200 < 100 ? 255 : 0;
+            break;
+        }
+        case SLEEP: {
+            // Powered down: slow, dim 6-second breath.
+            const uint32_t phase = now%6000;
+            const uint32_t ramp = phase <= 3000 ? phase : 6000-phase;
+            brightness = 1 + ramp*ramp*39/(3000UL*3000UL);
             break;
         }
         case BALANCING: {

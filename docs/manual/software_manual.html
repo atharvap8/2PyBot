@@ -11,7 +11,7 @@
   <div class="title">2PyBot</div>
   <div class="kind">Software manual</div>
   <div class="sub">How the controller firmware, the host console, the mapping and autonomy stack, the apps, the terminal tools and the deployment pipeline are built, how they talk to each other, and how to change them safely.</div>
-  <div class="meta"><div><b>SW-2PB-003</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.6 · Host software 4.7.6</div></div>
+  <div class="meta"><div><b>SW-2PB-003</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.7 · Host software 4.7.7</div></div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -41,7 +41,7 @@
 
 <h1 id="s1"><span class="no">1</span>About this manual</h1>
 <p class="lead">This manual is for anyone who reads, modifies or extends the 2PyBot software. It explains what each part does and why, where the code lives, and the rules that keep changes safe on a machine that moves by itself.</p>
-<p>It describes the repository at firmware BaseLink 4.7.6 and host software 4.7.6, branch <code>feature/lidar-autonomy</code>. File paths are relative to the repository root. Day-to-day operation is covered in the user manual (UM-2PB-001); hardware in the hardware manual (HW-2PB-004).</p>
+<p>It describes the repository at firmware BaseLink 4.7.7 and host software 4.7.7, branch <code>feature/lidar-autonomy</code>. File paths are relative to the repository root. Day-to-day operation is covered in the user manual (UM-2PB-001); hardware in the hardware manual (HW-2PB-004).</p>
 <h2>1.1 Ground rules</h2>
 <ul>
 <li><b>The controller owns motion.</b> Everything that can move a wheel runs on the ESP32. The host may stop the robot but can never arm it.</li>
@@ -211,7 +211,7 @@ driving: u = -(K2·clamp(v - v_ref, ±VERRMAX) + K3·θ + K4·ω)</pre>
 <tr><td><code>D</code></td><td>50 Hz</td><td>53 controller fields: pitch, rate, u, speed, position error, speed command, steer, saturation, loop time, modes, references, climb and descent state</td></tr>
 <tr><td><code>HM</code></td><td>10 Hz</td><td>Motor current commands and feedback, rpm, temperatures, faults, link and mode</td></tr>
 <tr><td><code>BB</code></td><td>10 Hz</td><td>Bubble as the controller sees it: clearance front and back, caps, flags, BG age</td></tr>
-<tr><td><code>NR</code></td><td>10 Hz</td><td>Navigation lease: token, state, sequence, command age, gamepad connected</td></tr>
+<tr><td><code>NR</code></td><td>10 Hz</td><td>Navigation lease: token, state, sequence, command age, gamepad connected, powered down</td></tr>
 <tr><td><code>SR</code></td><td>20 Hz</td><td>Self-uprighting phase, reason, timing, wheel travel</td></tr>
 <tr><td><code>HV</code></td><td>100 Hz</td><td>Fast wheel stream after <code>HF,s</code>: per-wheel speed, current command and feedback, rpm, pitch, rate, references</td></tr>
 <tr><td><code>P#</code>, <code>P</code>, <code>PR</code>, <code>P.</code></td><td>On request</td><td>Parameter dump: count, rows, derived capabilities, end</td></tr>
@@ -233,7 +233,8 @@ driving: u = -(K2·clamp(v - v_ref, ±VERRMAX) + K3·θ + K4·ω)</pre>
 <tr><td><code>C</code></td><td>Gyro calibration (disarmed)</td></tr>
 <tr><td><code>LT,n</code></td><td>LED ring test (1 compass, 2 front check, 0 off)</td></tr>
 <tr><td><code>HF,s</code></td><td>100 Hz <code>HV</code> stream for s seconds</td></tr>
-<tr><td><code>BT,FORGET</code></td><td>Forget bonded gamepads and accept a new one (disarmed)</td></tr>
+<tr><td><code>BT,FORGET</code></td><td>Clear all gamepad pairings (disarmed): stores a marker and restarts; the Bluetooth storage is erased before Bluetooth starts</td></tr>
+<tr><td><code>SL,1</code> / <code>SL,0</code></td><td>Power down (disarmed) / wake; reply <code>SL!,0|1</code></td></tr>
 </tbody></table>
 
 <h1 id="s6"><span class="no">6</span>Host console</h1>
@@ -266,7 +267,8 @@ driving: u = -(K2·clamp(v - v_ref, ±VERRMAX) + K3·θ + K4·ω)</pre>
 <tr><td><code>GET|POST /api/bubble</code></td><td>Bubble status; gamepad limiting on or off</td></tr>
 <tr><td><code>POST /api/autonomy/mission/start</code>, <code>GET /api/autonomy/mission</code></td><td>Lidar missions</td></tr>
 <tr><td><code>POST /api/autonomy/heartbeat|pause|resume|stop</code></td><td>Mission supervision</td></tr>
-<tr><td><code>POST /api/gamepad/repair</code></td><td>Forget and re-pair the gamepad</td></tr>
+<tr><td><code>POST /api/gamepad/repair</code></td><td>Clear all gamepad pairings (controller restarts)</td></tr>
+<tr><td><code>GET|POST /api/power</code></td><td>Power-down mode: status, <code>{"mode":"sleep"|"wake"}</code></td></tr>
 <tr><td><code>POST /api/led/test</code>, <code>POST /api/debug/record</code></td><td>LED test; raw recording</td></tr>
 <tr><td><code>GET /api/firmware/status</code>, <code>/api/deployment/status</code></td><td>Firmware and deployment</td></tr>
 <tr><td><code>/slam/api/*</code></td><td>Maps: state, scene, mapping, maps, labels, erase, extend, relocalize</td></tr>
@@ -306,7 +308,11 @@ driving: u = -(K2·clamp(v - v_ref, ±VERRMAX) + K3·θ + K4·ω)</pre>
 <li><b>Depth sensor</b>: <code>tof_worker.py</code> runs ST's driver in a separate process through ctypes so a driver hang cannot block the console; <code>tof.py</code> builds the corridor guard.</li>
 <li><b>System map</b>: <code>sysmap_health.py</code> judges every block from its own evidence and suppresses alarms downstream of a failed link.</li>
 </ul>
-<h2>6.9 Firmware worker</h2>
+<h2>6.9 Power-down mode</h2>
+<p><code>power.py</code> switches off what heats the robot while it is unused. Asleep, the camera pipeline is paused (the stream supervisor does not restart it), the lidar driver is stopped and its motor speed set to zero, the depth worker is stopped (it stops ranging on exit) and not restarted, object detection and autonomy are switched off, and the controller is sent <code>SL,1</code>. A 1 Hz task re-sends the wanted state after a controller reset. Host readiness ignores the camera while asleep, so a controller restart still passes its start-up gate. The Radxa does not suspend: Wi-Fi would go down and the board has no wake-on-LAN, so the console must stay up to wake the robot. The state is not persisted, so deployments and their health checks always start awake.</p>
+<h3>Gamepad re-pair</h3>
+<p>Bluepad32 4.1 keeps pairing state in two NVS namespaces: <code>BTstack</code> (link keys, BLE bonds, BLE root keys) and <code>bp32</code> (its settings). Deleting keys at runtime left its BLE state inconsistent with the EVOFOX pad. <code>BT,FORGET</code> therefore writes a marker in namespace <code>2pb_bt</code> and restarts; <code>btgamepad_begin()</code> erases both namespaces before <code>BP32.setup()</code>. This is the Bluetooth part of a full flash erase, without touching parameters or calibration.</p>
+<h2>6.10 Firmware worker</h2>
 <p>The worker flashes with esptool through its own process. It snapshots live tuning, backs up the boot and NVS region, verifies the installed image as a rollback copy, writes only the application at 0x10000, verifies it, confirms boot and NVS are unchanged, boots the controller and restores tuning. Any failure writes back the previous image. Host-side state such as the camera profile is checked but can only add a warning.</p>
 
 <h1 id="s7"><span class="no">7</span>Web interface</h1>
@@ -422,7 +428,7 @@ python scripts/versioning.py --check</pre>
 
 <h1 id="sR">Revision history</h1>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:12%">Revision</th><th>Changes</th></tr></thead><tbody>
-<tr><td>November 2026</td><td>4.7</td><td>First edition, for firmware and host 4.7.6.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>First edition, for firmware and host 4.7.7.</td></tr>
 </tbody></table>
 <h2>Important notice</h2>
 <p class="legal">This manual describes a development platform under active change. Where the code and this manual disagree, the code and <code>PROTOCOL.md</code> are authoritative.</p>

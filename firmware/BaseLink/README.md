@@ -76,9 +76,9 @@ checkpoint are historical data and are not applied to BLDC motor settings.
 
 ## Gamepad pairing
 
-Put the EVOFOX One S in **Home+B** pairing mode. Keep both sticks centered until the center-calibration log appears. Firmware adopts held buttons on the first processed connection frame; release START before pressing it to arm.
+Hold **HOME + A** on the EVOFOX One S (Android mode, green LED blinks; Bluepad32 reports it as `Android`). Keep both sticks centered until the center-calibration log appears. Firmware adopts held buttons on the first processed connection frame; release START before pressing it to arm.
 
-If pairing keys need clearing, enable the existing `BP32.forgetBluetoothKeys()` call for one flash, pair again, then disable that call.
+To clear old pairings, use `2pybot gamepad repair`, the TUI *Re-pair gamepad* action or serial `BT,FORGET` with the motors stopped. The controller restarts and erases its Bluetooth storage (NVS namespaces `BTstack` and `bp32`) before Bluetooth starts, then accepts a new pad. A full flash erase is not needed.
 
 Bluetooth TX power is raised from the ESP32 defaults (BR/EDR 0..+3 dBm, BLE +3 dBm) to BR/EDR +6..+9 dBm and BLE +9 dBm (default, advertising and scan). +9 dBm is the ESP32 Bluetooth API maximum. It is applied once the controller is enabled and logged as `[PAD] BT TX power: BR/EDR +6..+9 dBm, BLE +9 dBm`. Change `PAD_BREDR_TX_MIN`, `PAD_BREDR_TX_MAX` and `PAD_BLE_TX` in `bt_gamepad.h`.
 

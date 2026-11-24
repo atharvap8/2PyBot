@@ -221,8 +221,9 @@ void params_service() {
     if (dumpRow < 0) return;
     char line[256];
     const char* derivedKeys[] = {"STEPSM","COUNTSM","VMAX","AMAX","VNOLOAD","HUBMOTOR","HUBSCHEMA",
-        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW","SELFRIGHT","BUBBLE","BRAKEPROFILE","PADREPAIR"};
-    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1,1,2,2,1};
+        "TOFGUARD","BOOTGATE","STARTUPACK","FALLPREVENT","AUTOCLIMB","AUTODESCENT","FLASHLOCK","NAVIGATION","VDRIVE","HOSTLED","VELBAL","CURONLY","CURPROFILE","VELCTRL","VAMAX","INPUTPROFILE","FIXEDINPUT","PARAMACK","DIRECTYAW","SELFRIGHT","BUBBLE","BRAKEPROFILE","PADREPAIR","SLEEP"};
+    // PADREPAIR 2: BT,FORGET restarts and wipes the Bluetooth storage. SLEEP 1: SL,1/SL,0 power-down.
+    const float derivedValues[] = {P.stepsPerM,P.countsPerM,P.vMax,P.aMax,P.vNoLoad,1,4,1,1,1,0,1,1,1,1,P.driveVEff,0,0,1,1,0,0,2,1,2,1,1,2,2,2,1};
     const int end = (int)PARAM_COUNT + 1 + sizeof(derivedValues)/sizeof(derivedValues[0]);
     int length;
     if (dumpRow == 0) length = snprintf(line,sizeof(line),"P#,%u\n",(unsigned)PARAM_COUNT);

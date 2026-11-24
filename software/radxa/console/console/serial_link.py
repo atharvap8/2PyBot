@@ -419,10 +419,14 @@ class SerialLink:
                 self.nav.update(token=int(line[4:]),state=1 if line.startswith("AN!") else 9,last_rx=time.time(),received_monotonic=time.monotonic())
                 return
             if line.startswith("NR,"):
-                _,ms,token,state,sequence,age,pad,_reserved=line.split(",")
+                _,ms,token,state,sequence,age,pad,sleep=line.split(",")
                 self.nav={"ms":int(ms),"token":int(token),"state":int(state),"sequence":int(sequence),
                            "age_ms":int(age),"pad":bool(int(pad)),"last_rx":time.time(),"received_monotonic":time.monotonic()}
+                self.tel["asleep"]=sleep=="1"   # 4.7.7+: controller power-down state (was always 0)
                 self._publish({"type":"navigation","nav":self.nav})
+                return
+            if line in ("SL!,1","SL!,0"):
+                self.tel["asleep"]=line.endswith("1")
                 return
             if line in ("FU!,1","FU!,0"):
                 self.tel["firmware_lock"]=line.endswith("1")

@@ -5,7 +5,7 @@ import { STAGE, BUSES, NODES, WIRES, SERIAL_INFO, PINS } from "./model.js";
 
 const $ = (s) => document.querySelector(s);
 const SVGNS = "http://www.w3.org/2000/svg";
-const BADGE = { ok: "OK", warn: "WARN", error: "ERROR", blocked: "WAIT", nodata: "NO DATA", nofb: "NO FB" };
+const BADGE = { ok: "OK", warn: "WARN", error: "ERROR", blocked: "WAIT", nodata: "NO DATA", nofb: "NO FB", sleep: "ASLEEP" };
 const PROBLEM = /ERROR|FATAL|NO REPLY|fault 0x(?!00)|timeout[1-9]|Disconnected|unavailable|failed/i;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -130,7 +130,7 @@ function lineFor(n, count) {
 }
 
 function setStatus(el, status) {
-  el.classList.remove("s-ok", "s-warn", "s-error", "s-blocked", "s-nodata", "s-nofb");
+  el.classList.remove("s-ok", "s-warn", "s-error", "s-blocked", "s-nodata", "s-nofb", "s-sleep");
   el.classList.add("s-" + status);
 }
 
@@ -160,6 +160,7 @@ function wireStatus(w) {
   const n = snap?.nodes?.[w.node];
   if (!n) return "nodata";
   if (n.status === "nofb") return snap.nodes.esp32?.status === "ok" ? "ok" : "blocked";
+  if (n.status === "sleep") return "nodata";
   return n.status;
 }
 

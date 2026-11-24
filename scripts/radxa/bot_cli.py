@@ -182,10 +182,34 @@ class Bot:
                  for i, s in enumerate(states)}
         V.table(["SERVICE", "STATE", "AT BOOT", "PURPOSE"], [[s["name"], s["active"], s["enabled"], s["desc"]] for s in states], COLOUR, tones)
 
+    def power(self):
+        op = self.args.operation
+        r = self.api("/api/power", {"mode": op}) if op in ("sleep", "wake") else self.api("/api/power")
+        if self.args.json:
+            return show(r)
+        if r.get("asleep"):
+            print(c("Powered down", "warn") + " for {} min: camera, lidar, depth sensor, ring, servos, torch and gamepad off.".format(
+                round((r.get("asleep_s") or 0) / 60)))
+            print("Wake it with: 2pybot power wake")
+        else:
+            print(c("Awake", "ok") + "  camera {}  lidar {}  depth sensor {}".format(r.get("camera"), r.get("lidar"), r.get("tof")))
+        if not r.get("controller_supported"):
+            print(c("Controller firmware is older than 4.7.7: only the host side powers down.", "warn"))
+
     def gamepad(self):
         if self.args.operation == "repair":
             r = self.api("/api/gamepad/repair", {})
             print(c(r.get("message", "Re-pairing started."), "ok"))
+            if r.get("restart"):
+                print("Controller restarting; waiting for it to come back...")
+                time.sleep(4)
+                ready_by = time.time() + 40
+                while time.time() < ready_by:
+                    tel = (self.api("/api/status") or {}).get("telemetry", {})
+                    if tel.get("startup_ready") and not tel.get("stale", True):
+                        break
+                    time.sleep(1)
+                print(c("Now hold HOME + A on the gamepad.", "info"))
             print("Waiting up to 60 s for a gamepad to connect...")
             deadline = time.time() + 60
             seen = time.time() - 2
@@ -676,6 +700,8 @@ class Bot:
             self.services()
         elif name == "gamepad":
             self.gamepad()
+        elif name == "power":
+            self.power()
         elif name == "deploy-status":
             self.deploy_status()
         elif name == "build-firmware":
@@ -724,6 +750,8 @@ def parser():
     sub.add_parser("services", help="2PyBot service states")
     p = sub.add_parser("gamepad", help="Gamepad: status or re-pair")
     p.add_argument("operation", nargs="?", choices=["status", "repair"], default="status")
+    p = sub.add_parser("power", help="Power-down mode: status, sleep or wake")
+    p.add_argument("operation", nargs="?", choices=["status", "sleep", "wake"], default="status")
     sub.add_parser("help", help="List commands")
     sub.add_parser("status", help="Host readiness, controller telemetry and firmware versions")
     p = sub.add_parser("check", help="Check host/controller or deployment")
@@ -778,7 +806,7 @@ COMMAND_LIST = [
     ("services", "service states"), ("params list [GROUP|KEY]", "settings"), ("params set KEY VALUE --save", "change a setting"),
     ("firmware-status", "controller firmware"), ("deploy-status [--watch]", "software update progress"),
     ("doctor", "diagnostics summary + report file"), ("calibration imu|trim|tof|camera", "calibrations"),
-    ("gamepad [repair]", "gamepad status / forget and re-pair"), ("restart SERVICE", "restart a service"), ("backup / restore", "firmware and settings backups"),
+    ("gamepad [repair]", "gamepad status / forget and re-pair"), ("power [sleep|wake]", "power down to stop heating / wake up"), ("restart SERVICE", "restart a service"), ("backup / restore", "firmware and settings backups"),
 ]
 
 

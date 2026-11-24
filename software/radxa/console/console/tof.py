@@ -17,6 +17,7 @@ class ToF:
         self.received = None
         self.error = ""
         self.state = "starting"
+        self.paused = False         # console power-down
         self.guard_enabled = False  # never persisted; explicit opt-in each startup
         self.stop_m = 0.20
         self.slow_m = 0.80
@@ -233,6 +234,10 @@ class ToF:
         failures = 0
         try:
             while True:
+                if self.paused:
+                    self.state, self.error = "sleeping", ""
+                    await asyncio.sleep(1)
+                    continue
                 try:
                     self.state = "starting"
                     self.process = await asyncio.create_subprocess_exec(
@@ -254,12 +259,25 @@ class ToF:
                     self.state, self.error = "error", str(exc) or "Depth worker timed out"
                 finally:
                     await self.stop()
+                if self.paused:
+                    self.state, self.error, failures = "sleeping", "", 0
+                    continue
                 # Back off while the sensor is absent instead of hammering the
                 # bus every 5 s; a session that reached ranging resets it.
                 failures = 0 if self.received is not None and time.monotonic() - self.received < 10 else failures + 1
                 await asyncio.sleep(min(30, 5 * 2 ** max(0, failures - 1)))
         finally:
             await self.stop()
+
+    async def pause(self, paused):
+        """Power-down: stop ranging (the worker stops the sensor on SIGTERM) and stay stopped."""
+        self.paused = bool(paused)
+        if self.paused:
+            await self.stop()
+            self.frame, self.received = {}, None
+            self.state, self.error = "sleeping", ""
+        elif self.state == "sleeping":
+            self.state = "starting"
 
     async def stop(self):
         proc, self.process = self.process, None

@@ -11,7 +11,7 @@
   <div class="title">2PyBot</div>
   <div class="kind">Hardware manual</div>
   <div class="sub">Mechanical construction, drive system, controller and host electronics, sensors, LED ring, camera head, pin assignments, assembly, inspection and hardware fault finding.</div>
-  <div class="meta"><div><b>HW-2PB-004</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.6 · Host software 4.7.6</div></div>
+  <div class="meta"><div><b>HW-2PB-004</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.7 · Host software 4.7.7</div></div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -250,12 +250,13 @@
 <li>Charge the battery outside the robot with a balance charger, to 4.2 V per cell.</li>
 <li>Stop driving at about 3.3 V per cell; motor torque drops with voltage and balance margins shrink.</li>
 <li>Shut the host down cleanly before switching the battery off, so maps and settings being written are not corrupted.</li>
+<li>When the robot stays on but unused, use <b>Power down</b> in the console. It stops the camera, lidar motor, depth sensor, LED ring, servos and torch, and disconnects the gamepad, which removes most of the heat. The host stays on so that it can be woken from the console.</li>
 </ul>
 
 <h1 id="s12"><span class="no">12</span>Gamepad</h1>
 <figure>{{photo:photo_gamepad|Gamepad|from above}}</figure>
 <p class="cap"><b>Figure 7.</b> The EVOFOX One S gamepad.</p>
-<p>The gamepad (EVOFOX One S) pairs directly with the controller's Bluetooth through Bluepad32, so driving and stopping do not depend on the host or Wi-Fi. Put it in pairing mode by holding <b>HOME + A</b>; in this mode it identifies itself as EVOFOX One S, which is the mode the controller accepts. The controller raises its Bluetooth transmit power to the ESP32 maximum (+9 dBm) for range. To pair a different gamepad, use <b>Re-pair gamepad</b> in the control centre or <code>2pybot gamepad repair</code> with the robot disarmed.</p>
+<p>The gamepad (EVOFOX One S) pairs directly with the controller's Bluetooth through Bluepad32, so driving and stopping do not depend on the host or Wi-Fi. Put it in pairing mode by holding <b>HOME + A</b>; in this mode it identifies itself as EVOFOX One S, which is the mode the controller accepts. The controller raises its Bluetooth transmit power to the ESP32 maximum (+9 dBm) for range. To pair a different gamepad, use <b>Re-pair gamepad</b> in the control centre or <code>2pybot gamepad repair</code> with the robot disarmed. The controller restarts and erases only its Bluetooth storage (NVS namespaces <code>BTstack</code> and <code>bp32</code>); a full flash erase is not needed.</p>
 
 <h1 id="s13"><span class="no">13</span>Assembly and disassembly</h1>
 <div class="box warn"><b class="t">Caution</b>Switch the battery off and wait for all LEDs to go dark before opening the robot. Shut the host down first if it is running.</div>
@@ -361,7 +362,7 @@
 
 <h1 id="sR">Revision history</h1>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:12%">Revision</th><th>Changes</th></tr></thead><tbody>
-<tr><td>November 2026</td><td>4.7</td><td>First edition, for firmware and host 4.7.6.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>First edition, for firmware and host 4.7.7.</td></tr>
 </tbody></table>
 <h2>Important notice</h2>
 <p class="legal">Dimensions marked as estimates come from CAD that has not been measured against the physical robot. Measure before machining or printing replacement parts. Work on the robot only with the battery disconnected unless a step says otherwise.</p>

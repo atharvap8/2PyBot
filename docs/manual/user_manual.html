@@ -11,7 +11,7 @@
   <div class="title">2PyBot</div>
   <div class="kind">User manual</div>
   <div class="sub">Self-balancing two-wheel robot with BLDC hub motors, 360° lidar mapping with a safety bubble, live camera, supervised autonomy and control from a browser, an Android phone or a terminal.</div>
-  <div class="meta"><div><b>UM-2PB-001</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.6 · Host software 4.7.6</div></div>
+  <div class="meta"><div><b>UM-2PB-001</b> · Revision 4.7 · November 2026</div><div>Firmware BaseLink 4.7.7 · Host software 4.7.7</div></div>
 </section>
 
 <h1 id="toc">Contents</h1>
@@ -41,7 +41,7 @@
 
 <h1 id="s1"><span class="no">1</span>About this manual</h1>
 <p class="lead">This manual explains how to set up, drive, map with and look after 2PyBot. It is written for the person operating the robot. You do not need to read code to use anything described here.</p>
-<p>It describes the robot with controller firmware BaseLink 4.7.6 and host software 4.7.6. The firmware version is shown in the console header, on the <code>2pybot</code> dashboard and in the first lines of the controller log.</p>
+<p>It describes the robot with controller firmware BaseLink 4.7.7 and host software 4.7.7. The firmware version is shown in the console header, on the <code>2pybot</code> dashboard and in the first lines of the controller log.</p>
 <h2>1.1 Conventions</h2>
 <table><thead><tr><th style="width:30%">Convention</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><b>Bold</b></td><td>A button, key or screen element, for example <b>START</b> or <b>Save map</b>.</td></tr>
@@ -160,7 +160,7 @@
 <li>Switch the gamepad on. A paired gamepad reconnects by itself within a few seconds.</li>
 <li>To pair a new gamepad, hold <b>HOME + A</b>. This puts it in the mode in which it identifies itself as <b>EVOFOX One S</b>, the mode the robot accepts. Do not use HOME + B or other modes.</li>
 <li>Leave both sticks centred while it connects: the robot captures their centre position at that moment.</li>
-<li>If a gamepad will not connect, clear the old pairing with <code>2pybot gamepad repair</code> or <b>Robot → Re-pair gamepad</b> in the control centre, then hold <b>HOME + A</b> again.</li>
+<li>If a gamepad will not connect, clear the old pairings with <code>2pybot gamepad repair</code> or <b>Robot → Re-pair gamepad</b> in the control centre. The controller restarts (about 10 seconds, the ring shows the start-up loader). When the ring shows <b>ready</b>, hold <b>HOME + A</b> until the gamepad connects. A full flash erase is not needed.</li>
 </ol>
 <h2>5.4 Connect a phone or computer</h2>
 <ol>
@@ -177,6 +177,14 @@
 </ol>
 <h2>5.6 Power off</h2>
 <p>Press <b>SELECT</b> and let the robot settle on its bumper. Shut the host down cleanly from <b>System → Power off</b> in the control centre (or wait until nothing is being saved), then switch the battery off.</p>
+<h2>5.7 Power down when not in use</h2>
+<p>When the robot stays switched on but is not being used, power it down so it does not heat up. Press <b>Power down</b> in the console header (or <code>2pybot power sleep</code>, or <b>Robot → Power down</b> in the control centre). The robot must be disarmed.</p>
+<ul>
+<li>Off: camera, lidar (its motor stops), depth sensor, object detection, LED ring (one faint blue LED breathes at the front), camera servos, torch and the gamepad. The robot cannot be armed.</li>
+<li>On: the host computer with the console and Wi-Fi, so that you can wake the robot again.</li>
+<li>Wake it with <b>Wake up</b> in the console header, <code>2pybot power wake</code> or the control centre. The camera and sensors are back within a few seconds; switch the gamepad on and press <b>START</b> as usual.</li>
+<li>The gamepad cannot wake the robot. A restart of the console, an update or a reboot always comes back awake.</li>
+</ul>
 
 <h1 id="s6"><span class="no">6</span>Driving</h1>
 <h2>6.1 Gamepad controls</h2>
@@ -267,6 +275,7 @@
 <tr><td>Double flash</td><td>Stopped by you</td></tr>
 <tr><td>Triple flash</td><td>Firmware update or automatic tuning</td></tr>
 <tr><td>Rapid blink</td><td>Error</td></tr>
+<tr><td>Very slow, dim breathing</td><td>Powered down (section 5.7)</td></tr>
 </tbody></table>
 
 <h1 id="s8"><span class="no">8</span>Lidar safety bubble</h1>
@@ -350,7 +359,7 @@
 <h1 id="s13"><span class="no">13</span>The 2pybot control centre</h1>
 <p>Log in to the robot over SSH and type <code>2pybot</code>. A full-screen control centre opens in the terminal, similar to the Linux network tool <code>nmtui</code>.</p>
 <pre class="term"><span class="s"> ◉ 2PyBot  control centre                                              READY, disarmed   13:27:00 </span>
-<span class="d"> firmware 4.7.6  ·  feature/lidar-autonomy  ·  192.168.1.66  ·  http://192.168.1.66:8080</span>
+<span class="d"> firmware 4.7.7  ·  feature/lidar-autonomy  ·  192.168.1.66  ·  http://192.168.1.66:8080</span>
 <span class="o">┌ Menu ──────────┐┌ Dashboard ──────────────────────────────────────────────────────────────┐</span>
 <span class="o">│</span>                <span class="o">││</span> <span class="o">ROBOT</span>                                  <span class="o">MOTORS</span>                           <span class="o">│</span>
 <span class="o">│</span><span class="s"> 1  Dashboard   </span><span class="o">││</span> State            <span class="g">● READY, disarmed</span>      Left        <span class="g">● 0.00 A  32°C</span>       <span class="o">│</span>
@@ -382,7 +391,8 @@
 <tr><td><code>2pybot status</code></td><td>Everything at a glance</td></tr>
 <tr><td><code>2pybot stop</code></td><td>Stop the motors</td></tr>
 <tr><td><code>2pybot logs -f</code></td><td>Follow the controller log (<code>2pybot logs console</code> for a service)</td></tr>
-<tr><td><code>2pybot gamepad repair</code></td><td>Forget the old pairing and pair a gamepad again</td></tr>
+<tr><td><code>2pybot gamepad repair</code></td><td>Clear all pairings (the controller restarts), then pair with HOME + A</td></tr>
+<tr><td><code>2pybot power sleep</code> / <code>wake</code></td><td>Power down to stop heating / wake up</td></tr>
 <tr><td><code>2pybot params list BUBBLE</code></td><td>Show a settings group</td></tr>
 <tr><td><code>2pybot params set BRAKELK 0.4 --save</code></td><td>Change and save a setting</td></tr>
 <tr><td><code>2pybot services</code></td><td>Service states</td></tr>
@@ -476,13 +486,14 @@
 <tr><td>Amber blink</td><td>Pushed</td></tr>
 <tr><td>Magenta</td><td>Bubble limiting</td></tr>
 <tr><td>Red</td><td>Error: count the LEDs</td></tr>
+<tr><td>One faint blue LED</td><td>Powered down</td></tr>
 </tbody></table>
 </div>
 
 <h1 id="sR">Revision history</h1>
 <table><thead><tr><th style="width:18%">Date</th><th style="width:12%">Revision</th><th>Changes</th></tr></thead><tbody>
 <tr><td>November 2026</td><td>4.4</td><td>First release for firmware and host 4.4.0.</td></tr>
-<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.6: LED ring states and error codes, start-up loader, safety bubble, map correction and names, autonomy, Drive view, the 2pybot control centre, gamepad re-pair, braking update, photographs and the dark layout.</td></tr>
+<tr><td>November 2026</td><td>4.7</td><td>Firmware and host 4.7.7: LED ring states and error codes, start-up loader, safety bubble, map correction and names, autonomy, Drive view, the 2pybot control centre, gamepad re-pair, power-down mode, braking update, photographs and the dark layout.</td></tr>
 </tbody></table>
 <h2>Important notice</h2>
 <p class="legal">2PyBot is a development platform. Values in this manual are the configured defaults of the released software and can differ from measured behaviour. Operate the robot only in a clear area under direct supervision.</p>

@@ -270,6 +270,7 @@ class Robot(ActionPage):
         s = a.snap or {}
         bub = (s.get("bubble") or {}).get("enabled")
         guard = ((s.get("status") or {}).get("tof") or {}).get("guard_enabled")
+        asleep = (((s.get("status") or {}).get("host") or {}).get("asleep"))
         return [
             ("Stop motors", "zero torque now (same as X anywhere)", a.stop),
             ("Centre camera", "pan and zoom servos to home", lambda: a.call("/api/command", {"line": "N"}, "Camera centred")),
@@ -281,7 +282,9 @@ class Robot(ActionPage):
             ("LED test: show front", "front white, right green, back red", lambda: a.call("/api/led/test", {"mode": 2}, "Front check shown")),
             ("LED test: end", "back to normal ring", lambda: a.call("/api/led/test", {"mode": 0}, "LED test ended")),
             ("Calibrate gyro", "robot disarmed and perfectly still", self.gyro),
-            ("Re-pair gamepad", "forget the old pairing, then hold HOME + A", self.repair),
+            ("Re-pair gamepad", "clear all pairings, then hold HOME + A", self.repair),
+            (("Wake up" if asleep else "Power down"),
+             "sensors and camera back on" if asleep else "camera, lidar, ToF, ring, servos off (no heating)", self.power),
             ("Record 30 s of data", "for bubble/vibration analysis", self.record),
         ]
 
@@ -294,10 +297,22 @@ class Robot(ActionPage):
     def repair(self):
         if self.app.moving("re-pair the gamepad"):
             return
-        if self.app.confirm("Re-pair gamepad", "Forget the current gamepad pairing?\nAfterwards hold HOME + A on the gamepad until it connects."):
-            r = self.app.call("/api/gamepad/repair", {}, "Pairing cleared: hold HOME + A on the gamepad")
+        if self.app.confirm("Re-pair gamepad", "Clear every gamepad pairing?\nThe controller restarts (about 10 s); then hold HOME + A on the gamepad."):
+            r = self.app.call("/api/gamepad/repair", {}, "Re-pair started")
             if r:
                 self.app.message("Re-pair gamepad", r.get("message", "Hold HOME + A on the gamepad."))
+
+    def power(self):
+        s = self.app.snap or {}
+        asleep = (((s.get("status") or {}).get("host") or {}).get("asleep"))
+        if asleep:
+            self.app.call("/api/power", {"mode": "wake"}, "Waking: camera and sensors starting")
+            return
+        if self.app.moving("power down"):
+            return
+        if self.app.confirm("Power down", "Switch off camera, lidar, depth sensor, LED ring, servos, torch and gamepad?\n"
+                                          "The robot cannot be armed until you wake it from the console or here."):
+            self.app.call("/api/power", {"mode": "sleep"}, "Powered down")
 
     def record(self):
         r = self.app.call("/api/debug/record", {"seconds": 30, "label": "tui", "fast": True})
