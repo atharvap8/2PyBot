@@ -3,6 +3,23 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 4.7.5 — Fixes from the bubble/vibration recording
+
+- **Fall when releasing the stick in fast reverse.**
+  - Recorded: −1.17 m/s, the speed target jumped to 0 in one step, the acceleration
+    command and the 2.7 A current limit saturated for 0.6 s, and the robot tipped backwards.
+  - New DRVDEC (1.5 m/s²) limits how fast the drive target may fall toward zero.
+    Speeding up stays immediate, and the bubble cap still applies at once.
+- **22 Hz vibration, worst in climb mode.** Climb mode showed 6× the normal acceleration
+  noise and hit the limit 17 % of the time. The speed fed to the controller came from
+  differencing averaged position every loop; reply jitter and missed replies made
+  noise that grew with speed (0.02 → 0.07 m/s rms).
+  - New VELSRC=1 uses each motor's sample-timed velocity instead.
+  - VELSRC=0 restores the old method.
+- **Bubble stopped too close.** It stopped 0.6–2.4 cm short of obstacles instead of
+  5 cm, and twice overshot slightly. The model is now more conservative:
+  BUBDEC 0.35 m/s², BUBLAT 0.40 s, BUBMRG 0.08 m.
+
 ## Unreleased — 2pybot control centre
 
 - `2pybot` opens a full-screen terminal control centre (curses, Python 3.9 standard

@@ -186,10 +186,13 @@
   X(landMs,    "LANDMS",  350.0f,             50.0f, 2000.0f,"TERRAIN", "soft-gain hold after landing (ms)")\
   X(airFreeze, "AIRFRZ",  1.0f,                0.0f,   1.0f, "TERRAIN", "freeze integrator while airborne")\
   /* ---------- lidar safety bubble (BG) ---------- */                         \
-  X(bubDecel,  "BUBDEC",  0.50f,               0.10f,  3.0f, "BUBBLE",  "braking decel assumed (m/s^2)")\
-  X(bubLat,    "BUBLAT",  0.30f,               0.0f,   1.0f, "BUBBLE",  "balance braking delay (s)")\
-  X(bubMargin, "BUBMRG",  0.05f,               0.0f,   0.30f,"BUBBLE",  "stop this far from the body (m)")\
+  X(bubDecel,  "BUBDEC",  0.35f,               0.10f,  3.0f, "BUBBLE",  "braking decel assumed (m/s^2)")\
+  X(bubLat,    "BUBLAT",  0.40f,               0.0f,   1.0f, "BUBBLE",  "balance braking delay (s)")\
+  X(bubMargin, "BUBMRG",  0.08f,               0.0f,   0.30f,"BUBBLE",  "stop this far from the body (m)")\
   X(bubStale,  "BUBSTALE",300.0f,             60.0f, 1000.0f,"BUBBLE",  "fail closed after no BG (ms)")\
+  /* ---------- drive feel / measurement ---------- */                       \
+  X(drvDec,    "DRVDEC",  1.5f,                0.0f,  10.0f, "DRIVE",   "max braking rate of the drive reference (m/s^2, 0 = off)")\
+  X(velSrc,    "VELSRC",  1.0f,                0.0f,   1.0f, "MOTOR",   "LQR speed: 0 position difference, 1 hub sample velocity")\
   /* ---------- ring orientation ---------- */                               \
   X(ledDir,    "LEDDIR",  LED_DIR_CW ? 1.0f : -1.0f, -1.0f, 1.0f, "LED", "+1: index grows clockwise seen from above")
 

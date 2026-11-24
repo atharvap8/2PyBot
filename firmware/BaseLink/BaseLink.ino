@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v4.7.4
+ *  BaseLink.ino — 2PyBot v4.7.5
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -138,6 +138,7 @@ NavigationLease navigation;
 float climbXRef=0.0f,climbIntegral=0.0f,climbDriveRef=0.0f,climbRecovery=0.0f;
 bool climbReferenceInitialized=false;
 float requestedDriveV = 0.0f;
+float driveSlewRef = 0.0f;      // braking-rate-limited drive reference (DRVDEC)
 float effectiveDriveV = 0.0f;
 float appliedBalanceScale = 1.0f;
 float wheelTargetL = 0.0f, wheelTargetR = 0.0f;
@@ -232,7 +233,7 @@ void resetController() {
     descentGuard.reset();
     climbXRef=posM;climbIntegral=climbDriveRef=climbRecovery=0;
     climbReferenceInitialized=false;
-    requestedDriveV=effectiveDriveV=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
+    requestedDriveV=effectiveDriveV=driveSlewRef=0.0f;appliedBalanceScale=1.0f;wheelTargetL=wheelTargetR=0.0f;
     appliedSteerSteps=0.0f;
     driveReferenceActive=false;
     vCmd = 0.0f; zInt = 0.0f; uOut = 0.0f;
@@ -586,6 +587,18 @@ void runController(float dt) {
     // Full-stick and autonomy targets follow DRIVEV, without free-speed derating.
     float nominalDriveV=navigation.granted?clampf(navigation.velocity,-P.driveVEff,P.driveVEff):cmdFwd*driveScale;
     requestedDriveV = navigation.granted?nominalDriveV:descentGuard.limitReference(nominalDriveV);
+    // Braking-rate limit: releasing the stick at speed must not demand an
+    // instant stop. Recorded fall: reverse 1.17 m/s -> 0 in one step saturated
+    // u (6 m/s^2) and the 2.7 A current limit for 0.6 s and the robot tipped.
+    // Speeding up stays immediate; the bubble cap below still acts at once.
+    if (P.drvDec > 0.0f) {
+        const float step = P.drvDec * dt;
+        const bool braking = fabsf(requestedDriveV) < fabsf(driveSlewRef) || requestedDriveV * driveSlewRef < 0.0f;
+        driveSlewRef = braking ? driveSlewRef + clampf(requestedDriveV - driveSlewRef, -step, step) : requestedDriveV;
+        requestedDriveV = driveSlewRef;
+    } else {
+        driveSlewRef = requestedDriveV;
+    }
     effectiveDriveV=requestedDriveV;
     // An explicitly enabled obstacle guard still takes effect immediately.
     if (!navigation.granted && tofGuard.enabled) {
@@ -803,7 +816,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v4.7.4");
+    Serial.println("     2PyBot BaseLink v4.7.5");
     Serial.println("==================================================");
 
     params_begin();
@@ -901,13 +914,22 @@ void loop() {
     float vRaw = (posM-posPrev)/dt;
     posPrev=posM;
     const float aV = 1.0f - expf(-2.0f * PI * 15.0f * dt);
-    velF += aV * (vRaw - velF);
 
     static float diffPrev = 0.0f; static bool diffInit = false;
     encDiff = posR - posL;
     if (!diffInit) { diffPrev = encDiff; diffInit = true; }
     float dRaw = (encDiff - diffPrev) / dt;
     diffPrev = encDiff;
+    if (P.velSrc > 0.5f) {
+        // Hub-sample velocity: each wheel differentiated against its own
+        // request (sample) time. Differencing posM every loop aliased reply
+        // jitter and missed replies into speed noise that grew with speed
+        // (0.02 -> 0.07 m/s rms) and drove a 22 Hz oscillation in climb mode.
+        const float vL = hub.wheelVelL(), vR = hub.wheelVelR();
+        vRaw = 0.5f * (vL + vR) * P.encSign;
+        dRaw = (vR - vL) * P.encSign * P.countsPerM;
+    }
+    velF += aV * (vRaw - velF);
     diffRateF += aV * (dRaw - diffRateF);
 
     // ---- 2. inputs ----
