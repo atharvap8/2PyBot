@@ -64,7 +64,7 @@ class ObjectDetector:
         self.model_path=Path(model_path or os.environ.get("BOT_ML_MODEL","/var/lib/2pybot/models/ssd-mobilenet-v1-int8.onnx"))
         self.lock=threading.RLock();self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix="object-detector")
         self.enabled=False;self.threshold=.50;self.people_only=False;self.corrected=True
-        self.session=None;self.preview=None;self.last_frame=None;self.tracks=Tracks();self.last_inference=0.0
+        self.session=None;self.providers=[];self.provider="CPU";self.preview=None;self.last_frame=None;self.tracks=Tracks();self.last_inference=0.0
         self.result={"state":"off","detections":[],"message":"Enable object detection to start"}
 
     def configure(self,enabled,threshold=.50,people_only=False,corrected=True):
@@ -81,7 +81,7 @@ class ObjectDetector:
             result=copy.deepcopy(self.result)
             result.update(enabled=self.enabled,threshold=self.threshold,people_only=self.people_only,corrected=self.corrected,
                           model_installed=self.model_path.is_file(),runtime_available=importlib.util.find_spec("onnxruntime") is not None,
-                          model="SSD-MobileNetV1 INT8",provider="CPUExecutionProvider",
+                          model="SSD-MobileNetV1 INT8",provider=self.provider,
                           age_ms=round((time.monotonic()-self.last_inference)*1000) if self.last_inference else None,
                           measured_distance_available=False)
             return result
@@ -94,8 +94,11 @@ class ObjectDetector:
         import numpy as np
         if self.session is None:
             import onnxruntime as ort
+            from .accel import select_providers,provider_label
             settings=ort.SessionOptions();settings.intra_op_num_threads=1;settings.inter_op_num_threads=1
-            self.session=ort.InferenceSession(str(self.model_path),sess_options=settings,providers=["CPUExecutionProvider"])
+            self.providers=select_providers()
+            self.session=ort.InferenceSession(str(self.model_path),sess_options=settings,providers=self.providers)
+            self.providers=list(self.session.get_providers());self.provider=provider_label(self.providers)
         jpeg,timing=self.frame_source()
         if not jpeg:
             self.result={"state":"waiting","detections":[],"message":"Waiting for fresh camera frame"};return
@@ -125,7 +128,7 @@ class ObjectDetector:
             cv2.rectangle(image,p,q,color,2)
             label=f'{detection["label"]} #{detection["track_id"]} {detection["score"]:.0%}'
             cv2.putText(image,label,(p[0],max(16,p[1]-7)),cv2.FONT_HERSHEY_SIMPLEX,.55,color,2,cv2.LINE_AA)
-        image=cv2.putText(image,f'ONNX CPU {inference_ms:.0f} ms | depth distance uncalibrated',(10,height-12),cv2.FONT_HERSHEY_SIMPLEX,.45,(220,220,220),1,cv2.LINE_AA)
+        image=cv2.putText(image,f'ONNX {self.provider} {inference_ms:.0f} ms | depth distance uncalibrated',(10,height-12),cv2.FONT_HERSHEY_SIMPLEX,.45,(220,220,220),1,cv2.LINE_AA)
         preview=cv2.imencode(".jpg",image,[cv2.IMWRITE_JPEG_QUALITY,88])[1].tobytes()
         with self.lock:
             if not self.enabled:return

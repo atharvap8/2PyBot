@@ -83,11 +83,12 @@ class VisualPair:
         try:
             import onnxruntime as ort
             from .object_detection import decode_outputs
+            from .accel import select_providers
             opts = ort.SessionOptions()
             opts.intra_op_num_threads = 1
             opts.inter_op_num_threads = 1
             self.session = ort.InferenceSession(str(self.model_path), sess_options=opts,
-                                                providers=["CPUExecutionProvider"])
+                                                providers=select_providers())
             self._decode = decode_outputs
             return True
         except Exception as exc:  # noqa: BLE001 -- report instead of killing the loop

@@ -3,6 +3,25 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 5.1.0: nicer maps robot, app wordmark and splash, detector acceleration, doctor
+
+- **Maps 3D robot** is a proper little model now: round wheels (real cylinders),
+  a body, a camera head with a lens and a lidar puck on top, placed by its pose,
+  instead of the stack of axis-aligned cubes.
+- **Maps panel** tidied: even button grids (no more ragged rows), consistent
+  section headers with an accent tick and divider, and a shorter "Export STL".
+- **App branding**: the top-left dot-and-ring is replaced by the 2PyBot wordmark,
+  and a launch screen shows the wordmark, the real front photo of the robot and a
+  loading bar on the black and orange theme.
+- **On-board detector acceleration.** Detection now selects the fastest ONNX
+  Runtime execution provider that is available (NPU first, then other
+  accelerators, then XNNPACK, then CPU) and always falls back to CPU. The
+  provider in use is reported in status and on the camera overlay. See
+  docs/NPU_ACCELERATION.md for the Radxa A733 VeriSilicon NPU plan.
+- **Doctor self-healer** merged: a rule engine that ranks likely faults and
+  auto-applies safe, idempotent recoveries, with `/api/doctor` and
+  `2pybot doctor`.
+
 ## 5.0.0: SLAM console refresh, in-browser terminal, visual re-pair
 
 - **Maps page** rebuilt as a single clean panel (Mapping, Saved maps, Edit, Autopilot,

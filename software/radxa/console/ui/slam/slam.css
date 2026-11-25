@@ -161,6 +161,19 @@ p.kind-opts { margin: 0 0 8px; }
 .auto-safety span { flex: 1; }
 .dot.bad { background: var(--err); } .dot.off { background: var(--mute); }
 .brand img.brand-logo{height:24px;width:auto;flex:none}
-.steps .step .meter:first-of-type{margin-top:12px}
-.steps .step .meter{margin-bottom:11px}
-.steps .step .row + .meter{margin-top:14px}
+
+/* ---- consistent panel sections (same refined look as Autopilot) ---- */
+.steps .step { padding: 14px 16px 15px; }
+.steps .step h2 { padding-bottom: 9px; margin-bottom: 11px; border-bottom: 1px solid var(--line); }
+.steps .step h2::before { content: ""; width: 3px; height: 14px; border-radius: 2px; background: var(--acc); flex: none; }
+.step.auto h2 { border-bottom: 1px solid var(--line); }   /* keep the pill flush right */
+.steps .step .row { margin-bottom: 10px; }
+.steps .step .row:last-child { margin-bottom: 0; }
+.steps .step .meter:first-of-type { margin-top: 12px; }
+.steps .step .meter { margin-bottom: 11px; }
+.steps .step .meter:last-child { margin-bottom: 0; }
+.steps .step .row + .meter { margin-top: 14px; }
+
+/* even button grids: every button in a group gets the same width and gap */
+.row.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px; }
+.row.btns .btn { width: 100%; padding: 8px 10px; overflow: hidden; text-overflow: ellipsis; }

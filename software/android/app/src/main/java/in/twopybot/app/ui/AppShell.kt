@@ -1,6 +1,7 @@
 package `in`.twopybot.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -26,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import `in`.twopybot.app.BuildConfig
+import `in`.twopybot.app.R
 import `in`.twopybot.app.ui.screens.*
 import `in`.twopybot.app.ui.theme.*
 import `in`.twopybot.app.vm.BotViewModel
@@ -177,9 +180,11 @@ private fun LinkLine(vm: BotViewModel) {
 
 @Composable
 private fun BrandMark() {
-    Box(Modifier.size(30.dp).clip(CircleShape).border(2.dp, Accent, CircleShape), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(10.dp).clip(CircleShape).background(Accent))
-    }
+    Image(
+        painter = painterResource(R.drawable.logo_wordmark),
+        contentDescription = "2PyBot",
+        modifier = Modifier.height(20.dp),
+    )
 }
 
 @Composable

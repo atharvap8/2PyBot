@@ -123,7 +123,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             TwoPyBotTheme {
-                `in`.twopybot.app.ui.RobotApp()
+                var ready by rememberSaveable { mutableStateOf(false) }
+                if (ready) {
+                    `in`.twopybot.app.ui.RobotApp()
+                } else {
+                    `in`.twopybot.app.ui.SplashScreen(onDone = { ready = true })
+                }
             }
         }
     }
