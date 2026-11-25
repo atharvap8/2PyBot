@@ -109,7 +109,33 @@ work. What is left for Phase 1 is converting our own model:
 Blocker: step 1 and 2 need an x86 Linux machine with the ACUITY Docker image.
 That is the one piece not reachable from the robot itself.
 
-### Phase 2: drive the NPU from the console (VIPLite + NBG)
+### Phase 2: drive the NPU from the console (VIPLite + NBG) - IMPLEMENTED
+
+Done and verified on the robot. The detector auto-selects the NPU when the NBG and
+VIPLite driver are present, and falls back to ONNX/CPU otherwise:
+
+- `scripts/vision/awnn_runner.c` is a small persistent coprocess that loads the
+  NBG once through the vendor awnn/VIPLite helper and serves inferences over pipes
+  (network stays resident). Built with `scripts/vision/npu_build_runner.sh` into
+  `/usr/local/bin/awnn_runner`.
+- `console/npu_detect.py` speaks the runner protocol, converts frames to the
+  model's planar uint8 input, and does the SSD post-process the NBG omits (decode
+  box encodings against the 1917 SSD-MobileNet-V1 anchors, softmax, per-class NMS),
+  returning detections in the exact `decode_outputs()` format.
+- `console/object_detection.py` picks the NPU backend when `npu.available()`, shows
+  provider "NPU (VeriSilicon)", and drops to CPU on any runner failure.
+
+Validated against the CPU model on the same frames: same class and boxes (for
+example "book" at the same box, score 0.54 vs 0.49), steady-state about 90 ms per
+tick including image decode and the SSD post-process, with the raw NPU inference
+about 26 ms. Correctness matched; the win is offloading the convolutions from the
+A55 cores. Unit tests in `tests/test_npu_detect.py` cover anchors, decode and NMS.
+
+Notes: the `.nb` is produced off-board (Phase 1, ACUITY on x86) and dropped at
+`BOT_NPU_MODEL`. The runner binary is a one-time on-device build (not managed by
+the deploy yet); re-run `npu_build_runner.sh` after a reflash.
+
+#### Original plan (for reference)
 
 On-device findings rule out the ONNX Runtime VSINPU EP on this board (it needs the
 Unified OpenVX driver and `galcore`, which are absent). So the integration is the
@@ -171,9 +197,7 @@ the VSINPU EP already exist and are the supported path.
   resolves to CPU (no XNNPACK in the aarch64 wheel, no VSINPU driver).
 - Phase 1: NPU proven on the robot (VIPLite + `vpm_run`, about 3 ms on a sample
   NBG). Converting our own model is blocked only on an x86 ACUITY host.
-- Phase 2: console seam in place. `console/npu.py` detects the VIPLite device,
-  driver libraries and a compiled NBG, and reports readiness in the detector
-  status; `scripts/vision/npu_bench.sh` reproduces the on-device proof. The only
-  remaining step is dropping in an ACUITY-compiled NBG (Phase 1, x86) and a thin
-  VIPLite inference call; until then detection stays on ONNX/CPU.
+- Phase 2: IMPLEMENTED and verified on the robot. `awnn_runner` + `npu_detect.py`
+  run the detector on the NPU with SSD post-processing and a CPU fallback; the
+  detector reports "NPU (VeriSilicon)". Detections match the CPU model.
 - Phase 3 (GPU): not needed unless the NBG route stalls.

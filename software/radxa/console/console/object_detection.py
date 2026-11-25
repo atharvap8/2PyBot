@@ -64,7 +64,7 @@ class ObjectDetector:
         self.model_path=Path(model_path or os.environ.get("BOT_ML_MODEL","/var/lib/2pybot/models/ssd-mobilenet-v1-int8.onnx"))
         self.lock=threading.RLock();self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix="object-detector")
         self.enabled=False;self.threshold=.50;self.people_only=False;self.corrected=True
-        self.session=None;self.providers=[];self.provider="CPU";self.preview=None;self.last_frame=None;self.tracks=Tracks();self.last_inference=0.0
+        self.session=None;self.providers=[];self.provider="CPU";self.npu=None;self._npu_failed=False;self.preview=None;self.last_frame=None;self.tracks=Tracks();self.last_inference=0.0
         self.result={"state":"off","detections":[],"message":"Enable object detection to start"}
 
     def configure(self,enabled,threshold=.50,people_only=False,corrected=True):
@@ -93,13 +93,23 @@ class ObjectDetector:
             threshold=self.threshold;people_only=self.people_only;corrected=self.corrected
         import cv2
         import numpy as np
-        if self.session is None:
-            import onnxruntime as ort
-            from .accel import select_providers,provider_label
-            settings=ort.SessionOptions();settings.intra_op_num_threads=1;settings.inter_op_num_threads=1
-            self.providers=select_providers()
-            self.session=ort.InferenceSession(str(self.model_path),sess_options=settings,providers=self.providers)
-            self.providers=list(self.session.get_providers());self.provider=provider_label(self.providers)
+        if self.npu is None and self.session is None:
+            # Prefer the NPU (ACUITY NBG via VIPLite) when the model + driver are present;
+            # otherwise fall back to ONNX Runtime on CPU. See docs/NPU_ACCELERATION.md.
+            from .npu import available as npu_available
+            if npu_available() and not self._npu_failed:
+                try:
+                    from .npu_detect import NpuDetector
+                    self.npu=NpuDetector();self.npu.start();self.provider="NPU (VeriSilicon)"
+                except Exception:  # noqa: BLE001 -- any NPU setup issue falls back to CPU
+                    self.npu=None;self._npu_failed=True
+            if self.npu is None:
+                import onnxruntime as ort
+                from .accel import select_providers,provider_label
+                settings=ort.SessionOptions();settings.intra_op_num_threads=1;settings.inter_op_num_threads=1
+                self.providers=select_providers()
+                self.session=ort.InferenceSession(str(self.model_path),sess_options=settings,providers=self.providers)
+                self.providers=list(self.session.get_providers());self.provider=provider_label(self.providers)
         jpeg,timing=self.frame_source()
         if not jpeg:
             self.result={"state":"waiting","detections":[],"message":"Waiting for fresh camera frame"};return
@@ -115,12 +125,21 @@ class ObjectDetector:
             image=rectify(image,intrinsics,960);corrected_applied=True
         else:
             image=cv2.resize(image,(960,round(960*image.shape[0]/image.shape[1])),interpolation=cv2.INTER_AREA)
-        tensor=cv2.cvtColor(cv2.resize(image,(300,300),interpolation=cv2.INTER_AREA),cv2.COLOR_BGR2RGB)[None].astype(np.uint8)
         started=time.monotonic()
-        names=[value.name for value in self.session.get_outputs()]
-        values=self.session.run(names,{self.session.get_inputs()[0].name:tensor})
+        if self.npu is not None:
+            try:
+                detections=self.npu.infer(image,threshold,people_only)
+            except Exception:  # noqa: BLE001 -- runner died: drop to CPU from now on
+                try:self.npu.close()
+                except Exception:pass
+                self.npu=None;self._npu_failed=True
+                self.result={"state":"waiting","detections":[],"message":"NPU runner failed; falling back to CPU"};return
+        else:
+            tensor=cv2.cvtColor(cv2.resize(image,(300,300),interpolation=cv2.INTER_AREA),cv2.COLOR_BGR2RGB)[None].astype(np.uint8)
+            names=[value.name for value in self.session.get_outputs()]
+            values=self.session.run(names,{self.session.get_inputs()[0].name:tensor})
+            detections=decode_outputs(dict(zip(names,values)),threshold,people_only)
         inference_ms=(time.monotonic()-started)*1000
-        detections=decode_outputs(dict(zip(names,values)),threshold,people_only)
         now=time.monotonic();detections=self.tracks.update(detections,now)
         height,width=image.shape[:2]
         for detection in detections:
@@ -129,7 +148,7 @@ class ObjectDetector:
             cv2.rectangle(image,p,q,color,2)
             label=f'{detection["label"]} #{detection["track_id"]} {detection["score"]:.0%}'
             cv2.putText(image,label,(p[0],max(16,p[1]-7)),cv2.FONT_HERSHEY_SIMPLEX,.55,color,2,cv2.LINE_AA)
-        image=cv2.putText(image,f'ONNX {self.provider} {inference_ms:.0f} ms | depth distance uncalibrated',(10,height-12),cv2.FONT_HERSHEY_SIMPLEX,.45,(220,220,220),1,cv2.LINE_AA)
+        image=cv2.putText(image,f'{self.provider} {inference_ms:.0f} ms | depth distance uncalibrated',(10,height-12),cv2.FONT_HERSHEY_SIMPLEX,.45,(220,220,220),1,cv2.LINE_AA)
         preview=cv2.imencode(".jpg",image,[cv2.IMWRITE_JPEG_QUALITY,88])[1].tobytes()
         with self.lock:
             if not self.enabled:return
