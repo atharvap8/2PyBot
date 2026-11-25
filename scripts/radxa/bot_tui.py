@@ -97,9 +97,13 @@ def put(win, y, x, text, attr=0, width=None):
         room = min(room, width)
     if room <= 0:
         return
+    # curses.addstr raises ValueError on an embedded NUL (which can slip in from
+    # serial/log text decoded as UTF-8); strip NUL and guard it so one bad byte
+    # cannot blank a whole page.
+    text = str(text).replace("\x00", "")
     try:
-        win.addstr(y, x, str(text)[:room], attr)
-    except curses.error:
+        win.addstr(y, x, text[:room], attr)
+    except (curses.error, ValueError):
         pass
 
 
