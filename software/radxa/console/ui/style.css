@@ -52,6 +52,16 @@ nav#tabs button{background:transparent;border:0;border-left:3px solid transparen
 padding:9px 12px;font:inherit;font-size:13.5px;text-align:left;cursor:pointer;white-space:nowrap}
 nav#tabs button:hover{color:var(--tx);background:var(--panel)}
 nav#tabs button.sel{color:var(--cy);border-left-color:var(--cy);background:var(--accbg);font-weight:600}
+/* collapsible parameter subgroup in the rail */
+.navgroup{display:flex;flex-direction:column;gap:2px;margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
+.navgroup>summary{list-style:none;cursor:pointer;color:var(--dim);padding:7px 12px;font-size:11.5px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.07em;display:flex;align-items:center;gap:7px;border-radius:6px}
+.navgroup>summary::-webkit-details-marker{display:none}
+.navgroup>summary::before{content:"\25B8";font-size:10px;color:var(--mute);transition:transform .15s}
+.navgroup[open]>summary::before{transform:rotate(90deg)}
+.navgroup>summary:hover{color:var(--tx);background:var(--panel)}
+.navgroup-items{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.navgroup-items button{padding-left:24px;font-size:13px}
 main{padding:20px 24px;max-width:1240px;width:100%;margin:0 auto;min-width:0}
 footer{flex:none;padding:6px 24px;border-top:1px solid var(--line);color:var(--mute);font-size:12px;
 display:flex;justify-content:space-between;gap:12px}

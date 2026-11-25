@@ -139,18 +139,42 @@ function select(tab) {
   localStorage.setItem('tab', tab.id);
 }
 
+// Firmware parameter tabs collapse into one "Parameters" group so the rail stays
+// short; the perception/dashboard tabs stay at the top level.
+const PARAM_TABS = new Set(['balance', 'motor', 'drive', 'yaw', 'imu', 'safety', 'climb', 'led', 'payload']);
+
 function buildNav() {
   const nav = document.getElementById('tabs');
   nav.innerHTML = '';
   TABS.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
-  for (const t of TABS) {
+  const mkBtn = (t) => {
     const b = document.createElement('button');
     b.textContent = t.title; b.dataset.id = t.id;
     b.onclick = () => select(t);
-    nav.appendChild(b);
+    return b;
+  };
+  const params = [];
+  for (const t of TABS) {
+    if (PARAM_TABS.has(t.id)) params.push(t);
+    else nav.appendChild(mkBtn(t));
+  }
+  if (params.length) {
+    const group = document.createElement('details');
+    group.className = 'navgroup'; group.id = 'navparams';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Parameters';
+    group.appendChild(summary);
+    const box = document.createElement('div');
+    box.className = 'navgroup-items';
+    for (const t of params) box.appendChild(mkBtn(t));
+    group.appendChild(box);
+    nav.appendChild(group);
   }
   const want = TABS.find(t => t.id === localStorage.getItem('tab')) || TABS[0];
-  if (want) select(want);
+  if (want) {
+    if (PARAM_TABS.has(want.id)) document.getElementById('navparams').open = true;
+    select(want);
+  }
 }
 
 // ---------------- websocket ----------------
@@ -261,7 +285,7 @@ async function togglePower() {
 }
 
 // ---------------- boot ----------------
-const TAB_FILES = ['telemetry', 'vision', 'camera', 'calibration', 'objects', 'balance', 'motor', 'drive', 'yaw',
+const TAB_FILES = ['telemetry', 'camera', 'calibration', 'objects', 'balance', 'motor', 'drive', 'yaw',
                    'safety', 'imu', 'climb', 'led', 'payload', 'console'];
 
 (async function boot() {
@@ -277,7 +301,7 @@ const TAB_FILES = ['telemetry', 'vision', 'camera', 'calibration', 'objects', 'b
   document.addEventListener('params', () => {
     paintHeader();
     // Parameter dumps must not tear down live video/grid/log views.
-    if (current && !['telemetry', 'vision', 'camera', 'calibration', 'objects', 'console'].includes(current.id)) select(current);
+    if (current && !['telemetry', 'camera', 'calibration', 'objects', 'console'].includes(current.id)) select(current);
   });
   setInterval(() => { if (!Object.keys(state.params).length) refreshParams().catch(() => {}); }, 4000);
 })();
