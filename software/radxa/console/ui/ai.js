@@ -26,6 +26,7 @@ function paintDetect() {
   $("d-stop").disabled = !det.enabled;
   $("d-cap").textContent = `${(det.state || "off").toUpperCase()} · ${det.corrected_applied ? "rectified" : "raw"} · ${det.message || ""}`;
   if (det.enabled) $("d-image").src = "/api/ml/preview.jpg?t=" + Date.now();
+  else $("d-image").removeAttribute("src");
   $("d-note").textContent = det.state === "error" ? det.message : "";
   $("d-note").className = "note" + (det.state === "error" ? " err" : "");
   const rows = $("d-rows"); rows.replaceChildren();

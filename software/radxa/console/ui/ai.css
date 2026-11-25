@@ -28,9 +28,11 @@ button { background: none; border: 0; cursor: pointer; }
 .pagelinks a { color: var(--sub); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px 11px; font-size: 13px; }
 .pagelinks a:hover, .pagelinks a.sel { color: var(--ink); border-color: var(--acc); }
 
-/* cards grid: same card look and spacing as the Maps panel */
-.layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; padding: 16px; align-items: start; }
-.step { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px 15px; }
+/* cards: same look/spacing/controls as the Maps panel, packed as masonry columns
+   so cards of different heights do not leave ragged gaps. */
+.layout { columns: 360px; column-gap: 14px; padding: 16px; }
+.step { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px 15px;
+  break-inside: avoid; -webkit-column-break-inside: avoid; margin: 0 0 14px; }
 .step h2 { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 10px; margin-bottom: 11px; padding-bottom: 9px; border-bottom: 1px solid var(--line); }
 .step h2::before { content: ""; width: 3px; height: 14px; border-radius: 2px; background: var(--acc); flex: none; }
 .step h2 .pill { margin-left: auto; }
@@ -63,8 +65,9 @@ input, select { background: var(--card2); border: 1px solid var(--line); border-
 .note { font-size: 12.5px; color: var(--sub); margin-top: 8px; }
 .note.warn { color: var(--warn); } .note.err { color: var(--err); } .note:empty { display: none; }
 
-.preview { position: relative; background: #0f0d0c; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; }
+.preview { position: relative; background: #0f0d0c; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 10px; min-height: 150px; }
 .preview img { display: block; width: 100%; height: auto; max-height: 300px; object-fit: contain; }
+.preview img:not([src]) { display: none; }
 .preview .cap { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(20,18,16,.82); color: var(--sub); font-size: 12px; padding: 5px 8px; }
 
 table.dets { width: 100%; border-collapse: collapse; font-size: 12.5px; }
