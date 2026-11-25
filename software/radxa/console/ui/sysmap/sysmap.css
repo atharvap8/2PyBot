@@ -171,3 +171,7 @@ main { height: calc(100% - 64px); }
 .brand{white-space:nowrap;flex:none}
 .brand img.brand-logo{height:24px;width:auto;flex:none}
 .brand .sub{color:var(--sub);font-size:12.5px}
+
+/* hosted inside the console shell's app pane */
+.embed header.top{display:none}
+.embed main{height:100%}

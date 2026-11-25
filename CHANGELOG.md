@@ -3,6 +3,36 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## Unreleased (branch feature/drive-visualization): 3D console
+
+Not released and not versioned yet: VERSION is unchanged on purpose, so deploying
+this branch only restarts the console (no firmware or app rebuild).
+
+- **New console home.** The console opens on a live 3D view of the robot with an
+  app pane beside it and a dock below, replacing the tab rail. The view chooses
+  its own mode from live state: a studio shot when disarmed, a chase camera over
+  the map while balancing or on a mission, and a top-down view with proximity arcs
+  when it is slow and close to something. Mode changes are one continuous camera
+  move, not a cut.
+- **The robot is the real CAD.** `ui/viz/robot.json` is generated from the printed
+  STLs by `scripts/generate_viz_model.py` as a true rotation. The older driving and
+  world assets negate one axis only, which mirrors the robot; they are untouched.
+  Wheels, tyre tread, the lidar and the LED ring are parametric.
+- **Live layers.** Map walls and floor, the planned route and goal, live lidar
+  returns the map does not explain, depth-sensor obstacles and drop-offs, and
+  proximity arcs computed from the scan.
+- **Apps in the pane.** Drive (map, camera, mission), Maps, Camera, ML, Controls
+  (telemetry, calibration, log and every parameter group), System, Terminal and
+  Deploy. Existing pages are hosted with their own header hidden.
+- **Safety unchanged.** The new page can stop things (STOP, pause or end a mission,
+  power down) but never starts motion; missions still start from Maps, which keeps
+  its own supervision lease.
+- **Runs in the browser only.** The robot serves static files; three.js r160 is
+  vendored, nothing is fetched from the internet. Quality scales down on slow
+  devices. `/?demo` runs the console on synthetic data, and
+  `scripts/preview_console.py` serves it on a laptop without the robot.
+- **Fallback.** The previous console is kept at `/ui/classic.html`.
+
 ## 5.1.0: nicer maps robot, app wordmark and splash, detector acceleration, doctor
 
 - **Maps 3D robot** is a proper little model now: round wheels (real cylinders),

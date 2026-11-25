@@ -76,3 +76,6 @@ table.dets td { padding: 5px 6px; border-bottom: 1px dashed var(--line); }
 table.dets tr:last-child td { border-bottom: 0; }
 
 @media (max-width: 760px) { .top { padding: 0 12px; gap: 10px; } .brand span, .pagelinks { display: none; } .layout { grid-template-columns: 1fr; } }
+
+/* hosted inside the console shell's app pane */
+.embed .top{display:none}

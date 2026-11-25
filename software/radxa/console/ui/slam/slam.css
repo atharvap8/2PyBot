@@ -177,3 +177,7 @@ p.kind-opts { margin: 0 0 8px; }
 /* even button grids: every button in a group gets the same width and gap */
 .row.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px; }
 .row.btns .btn { width: 100%; padding: 8px 10px; overflow: hidden; text-overflow: ellipsis; }
+
+/* hosted inside the console shell's app pane */
+.embed .top{display:none}
+.embed .layout{height:100%}

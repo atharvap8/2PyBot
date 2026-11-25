@@ -1,0 +1,30 @@
+<!doctype html><html lang=en><head>
+<meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name=theme-color content="#141210">
+<title>2PyBot Console (classic)</title><link rel=stylesheet href=/ui/style.css?v=48><link rel=stylesheet href=/ui/calibration.css?v=48>
+</head><body class=shell>
+<header class=top>
+  <a class=brand href=/>
+    <img class="brand-logo" src="/ui/logo.svg" alt="2PyBot">
+    <div><i class=dot id=dot></i><span id=sub>console</span></div>
+  </a>
+  <div class=chips>
+    <span class=chip id=cState>—</span>
+    <span class=chip id=cPitch>pitch —</span>
+    <span class=chip id=cVel>0.00 m/s</span>
+    <span class=chip id=cRx>— Hz</span>
+  </div>
+  <nav class=pages aria-label=Pages>
+    <a href=/>Console</a><a class=sel href=/ui/classic.html>Classic</a><a href=/sysmap/>System</a><a href=/slam/>Maps</a>
+    <a href=/deploy>Deploy</a><a href=/terminal>Terminal</a><a href=/ui/ai.html>ML</a>
+  </nav>
+  <button class=pwr id=pwr title="Power down: camera, lidar, depth sensor and controller outputs off to stop heating. Wake from here.">Power down</button>
+  <button class=estop onclick="window.API.estop()">STOP</button>
+</header>
+<div class=body>
+  <nav id=tabs class=rail aria-label=Sections></nav>
+  <main id=view></main>
+</div>
+<footer><span id=msg>starting…</span><span id=dirty></span></footer>
+<script src=/ui/app.js type=module></script>
+</body></html>
