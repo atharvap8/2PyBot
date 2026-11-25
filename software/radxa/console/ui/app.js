@@ -285,7 +285,7 @@ async function togglePower() {
 }
 
 // ---------------- boot ----------------
-const TAB_FILES = ['telemetry', 'camera', 'calibration', 'objects', 'balance', 'motor', 'drive', 'yaw',
+const TAB_FILES = ['telemetry', 'drive_view', 'camera', 'calibration', 'balance', 'motor', 'drive', 'yaw',
                    'safety', 'imu', 'climb', 'led', 'payload', 'console'];
 
 (async function boot() {
@@ -301,7 +301,7 @@ const TAB_FILES = ['telemetry', 'camera', 'calibration', 'objects', 'balance', '
   document.addEventListener('params', () => {
     paintHeader();
     // Parameter dumps must not tear down live video/grid/log views.
-    if (current && !['telemetry', 'camera', 'calibration', 'objects', 'console'].includes(current.id)) select(current);
+    if (current && !['telemetry', 'cockpit', 'camera', 'calibration', 'console'].includes(current.id)) select(current);
   });
   setInterval(() => { if (!Object.keys(state.params).length) refreshParams().catch(() => {}); }, 4000);
 })();
