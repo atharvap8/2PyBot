@@ -227,7 +227,7 @@ function onSlam(s) {
   S.clear = sectorClearance(s.scan);
   const b = s.bubble || {}, mins = S.clear.filter(fin);
   S.near = !b.stale && fin(b.nearest_m) ? b.nearest_m : (mins.length ? Math.min(...mins) : null);
-  if (performance.now() - live.at > 600) onPose(s.live_pose || s.pose, s.jumps);      // no fast pose stream: 5 Hz is still a pose
+  onPose(s.live_pose || s.pose, s.jumps);             // the state carries the live pose too (all there is from an older robot)
   if (s.map_version === 0 && S.mapImg) { S.mapImg = S.mapMeta = null; $('sh-mini').classList.remove('has'); }   // map unloaded
   if (engine) {
     engine.setScan(s.scan || []);
@@ -369,13 +369,14 @@ const LABELS = [                                       // sysmap node, anchor on
   ['esp32', 'esp32', 'l', 'Controller', ['State', 'Loop max']], ['wheel_r', 'wheel_r', 'l', 'Right motor', ['Temp']],
   ['lidar', 'lidar', 'r', 'Lidar', ['Scan rate']], ['radxa', 'host', 'r', 'Radxa', ['CPU temp', 'Load']], ['wheel_l', 'wheel_l', 'r', 'Left motor', ['Temp']],
 ];
+// Columns follow where the parts really sit in the robot (it faces you: its right side is on your left).
 const BLOCKS = {                                       // system view: column (top to bottom), anchor on the model, title, metrics
-  lidar: ['l', 'lidar', 'Lidar', ['Scan rate', 'Points']], camera: ['l', 'camera', 'Camera', ['Frame rate', 'Capture to publish']],
-  radxa: ['l', 'radxa', 'Radxa host', ['CPU temp', 'Load']], clients: ['l', 'radxa', 'Phones and browsers', ['Hotspot', 'Cockpit clients']],
-  imu: ['l', 'imu', 'IMU', ['Pitch', 'Accel']],
-  lights: ['r', 'lights', 'LED ring', ['Blue LED should be']], tof: ['r', 'tof', 'Depth sensor', ['Nearest', 'Valid zones']],
-  compass: ['r', 'compass', 'Compass', ['Heading']], esp32: ['r', 'esp32', 'ESP32 controller', ['State', 'Loop max']],
-  gamepad: ['r', 'esp32', 'Gamepad', ['Controller', 'Speed mode']],
+  lidar: ['l', 'lidar', 'Lidar', ['Scan rate', 'Points']], lights: ['l', 'lights', 'LED ring', ['Blue LED should be']],
+  camera: ['l', 'camera', 'Camera', ['Frame rate', 'Capture to publish']], esp32: ['l', 'esp32', 'ESP32 controller', ['State', 'Loop max']],
+  gamepad: ['l', 'esp32', 'Gamepad', ['Controller', 'Speed mode']],
+  tof: ['r', 'tof', 'Depth sensor', ['Nearest', 'Valid zones']], radxa: ['r', 'radxa', 'Radxa host', ['CPU temp', 'Load']],
+  clients: ['r', 'radxa', 'Phones and browsers', ['Hotspot', 'Cockpit clients']], imu: ['r', 'imu', 'IMU', ['Pitch', 'Accel']],
+  compass: ['r', 'compass', 'Compass', ['Heading']],
   wheel_r: ['b', 'wheel_r', 'Right motor', ['Temp', 'Current']], payload: ['b', 'payload', 'Camera payload', ['Torch']],
   wheel_l: ['b', 'wheel_l', 'Left motor', ['Temp', 'Current']],
 };

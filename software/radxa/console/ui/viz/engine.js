@@ -152,46 +152,88 @@ export async function createEngine(canvas, host, opts = {}) {
     glass: new THREE.MeshPhysicalMaterial({ color: 0x1b1d23, roughness: 0.2, metalness: 0.45, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.5 }),
     led: new THREE.MeshBasicMaterial({ color: 0x55f2d4, toneMapped: false }),
   };
+
+  // The robot itself. Preferred: the full assembly (robot2.json + robot2.bin, made from the
+  // CAD export by scripts/generate_viz_glb.py), with the real boards, motors and lidar in
+  // their true places. If that cannot be loaded, the printed parts alone with stand-in
+  // wheels and lidar (robot.json), as before.
+  const full = await (async () => {
+    try {
+      const url = new URL(opts.assembly || '/ui/viz/robot2.json', location.href);
+      const man = await (await fetch(url)).json();
+      const buf = await (await fetch(new URL(man.bin, url))).arrayBuffer();
+      if (man.schema !== '2pybot-viz-mesh/2' || buf.byteLength !== man.bytes) throw new Error('model does not match its manifest');
+      return { man, buf };
+    } catch (e) { console.warn('full robot model unavailable, using the printed parts', e); return null; }
+  })();
+  robot.body.position.z = AXLE;                      // the body pitches about the axle
+  if (full) {
+    const { man, buf } = full, made = {};
+    const matFor = (part) => {
+      if (mats[part.finish] && ['shell', 'tyre', 'glass', 'led'].includes(part.finish)) return mats[part.finish];
+      const id = part.finish + ':' + part.color.join();
+      if (made[id]) return made[id];
+      const color = new THREE.Color().setRGB(part.color[0], part.color[1], part.color[2], THREE.SRGBColorSpace);
+      const m = part.finish === 'accent' ? new THREE.MeshPhysicalMaterial({ color, roughness: 0.58, clearcoat: 0.15, clearcoatRoughness: 0.6, envMapIntensity: 1.0 })
+        : part.finish === 'metal' ? new THREE.MeshStandardMaterial({ color, roughness: 0.38, metalness: 0.85, envMapIntensity: 1.2 })
+        : part.finish === 'pcb' ? new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.1, envMapIntensity: 0.8 })
+        : new THREE.MeshStandardMaterial({ color, roughness: 0.62, envMapIntensity: 0.9 });
+      made[id] = mats['cad:' + id] = m; return m;
+    };
+    for (const part of man.parts) {
+      let g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(buf, part.voff, part.vertices * 3), 3));
+      g.setIndex(new THREE.BufferAttribute(part.wide ? new Uint32Array(buf, part.ioff, part.indices) : new Uint16Array(buf, part.ioff, part.indices), 1));
+      g = toCreasedNormals(g, 34 * D2R);             // CAD shading: smooth curves, crisp edges
+      const mesh = new THREE.Mesh(g, matFor(part));
+      mesh.name = part.name; mesh.castShadow = !part.inner; mesh.receiveShadow = !part.inner;
+      mesh.userData.keys = part.keys; mesh.userData.inner = part.inner;
+      const wheel = part.spin === 'l' ? robot.wheelL : part.spin === 'r' ? robot.wheelR : null;
+      if (wheel) {                                   // a hub motor: the whole outer turns about the axle
+        const w = man.wheels[part.spin]; wheel.position.set(w.x, 0, w.radius); mesh.position.set(-w.x, 0, -w.radius); wheel.add(mesh);
+      } else { mesh.position.z = -AXLE; robot.body.add(mesh); }
+    }
+    Object.assign(ANCHORS, man.anchors);
+  } else {
+    const model = await (await fetch(opts.model || '/ui/viz/robot.json')).json();
+    for (const p of model.parts) {
+      let g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(p.vertices, 3));
+      g.setIndex(p.faces);
+      g = toCreasedNormals(g, 34 * D2R);               // CAD shading: smooth curves, crisp edges
+      const mesh = new THREE.Mesh(g, mats[p.material] || mats.shell);
+      mesh.castShadow = true; mesh.receiveShadow = true; mesh.position.z = -AXLE; mesh.name = p.name;
+      robot.body.add(mesh);
+    }
+    { // lidar dome and LED ring: not in the CAD export, so parametric
+      const top = 0.247 - AXLE;
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.004, 56), mats.shell);
+      ring.rotation.x = Math.PI / 2; ring.position.z = top + 0.002; ring.castShadow = true; ring.name = 'ring'; robot.body.add(ring);
+      const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.0335, 0.036, 0.027, 56), mats.glass);
+      dome.rotation.x = Math.PI / 2; dome.position.z = top + 0.0175; dome.castShadow = true; dome.name = 'dome'; robot.body.add(dome);
+      const led = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0045, 0.0045, 0.0022), mats.led, 16), m4 = new THREE.Matrix4();
+      for (let i = 0; i < 16; i++) { const a = i / 16 * TAU;
+        m4.makeRotationZ(a).setPosition(Math.cos(a) * 0.0415, Math.sin(a) * 0.0415, top + 0.005); led.setMatrixAt(i, m4); }
+      led.name = 'led'; robot.body.add(led);
+    }
+    for (const [grp, side] of [[robot.wheelL, -1], [robot.wheelR, 1]]) {     // wheels: parametric, with tread
+      grp.position.set(side * 0.092, 0, AXLE);
+      const tyre = new THREE.Mesh(new THREE.CylinderGeometry(0.0468, 0.0468, 0.024, 44), mats.tyre);
+      tyre.rotation.z = Math.PI / 2; tyre.castShadow = true; grp.add(tyre);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.0255, 32), mats.hub);
+      hub.rotation.z = Math.PI / 2; grp.add(hub);
+      const N = 26, lugs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0118, 0.0034, 0.0078), mats.tyre, N * 2);
+      const rx = new THREE.Matrix4(), tr = new THREE.Matrix4(), tw = new THREE.Matrix4(), m4 = new THREE.Matrix4();
+      for (let row = 0; row < 2; row++) for (let i = 0; i < N; i++) {
+        const s = row ? 1 : -1;
+        rx.makeRotationX((i + row * 0.5) / N * TAU); tr.makeTranslation(s * 0.0062, 0.0483, 0); tw.makeRotationY(s * 0.5);
+        lugs.setMatrixAt(row * N + i, m4.copy(rx).multiply(tr).multiply(tw));
+      }
+      lugs.castShadow = true; grp.add(lugs);
+    }
+  }
   for (const m of Object.values(mats)) m.userData = { env: m.envMapIntensity, cc: m.clearcoat, rough: m.roughness, parkEnv: 0.2 };
   mats.glass.userData.parkEnv = 0.035; mats.glass.userData.parkRough = 0.4;
-
-  const model = await (await fetch(opts.model || '/ui/viz/robot.json')).json();
-  robot.body.position.z = AXLE;                      // the body pitches about the axle
-  for (const p of model.parts) {
-    let g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(p.vertices, 3));
-    g.setIndex(p.faces);
-    g = toCreasedNormals(g, 34 * D2R);               // CAD shading: smooth curves, crisp edges
-    const mesh = new THREE.Mesh(g, mats[p.material] || mats.shell);
-    mesh.castShadow = true; mesh.receiveShadow = true; mesh.position.z = -AXLE; mesh.name = p.name;
-    robot.body.add(mesh);
-  }
-  { // lidar dome and LED ring: not in the CAD export, so parametric
-    const top = 0.247 - AXLE;
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.004, 56), mats.shell);
-    ring.rotation.x = Math.PI / 2; ring.position.z = top + 0.002; ring.castShadow = true; ring.name = 'ring'; robot.body.add(ring);
-    const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.0335, 0.036, 0.027, 56), mats.glass);
-    dome.rotation.x = Math.PI / 2; dome.position.z = top + 0.0175; dome.castShadow = true; dome.name = 'dome'; robot.body.add(dome);
-    const led = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0045, 0.0045, 0.0022), mats.led, 16), m4 = new THREE.Matrix4();
-    for (let i = 0; i < 16; i++) { const a = i / 16 * TAU;
-      m4.makeRotationZ(a).setPosition(Math.cos(a) * 0.0415, Math.sin(a) * 0.0415, top + 0.005); led.setMatrixAt(i, m4); }
-    led.name = 'led'; robot.body.add(led);
-  }
-  for (const [grp, side] of [[robot.wheelL, -1], [robot.wheelR, 1]]) {     // wheels: parametric, with tread
-    grp.position.set(side * 0.092, 0, AXLE);
-    const tyre = new THREE.Mesh(new THREE.CylinderGeometry(0.0468, 0.0468, 0.024, 44), mats.tyre);
-    tyre.rotation.z = Math.PI / 2; tyre.castShadow = true; grp.add(tyre);
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.0255, 32), mats.hub);
-    hub.rotation.z = Math.PI / 2; grp.add(hub);
-    const N = 26, lugs = new THREE.InstancedMesh(new THREE.BoxGeometry(0.0118, 0.0034, 0.0078), mats.tyre, N * 2);
-    const rx = new THREE.Matrix4(), tr = new THREE.Matrix4(), tw = new THREE.Matrix4(), m4 = new THREE.Matrix4();
-    for (let row = 0; row < 2; row++) for (let i = 0; i < N; i++) {
-      const s = row ? 1 : -1;
-      rx.makeRotationX((i + row * 0.5) / N * TAU); tr.makeTranslation(s * 0.0062, 0.0483, 0); tw.makeRotationY(s * 0.5);
-      lugs.setMatrixAt(row * N + i, m4.copy(rx).multiply(tr).multiply(tw));
-    }
-    lugs.castShadow = true; grp.add(lugs);
-  }
   robot.root.add(robot.body, robot.wheelL, robot.wheelR, contact(0.44, 0.34, C.shadow));
   zup.add(robot.root);
 
@@ -215,11 +257,15 @@ export async function createEngine(canvas, host, opts = {}) {
     tof: proxy('tof', new THREE.BoxGeometry(0.017, 0.004, 0.012), [-0.047, 0.0497, 0.196]),
   };
   INNER.camera.rotation.x = Math.PI / 2;
-  const SHOWS = { esp32: ['esp32'], radxa: ['radxa'], imu: ['imu', 'esp32'], compass: ['compass', 'esp32'], payload: ['payload'],
-                  camera: ['camera'], tof: ['tof'], gamepad: ['esp32'], clients: ['radxa'] };
+  // Stand-ins glow only for parts the model does not have. The full assembly brings its own
+  // controller, IMU, Radxa and camera; the depth sensor, compass and payload are not in it.
+  const SHOWS = full ? { compass: ['compass'], payload: ['payload'], tof: ['tof'] }
+    : { esp32: ['esp32'], radxa: ['radxa'], imu: ['imu', 'esp32'], compass: ['compass', 'esp32'], payload: ['payload'],
+        camera: ['camera'], tof: ['tof'], gamepad: ['esp32'], clients: ['radxa'] };
   const real = [];
   for (const top of [robot.body, robot.wheelL, robot.wheelR]) top.traverse((o) => {
     if (!o.isMesh || o.userData.proxy) return;
+    if (o.userData.keys) { o.userData.tags = o.userData.keys; o.userData.mat = o.material; real.push(o); return; }
     const n = o.name, t = o.userData.tags = [];
     if (n === 'dome') t.push('lidar'); if (n === 'ring') t.push('lidar', 'lights'); if (n === 'led') t.push('lights');
     if (n === '2pybot_face') t.push('camera', 'tof');
@@ -234,6 +280,7 @@ export async function createEngine(canvas, host, opts = {}) {
     for (const o of real) {
       if (!hot) { o.material = o.userData.mat; continue; }
       if (!o.userData.tags.includes(hot)) { o.material = ghost; continue; }
+      if (o.userData.inner) { o.material = glowMat; continue; }       // a board inside the shell: make it glow
       if (!o.userData.lit) { o.userData.lit = o.userData.mat.clone();
         if (o.userData.lit.emissive) { o.userData.lit.emissive.set(0xff7a1a); o.userData.lit.emissiveIntensity = 0.16; } }
       o.material = o.userData.lit;

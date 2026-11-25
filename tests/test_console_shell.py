@@ -66,6 +66,49 @@ def test_cad_to_robot_frame_is_a_rotation():
     assert round(det, 6) == 1.0
 
 
+def test_full_assembly_model_is_small_upright_and_matches_its_manifest():
+    man = json.loads(text(UI / "viz/robot2.json"))
+    blob = (UI / "viz/robot2.bin").read_bytes()
+    assert man["schema"] == "2pybot-viz-mesh/2" and man["axes"] == "x right / y forward / z up"
+    assert len(blob) == man["bytes"] < 3_000_000, "the robot serves this over its hotspot: keep it small"
+    assert 60_000 < man["triangles"] < 200_000
+    import struct
+    lo, hi, names = [9, 9, 9], [-9, -9, -9], set()
+    for part in man["parts"]:
+        names.add(part["name"])
+        assert part["voff"] % 4 == 0 and part["ioff"] % (4 if part["wide"] else 2) == 0, "typed arrays need aligned offsets"
+        assert part["ioff"] + part["indices"] * (4 if part["wide"] else 2) <= len(blob)
+        v = struct.unpack_from("<%df" % (part["vertices"] * 3), blob, part["voff"])
+        for axis in range(3):
+            lo[axis], hi[axis] = min(lo[axis], min(v[axis::3])), max(hi[axis], max(v[axis::3]))
+        index = struct.unpack_from("<%d%s" % (part["indices"], "I" if part["wide"] else "H"), blob, part["ioff"])
+        assert max(index) < part["vertices"] and part["indices"] % 3 == 0
+        if part["name"] == "face_inlay":
+            assert min(v[1::3]) > 0.03, "the face (camera side) is at the front, +y"
+        if part["spin"]:
+            side = -1 if part["spin"] == "l" else 1
+            assert side * (min(v[0::3]) + max(v[0::3])) > 0 and part["keys"] == ["wheel_" + part["spin"]], "left wheel at -x"
+    assert abs(lo[2]) < 0.002 and 0.25 < hi[2] < 0.29, "standing on the floor, in metres"
+    assert abs(lo[0] + hi[0]) < 0.005, "centred between its wheels"
+    assert {"face_inlay", "RPLIDAR_C1", "ESP32_DevKitC", "Radxa_Cubie_A7A", "leds", "screws"} <= names
+    assert not any(n.startswith(("wire_", "GRM188")) for n in names), "wires and 1 mm capacitors are left out"
+    for key in ("lidar", "lights", "esp32", "imu", "radxa", "wheel_l", "wheel_r"):
+        assert len(man["anchors"][key]) == 3
+    assert man["anchors"]["wheel_l"][0] < 0 < man["anchors"]["wheel_r"][0]
+    engine = text(UI / "viz/engine.js")
+    assert "robot2.json" in engine and "/ui/viz/robot.json" in engine, "the printed-parts model stays as the fallback"
+
+
+def test_assembly_converter_turns_the_cad_export_without_mirroring_it():
+    source = text(ROOT / "scripts/generate_viz_glb.py")
+    assert "return np.c_[cx - v[:, 0], v[:, 2] - cz, v[:, 1] - floor]" in source
+    # (x, y, z) -> (-x, z, y): rows (-1,0,0), (0,0,1), (0,1,0); determinant +1, so a rotation
+    m = [[-1, 0, 0], [0, 0, 1], [0, 1, 0]]
+    det = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+           + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+    assert det == 1
+
+
 # ------------------------------------------------------------------ the shell page
 def test_every_local_asset_the_shell_loads_exists():
     html = text(UI / "index.html")

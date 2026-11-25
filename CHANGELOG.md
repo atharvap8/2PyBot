@@ -46,6 +46,17 @@ read from the robot's own log of the 5.2.0 test drive.
   The browser used to combine a 5 Hz map pose with newer odometry itself, which
   jittered in turns and snapped on corrections. The view now cuts only when the
   robot says it moved the pose in one step.
+- **The 3D robot is the full CAD assembly.** `scripts/generate_viz_glb.py` turns the
+  Onshape export (`models/2pybot.glb`: 45 MB, 686,000 triangles in 17,000 pieces)
+  into `ui/viz/robot2.json` + `robot2.bin` (1.4 MB, 111,000 triangles): rotated into
+  the robot frame, one welded mesh per part and colour, the 1 mm capacitors and the
+  three decorative wires left out, screws and LEDs as hulls. The view now shows the
+  real shell with its vents and logo, the hub motors and their mounts, the lidar
+  where it really sits (31 mm right of centre), the LED ring, decks, battery and
+  boards. In the system view the controller, IMU, Radxa and camera light up as the
+  real parts in their true places; the depth sensor, compass and payload are not in
+  the CAD and keep stand-ins. The printed-parts model stays as the fallback. The
+  45 MB export itself is not committed.
 - **Unload a map.** Maps has an Unload button (`POST /slam/api/maps/unload`): back
   to idle with an empty map, saved files untouched. Loading one map straight
   after another now refreshes the 2D picture and the 3D walls (both were keyed on a
