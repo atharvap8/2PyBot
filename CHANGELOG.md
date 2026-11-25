@@ -3,6 +3,54 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 5.3.0: gamepad reconnect no longer drops the robot, missions survive Wi-Fi loss, no more room-hopping on the map
+
+The firmware changes compile but have not been driven yet. The causes below were
+read from the robot's own log of the 5.2.0 test drive.
+
+- **Connecting the gamepad no longer switches the motors off.** While a gamepad
+  reconnects, the balance loop runs late in a burst: 20 ms and 22 ms about 50 ms
+  apart, roughly 2 s before the pad reports connected (logged twice on 5.2.0, both
+  times followed by "CONTROL LOOP OVERRUN"). 5.2.0 rode through one late loop but
+  stopped for a second one within a second. Late time is now budgeted: each late
+  loop banks its length, the bank drains 100 ms per second, and the motors stop
+  only for one loop over 100 ms or more than 250 ms banked. The stall guard is
+  unchanged.
+- **Losing Wi-Fi no longer stops a lidar mission.** Go-to, roam and explore carry on
+  when the supervising page stops answering (the log shows two "supervisor
+  disconnected" pauses on one short route). They still stop for STOP, SELECT, the
+  safety bubble and the controller's command timeout. A recorded replay drives
+  blind, so it still pauses without its supervisor.
+- **After you take over with the gamepad, the autopilot takes the drive back.** A
+  takeover no longer pauses a lidar mission. It waits until the sticks have rested
+  for 1.5 s, asks the controller for the drive again and carries on, replanning if
+  you moved it off the route. The controller reports how long the pad has been idle
+  (new last field of `NR`); SELECT still ends the mission.
+- **"Lost contact with the controller" root cause fixed.** The doctor ran four
+  `systemctl`/`ip` commands on the console's event loop every 5 s. Starting a
+  process from the 370 MB console froze everything for 0.3 to 0.5 s each time
+  (38 "Console was busy" lines in about three minutes of missions), which is what starved
+  the serial reader. The checks now run off the event loop, start through
+  `posix_spawn` (no copy of the console), and drop to every 30 s while balancing.
+- **The map position no longer hops between rooms.** Two faults did it. (1) A
+  confident scan match that the pose filter refused was counted as "lost", and
+  after a second of that the whole map was searched. It now loosens the filter and
+  takes the matcher's word after three scans. (2) The whole-map search moved the
+  robot to its best score at once, and rooms look alike to a lidar. It now looks
+  within 0.6 m first, and a far-away place must clearly beat what is nearby and
+  win a second search, at the spot odometry says it should then be, before the
+  robot is moved. Until then the pose carries on by odometry. Find me and loading a
+  map still move at once.
+- **Drive view without the glitches.** The robot sends its live pose 20 times a
+  second: the last matched pose carried forward by the odometry measured since.
+  The browser used to combine a 5 Hz map pose with newer odometry itself, which
+  jittered in turns and snapped on corrections. The view now cuts only when the
+  robot says it moved the pose in one step.
+- **Unload a map.** Maps has an Unload button (`POST /slam/api/maps/unload`): back
+  to idle with an empty map, saved files untouched. Loading one map straight
+  after another now refreshes the 2D picture and the 3D walls (both were keyed on a
+  version number that was always 1).
+
 ## 5.2.0: 3D console, autopilot that goes round things, missions without the gamepad
 
 Firmware changes in this revision compile but have not been driven on the robot

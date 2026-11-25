@@ -193,3 +193,92 @@ def test_a_refused_renewal_pauses(tmp_path):
     link.on_grant=lambda:link.nav.update(state=nav.NAV_REFUSED)
     step(m,link,clock);step(m,link,clock)
     assert m.mission["state"]=="paused" and "would not renew" in m.mission["reason"]
+
+
+# ---- 5.3.0: lidar missions survive a lost page and hand back after a gamepad takeover ----
+class Bubble:
+    def status(self,now=None):
+        return {"stale":False,"forward_cap":.5,"reverse_cap":.3,"turn_left_ok":True,"turn_right_ok":True,
+                "front_m":2.0,"free_by_heading":[3.0]*24,"state":"clear"}
+
+
+class Slam:
+    def __init__(self):
+        import threading
+        self.mode="localizing";self.lock=threading.Lock();self.pose=[0.0,0.0,0.0];self.match={"ok":True,"lost":0}
+        self.bubble=Bubble();self.plan=[];self.goal=None
+    def robot_live(self):return True
+
+
+def roaming(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);m.slam=Slam();link.debug['v']=.2   # wheels turning: not stuck
+    asyncio.run(m.start_task("roam"));step(m,link,clock);step(m,link,clock)
+    assert m.mission["state"]=="running" and m.mission["command_v"]>0
+    return m,link,clock
+
+
+def grants(link):return sum(line.startswith("AN,") and line.endswith(",1") for line in link.sent)
+
+
+def test_losing_the_supervising_page_does_not_stop_a_lidar_mission(tmp_path):
+    m,link,clock=roaming(tmp_path)
+    step(m,link,clock,3.5,heartbeat=False)                      # Wi-Fi out of range: no heartbeat
+    for _ in range(40):step(m,link,clock,heartbeat=False)
+    assert m.mission["state"]=="running" and m.mission["command_v"]>0 and m.mission["unsupervised"]
+    assert any("carries on" in e["text"] for e in m.events)
+    step(m,link,clock)                                          # the page is back
+    assert m.mission["unsupervised"] is False
+
+
+def test_a_recorded_replay_still_needs_its_supervisor(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]));step(m,link,clock)
+    step(m,link,clock,3.5,heartbeat=False)
+    assert m.mission["state"]=="paused" and "supervisor" in m.mission["reason"]
+
+
+def test_after_a_takeover_the_autopilot_waits_for_the_pad_to_rest_then_drives_again(tmp_path):
+    m,link,clock=roaming(tmp_path);before=grants(link);first=m.mission["token"]
+    link.nav.update(state=nav.NAV_TAKEOVER,idle_ms=0);step(m,link,clock)
+    assert m.mission["state"]=="running" and m.mission["yielded"] and m.mission["info"]["waiting"]=="gamepad"
+    assert m.mission["command_v"]==0
+    sent=len(link.sent)
+    for _ in range(60):                                         # three seconds of the operator driving
+        link.nav["idle_ms"]=40;step(m,link,clock)
+    assert grants(link)==before and m.mission["state"]=="running", "it must not grab the drive while the sticks move"
+    assert not any(line.startswith("AU,") for line in link.sent[sent:]), "and must not send drive commands either"
+    link.nav["idle_ms"]=900;step(m,link,clock)
+    assert grants(link)==before, "0.9 s of rest is not enough"
+    link.nav["idle_ms"]=1600;step(m,link,clock)
+    assert grants(link)==before+1
+    step(m,link,clock);step(m,link,clock)
+    assert m.mission["token"]!=first and m.mission["yielded"] is False and m.mission["command_v"]>0
+    assert any("driving again" in e["text"] for e in m.events)
+
+
+def test_handback_is_asked_again_when_the_controller_says_not_yet(tmp_path):
+    m,link,clock=roaming(tmp_path)
+    link.nav.update(state=nav.NAV_TAKEOVER,idle_ms=2000)
+    held=m.mission["token"]
+    link.on_grant=lambda:link.nav.update(token=held,state=nav.NAV_TAKEOVER)   # a stick is off-centre: refused
+    for _ in range(50):step(m,link,clock)
+    assert m.mission["state"]=="running" and m.mission["yielded"], "a refused hand-back is not a reason to pause"
+    tries=grants(link)
+    assert tries>=3
+    link.on_grant=None;clock.t+=1.1;step(m,link,clock);step(m,link,clock);step(m,link,clock)
+    assert m.mission["yielded"] is False and m.mission["command_v"]>0
+
+
+def test_handback_works_on_firmware_that_does_not_report_pad_idle_time(tmp_path):
+    m,link,clock=roaming(tmp_path);before=grants(link)
+    link.nav.update(state=nav.NAV_TAKEOVER);link.nav.pop("idle_ms",None)
+    for _ in range(20):step(m,link,clock)                       # 1 s
+    assert grants(link)==before
+    for _ in range(14):step(m,link,clock)                       # past 1.5 s since the takeover
+    assert grants(link)==before+1 and m.mission["yielded"] is False
+
+
+def test_select_during_a_takeover_still_ends_the_mission(tmp_path):
+    m,link,clock=roaming(tmp_path)
+    link.nav.update(state=nav.NAV_TAKEOVER,idle_ms=0);step(m,link,clock)
+    link.tel["balancing"]=False;step(m,link,clock)
+    assert m.mission["state"]=="aborted"

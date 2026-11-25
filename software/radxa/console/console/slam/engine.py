@@ -46,6 +46,23 @@ DEFAULTS = {
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 
+def _wrap(a):
+    return math.atan2(math.sin(a), math.cos(a))
+
+
+def _between(a, b):
+    """The motion that takes pose a to pose b, expressed in a's own frame."""
+    c, s = math.cos(a[2]), math.sin(a[2])
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    return c * dx + s * dy, -s * dx + c * dy, _wrap(b[2] - a[2])
+
+
+def _compose(p, d):
+    """Pose p moved by d (a motion in p's own frame)."""
+    c, s = math.cos(p[2]), math.sin(p[2])
+    return np.array([p[0] + c * d[0] - s * d[1], p[1] + s * d[0] + c * d[1], _wrap(p[2] + d[2])])
+
+
 class SlamEngine:
     def __init__(self, maps_dir: str, settings: dict | None = None):
         self.cfg = dict(DEFAULTS, **(settings or {}))
@@ -85,6 +102,11 @@ class SlamEngine:
         self._ok_streak = 0
         self._last_find = 0.0
         self._find_lock = threading.Lock()
+        self._gate_streak = 0                  # confident matches in a row that the filter refused
+        self._candidate = None                 # a far-away place the whole-map search proposed, awaiting a second vote
+        self._anchor = None                    # (map pose, odometry pose) of the last matched scan
+        self._scan_t = 0.0                     # capture time of the scan in scan_pts
+        self.jumps = 0                         # times the pose was moved in one step (load, Find me, confirmed re-find)
         self._scan_q = collections.deque(maxlen=2)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._worker, name="slam", daemon=True)
@@ -286,6 +308,7 @@ class SlamEngine:
         pts_full = np.c_[c["lidar_x"] + r * np.cos(a), c["lidar_y"] + r * np.sin(a)]
         with self.lock:
             self.scan_pts = pts_full                         # radar view shows raw scan
+            self._scan_t = 0.5 * (scan["t0"] + scan["t1"])
         if g not in ("tilt", "rate") and g is not None:
             self._update_bubble(scan, g)
         else:
@@ -339,6 +362,7 @@ class SlamEngine:
             guess = self.filter.mu.copy()
         sub = pts[np.linspace(0, len(pts) - 1, min(len(pts), c["match_points"])).astype(int)]
         first = grid.version == 0
+        good = True
         if first:
             new_pose, score, ok = guess, 0.0, True
         else:
@@ -347,14 +371,30 @@ class SlamEngine:
             # A good match still has to agree with wheels+gyro (Mahalanobis gate);
             # otherwise this scan is carried by the odometry prediction alone.
             ok = good and self.filter.update(z, cov)
-            if not good:
+            if ok:
+                self._gate_streak = 0
+            elif good:
+                # A confident match right next to where we think we are, refused by the gate.
+                # That is not being lost: the filter has become too sure of itself (slip it
+                # did not see). Loosen it, and on a known map take the matcher's word once it
+                # has said the same thing three scans running. Searching the whole map for
+                # this is what used to throw the robot into another room.
+                self._gate_streak += 1
+                self.filter.inflate()
+                if self.mode == "localizing" and self._gate_streak >= 3:
+                    self.filter.reset(z, sigma_xy=0.08, sigma_th=math.radians(4))
+                    ok, self._gate_streak = True, 0
+            else:
                 self.filter.stats["skipped"] += 1
             new_pose = self.filter.mu.copy()
         new_pose[2] = math.atan2(math.sin(new_pose[2]), math.cos(new_pose[2]))
         with self.lock:
             self.pose = new_pose
-            self.match = {"score": score, "ok": ok, "lost": 0 if ok else self.match["lost"] + 1}
+            # "lost" counts scans that match nothing nearby; a refused but confident match is not one
+            self.match = {"score": score, "ok": ok, "lost": 0 if ok else self.match["lost"] + (0 if good else 1)}
             self.path.append((float(new_pose[0]), float(new_pose[1])))
+            if od is not None:
+                self._anchor = (new_pose.copy(), np.array(od, float))
         if self.mode == "mapping":
             lp = self._last_map_pose
             moved = (lp is None or math.hypot(new_pose[0] - lp[0], new_pose[1] - lp[1]) >= c["map_every_m"]
@@ -365,11 +405,16 @@ class SlamEngine:
             self.message = ("Mapping. Drive slowly and come back to where you started to tidy the map."
                             if ok or first else "I'm not sure where I am. Slow down or drive back to a spot you've mapped.")
         else:
-            # lost for ~2 s: search the whole map again (at most every 3 s)
-            if self.match["lost"] >= 20 and time.monotonic() - self._last_find > 3.0:
+            # Nothing nearby has matched for ~1 s: look for the robot again. At most every 3 s,
+            # or after 1 s when a far-away candidate is waiting for its second vote.
+            if self.match["lost"] >= 20 and time.monotonic() - self._last_find > (1.0 if self._candidate else 3.0):
                 self._last_find = time.monotonic()
-                self.relocalize(wide=True)
-            self.message = ("Localized: I know where I am on this map." if ok else
+                self._recover()
+            elif ok:
+                self._candidate = None
+            self.message = ("Localized: I know where I am on this map." if ok or good else
+                            "This looks like another part of the map. Checking again before I move the marker."
+                            if self._candidate else
                             "I can't match this view to the map. Drive to a mapped area or press Find me.")
             self._ok_streak = self._ok_streak + 1 if ok else 0
             if self.mode == "localizing" and self._extend_pending and self._ok_streak >= 8:
@@ -392,6 +437,9 @@ class SlamEngine:
             self.filter.reset(self.pose, sigma_xy=0.01, sigma_th=math.radians(0.5))
             self._odom_ref = None
             self._last_map_pose = None
+            self._anchor, self._candidate = None, None
+            if fresh:
+                self.jumps += 1
             self.mode = "mapping"
         self.message = "Mapping started."
 
@@ -401,41 +449,112 @@ class SlamEngine:
         self.message = "Stopped. Save the map if you like it."
 
     def relocalize(self, wide=True):
-        """Global search: try positions on a 0.25 m lattice over the map's free
-        space at 36 headings with a few scan points, then refine the best eight.
-        Serialized: "Find me" (HTTP) and the automatic re-search (worker) never
-        run at the same time."""
+        """Find me: search the whole map and move the robot to the best place found.
+        Used when a map is loaded and when the operator asks. Serialized with the
+        automatic re-find, so the two never run at the same time."""
         with self._find_lock:
-            return self._relocalize()
+            g = self.grid
+            pts = self._usable_scan()
+            if g.version == 0 or pts is None:
+                return 0.0
+            best, best_s = self._global_search(pts)
+            if best is None:
+                return 0.0
+            self._adopt(best)
+            return best_s
 
-    def _relocalize(self):
+    def _usable_scan(self):
+        pts = self.scan_pts
+        if not len(pts):
+            return None
+        pts = pts[np.hypot(pts[:, 0], pts[:, 1]) < self.cfg["max_range"]]
+        return pts if len(pts) >= 30 else None
+
+    def _adopt(self, pose, jump=True):
+        """Move the robot on the map in one step."""
+        od = self._odom_at(self._scan_t)
+        with self.lock:
+            self.pose = np.array(pose, float)
+            self.filter.reset(self.pose)
+            self._odom_ref = None
+            self._anchor = None if od is None else (self.pose.copy(), np.array(od, float))
+            if jump:
+                self.jumps += 1
+        self._candidate, self._gate_streak = None, 0
+
+    def _recover(self):
+        """The automatic re-find, run by the worker when nothing nearby has matched for a while.
+
+        A house has rooms that look alike to a lidar, so the best score over the whole map
+        is not proof of anything. This looks around the current position first (odometry
+        rarely drifts more than half a metre). Only if that fails does it search the whole
+        map, and a place far from where the robot thinks it is has to (1) clearly beat what
+        is nearby and (2) win again on the next search, at the spot odometry says it should
+        then be, before the robot is moved there. Until then the pose carries on by
+        odometry, so nothing jumps on the map or in the drive view.
+        """
+        with self._find_lock:
+            g, c = self.grid, self.cfg
+            pts = self._usable_scan()
+            if g.version == 0 or pts is None:
+                return
+            here = self.filter.mu.copy()
+            near, near_s = g.match(pts[::2], here, lin=0.60, ang=math.radians(24))
+            if near_s >= c["min_loc_score"]:
+                self._adopt(near, jump=math.hypot(near[0] - here[0], near[1] - here[1]) > 0.5)
+                return
+            best, best_s = self._global_search(pts)
+            if best is None or best_s < max(c["min_loc_score"], 1.25 * near_s):
+                self._candidate = None                       # nowhere is convincing: stay on odometry
+                return
+            od = self._odom_at(self._scan_t)
+            cand = self._candidate
+            if cand is not None:
+                moved = od is not None and cand["odom"] is not None        # no odometry (bench): assume it stood still
+                expect = _compose(cand["pose"], _between(cand["odom"], od)) if moved else cand["pose"]
+                if (math.hypot(best[0] - expect[0], best[1] - expect[1]) < 0.5
+                        and abs(_wrap(best[2] - expect[2])) < math.radians(20)):
+                    self._adopt(best)
+                    return
+            self._candidate = {"pose": np.array(best, float), "odom": od, "score": float(best_s)}
+
+    def live_pose(self):
+        """(pose, jumps): where the robot is now. The last scan-matched pose is a little old
+        by the time anyone draws it, so it is carried forward by the odometry measured since
+        that scan. `jumps` changes when the pose was moved in one step (so a view can cut
+        instead of gliding across the map)."""
+        with self.lock:
+            anchor, jumps = self._anchor, self.jumps
+            od = (self.odom.x, self.odom.y, self.odom.th)
+            pose = self.pose.copy()
+            idle = self.mode == "idle"
+        if idle:
+            return [float(od[0]), float(od[1]), float(od[2])], jumps      # no map: plain odometry
+        if anchor is None:
+            return pose.tolist(), jumps
+        return _compose(anchor[0], _between(anchor[1], od)).tolist(), jumps
+
+    def _global_search(self, pts):
+        """Best pose over the whole map: positions on a 0.25 m lattice over the free space
+        at 36 headings with a few scan points, then the best eight refined. -> (pose, score)"""
         g = self.grid
-        if g.version == 0 or not len(self.scan_pts):
-            return 0.0
-        pts = self.scan_pts[np.hypot(self.scan_pts[:, 0], self.scan_pts[:, 1]) < self.cfg["max_range"]]
-        if len(pts) < 30:
-            return 0.0
         few = pts[np.linspace(0, len(pts) - 1, 90).astype(int)]
         stride = max(1, int(round(0.25 / g.res)))                 # even 0.25 m lattice
         free = g.logodds[::stride, ::stride] < -1.0              # confidently free cells
         rows, cols = np.nonzero(free)
         if not len(rows):
-            return 0.0
+            return None, 0.0
         xs = g.origin + (cols * stride + 0.5) * g.res
         ys = g.origin + (rows * stride + 0.5) * g.res
         ths = np.radians(np.arange(0, 360, 10))
         cand = np.stack([np.repeat(xs, len(ths)), np.repeat(ys, len(ths)), np.tile(ths, len(xs))], axis=1)
         coarse = g.score(few, cand)
-        best, best_s = self.pose, -1.0
+        best, best_s = None, -1.0
         for k in np.argsort(coarse)[-8:]:
             p, sc = g.match(pts[::2], cand[k], lin=0.30, ang=math.radians(8))
             if sc > best_s:
                 best, best_s = p, sc
-        with self.lock:
-            self.pose = best
-            self.filter.reset(best)
-            self._odom_ref = None
-        return best_s
+        return best, float(best_s)
 
     # ------------------------------------------------------------- motion tests
     def test_start(self, name):
@@ -611,7 +730,10 @@ class SlamEngine:
         g = OccupancyGrid()
         g.logodds[:] = data["logodds"]
         g.touched[:] = data["touched"]
-        g.version = 1
+        # Not simply 1: viewers reload the map picture when the version changes, and loading
+        # one map straight after another must count as a change.
+        self._map_serial = max(getattr(self, "_map_serial", 0) + 1, int(time.time()))
+        g.version = self._map_serial * 1000
         meta = self._read_meta(name) or {}
         with self.lock:
             self.grid = g
@@ -623,10 +745,29 @@ class SlamEngine:
             self.filter.reset(self.pose, sigma_xy=0.5, sigma_th=math.radians(30))
             self.path.clear()
             self._odom_ref = None
+            self._anchor, self._candidate = None, None
+            self.jumps += 1
             self.map_name = name
             self.mode = "localizing"
             self._need_find = True               # search the whole map on the first scan
         self.message = "Map loaded. Looking for where the robot is on it…"
+
+    def unload(self):
+        """Stop using the loaded map: back to idle with an empty one. Saved files stay."""
+        with self.lock:
+            self.grid = OccupancyGrid()
+            self.labels, self.plan, self.goal = [], [], None
+            self.map_name, self.mode = "", "idle"
+            self.pose = np.zeros(3)
+            self.filter.reset(self.pose)
+            self.path.clear()
+            self._odom_ref = self._last_map_pose = self._anchor = self._candidate = None
+            self._extend_pending = self._need_find = False
+            self._ok_streak = self._gate_streak = 0
+            self.match = {"score": 0.0, "ok": False, "lost": 0}
+            self.tof_layer.clear_voxels()
+            self.jumps += 1
+        self.message = "Map unloaded. Load one or start mapping."
 
     # ------------------------------------------------------------- state for the UI
     def state(self, lidar_status):
@@ -645,7 +786,9 @@ class SlamEngine:
             labels = [dict(lb) for lb in self.labels]
             plan = [list(p) for p in self.plan]
             goal = None if self.goal is None else dict(self.goal)
+        live, jumps = self.live_pose()
         return {
+            "live_pose": live, "jumps": jumps, "relocating": self._candidate is not None,
             "mode": self.mode, "map_name": self.map_name, "message": self.message,
             "lidar": lidar_status, "rates": self.rate_hz,
             "robot_live": now - self.last_o < 1.0, "odom": od, "attitude": att,

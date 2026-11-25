@@ -5,9 +5,12 @@ console. Everything runs in the console process. The firmware only receives the
 navigation lease (`AN`/`AU`) and the safety-bubble caps (`BG`).
 
 The host can stop the robot but can never arm it. Local START and an open
-supervising page are required. Any stick movement takes over immediately. Since
-5.2.0 a mission keeps driving if the gamepad drops out: STOP on the console, the
-supervising page and the controller's 0.5 s command timeout still end it.
+supervising page are required to start. Any stick movement takes over immediately.
+Since 5.2.0 a mission keeps driving if the gamepad drops out. Since 5.3.0 a lidar
+mission (go-to, roam, explore) also keeps driving if the supervising page is lost
+(Wi-Fi out of range), and after a gamepad takeover it takes the drive back once
+the sticks have rested for 1.5 s. STOP on the console, SELECT on the gamepad, the
+safety bubble and the controller's 0.5 s command timeout still end or hold it.
 
 ## Plan
 

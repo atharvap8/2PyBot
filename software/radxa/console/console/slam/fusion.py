@@ -30,6 +30,14 @@ class PoseFilter:
         self.mu = np.array(pose, float)
         self.P = np.diag([sigma_xy ** 2, sigma_xy ** 2, sigma_th ** 2])
 
+    def inflate(self, factor=2.0, floor_xy=0.03, floor_th=math.radians(2.0)):
+        """Admit the estimate may be off: grow the uncertainty. Used when a confident scan
+        match keeps being refused, which means the filter became too sure of itself."""
+        self.P = self.P * factor
+        self.P[0, 0] = max(self.P[0, 0], floor_xy ** 2)
+        self.P[1, 1] = max(self.P[1, 1], floor_xy ** 2)
+        self.P[2, 2] = max(self.P[2, 2], floor_th ** 2)
+
     def predict(self, dx, dy, dth, slip=0.0):
         """dx, dy, dth: motion since the last step, in the previous robot frame."""
         th = self.mu[2]

@@ -419,9 +419,11 @@ class SerialLink:
                 self.nav.update(token=int(line[4:]),state=1 if line.startswith("AN!") else 9,last_rx=time.time(),received_monotonic=time.monotonic())
                 return
             if line.startswith("NR,"):
-                _,ms,token,state,sequence,age,pad,sleep=line.split(",")
+                fields=line.split(",");ms,token,state,sequence,age,pad,sleep=fields[1:8]
                 self.nav={"ms":int(ms),"token":int(token),"state":int(state),"sequence":int(sequence),
-                           "age_ms":int(age),"pad":bool(int(pad)),"last_rx":time.time(),"received_monotonic":time.monotonic()}
+                           "age_ms":int(age),"pad":bool(int(pad)),"last_rx":time.time(),"received_monotonic":time.monotonic(),
+                           # 5.3.0+: ms since the operator last drove; None on older firmware
+                           "idle_ms":int(fields[8]) if len(fields)>8 else None}
                 self.tel["asleep"]=sleep=="1"   # 4.7.7+: controller power-down state (was always 0)
                 self._publish({"type":"navigation","nav":self.nav})
                 return

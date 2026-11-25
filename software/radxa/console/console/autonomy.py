@@ -17,6 +17,7 @@ ENGAGED={"running"}
 # stops by itself 0.5 s after the last command it received.
 FEEDBACK_GRACE=2.0      # s without fresh odometry / lease feedback before a mission pauses
 REGRANT_LIMIT=3         # times a mission may renew a lease the controller timed out
+RESUME_IDLE=1.5         # s the gamepad must rest after a takeover before the autopilot drives again
 NAV_TAKEOVER,NAV_TIMEOUT,NAV_DISABLED,NAV_REFUSED=3,4,6,9
 
 
@@ -110,6 +111,8 @@ class Autonomy:
         self.action_epoch=0
         self.gap_since=None     # start of the current gap in controller feedback
         self.regrant=None       # lease renewal in flight: {"owner","until","why"}
+        self.yielded=None       # when the operator took over with the gamepad (mission waits, then resumes)
+        self.next_grant=0.0
         self.slam=None          # SlamEngine (set by the server): map pose + lidar safety bubble
         self.planner=None       # RoamPlanner / GotoPlanner / ExplorePlanner for lidar missions
     # ---------------------------------------------------------------- lidar missions
@@ -172,7 +175,7 @@ class Autonomy:
                 "origin":None,"points":[],"index":0,"speed_mps":planner.speed,"elapsed_s":0,"samples":[],"sample_index":0,
                 "replay_mode":kind,"distance_m":0,"command_v":0,"command_w":0,"epoch":self.link.pose_epoch,"token":owner,"info":{}}
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock()
-            self.gap_since=self.regrant=None
+            self.gap_since=self.regrant=self.yielded=None
             self.last_v=self.last_w=0;self.event("Mission started: "+name)
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
     def clear_plan(self):
@@ -323,7 +326,7 @@ class Autonomy:
                 "samples":route.get("samples",[]),"sample_index":0,"replay_mode":"original" if route.get("samples") else "legacy_waypoints",
                 "distance_m":0,"command_v":0,"command_w":0,"epoch":self.link.pose_epoch,"token":owner}
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock();self.best_metric=math.inf
-            self.gap_since=self.regrant=None
+            self.gap_since=self.regrant=self.yielded=None
             self.last_v=self.last_w=0;self.event("Replay started: "+route["name"])
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
     def heartbeat(self,identifier,key):
@@ -331,12 +334,12 @@ class Autonomy:
             raise ValueError("Supervision lease is not current; resume explicitly")
         self.last_operator=self.clock()
     def pause(self,reason="operator_pause"):
-        self.action_epoch+=1;self.gap_since=self.regrant=None
+        self.action_epoch+=1;self.gap_since=self.regrant=self.yielded=None
         if self.mission and self.mission["state"] in ENGAGED:
             self.tx(f"AN,{self.mission['token']},0");self.mission.update(state="paused",reason=reason,command_v=0,command_w=0)
             self.last_v=self.last_w=0;self.lease_key=None;self.event(self.mission["name"]+" paused: "+reason)
     def stop(self,reason="operator_stop",state="stopped"):
-        self.action_epoch+=1;self.gap_since=self.regrant=None
+        self.action_epoch+=1;self.gap_since=self.regrant=self.yielded=None
         if self.mission:
             if self.mission["state"] in ENGAGED or self.mission["state"]=="paused":
                 self.tx(f"AN,{self.mission['token']},0")
@@ -357,7 +360,7 @@ class Autonomy:
             if generation!=self.action_epoch:
                 self.tx(f"AN,{owner},0");raise ValueError("Resume was cancelled")
             self.mission["token"]=owner;self.mission.update(state="running",reason="",regrants=0)
-            self.gap_since=self.regrant=None
+            self.gap_since=self.regrant=self.yielded=None
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock();self.best_metric=math.inf
             self.event("Replay explicitly resumed")
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
@@ -379,16 +382,32 @@ class Autonomy:
         or one it refuses to renew, pauses the mission."""
         nav=self.link.nav;token=nav.get("token");state=nav.get("state")
         if self.regrant:
-            pending=self.regrant
+            pending=self.regrant;handback=pending.get("handback")
             if token==pending["owner"] and state in (1,2):
                 m["token"]=pending["owner"];self.sequence=0;self.regrant=None
-                self.event("Drive lease renewed after "+pending["why"]);return True
+                if handback:self.yielded=None;m["yielded"]=False;self.last_progress=now;self.event("Gamepad at rest: the autopilot is driving again")
+                else:self.event("Drive lease renewed after "+pending["why"])
+                return True
             if (token==pending["owner"] and state==NAV_REFUSED) or now>pending["until"]:
-                self.tx(f"AN,{pending['owner']},0")
-                self.pause("native lease lost: the controller would not renew it after "+pending["why"]);return False
-            m["info"]=dict(m.get("info") or {},waiting="controller link");return False
-        if token==m["token"] and state in (1,2):return True
-        if token==m["token"] and state==NAV_TAKEOVER:self.pause("gamepad takeover");return False
+                self.tx(f"AN,{pending['owner']},0");self.regrant=None
+                if not handback:self.pause("native lease lost: the controller would not renew it after "+pending["why"])
+                return False                       # after a takeover: sticks not at rest yet, ask again shortly
+            m["info"]=dict(m.get("info") or {},waiting="gamepad" if handback else "controller link");return False
+        if self.yielded is None and token==m["token"] and state in (1,2):return True
+        if self.yielded is not None or (token==m["token"] and state==NAV_TAKEOVER):
+            # The operator took over with the gamepad. A lidar mission waits and takes the drive
+            # back once the pad has rested; a recorded replay cannot pick up mid-way, so it pauses.
+            if not m.get("kind"):self.pause("gamepad takeover");return False
+            if self.yielded is None:
+                self.yielded=now;self.next_grant=0.0;self.last_v=self.last_w=0
+                m.update(yielded=True,command_v=0,command_w=0)
+                self.event("Gamepad took over: the autopilot resumes when the sticks rest")
+            idle=nav.get("idle_ms")              # 5.3.0 firmware reports it; older firmware: time since the takeover
+            rested=idle>=RESUME_IDLE*1000 if isinstance(idle,int) else now-self.yielded>=RESUME_IDLE
+            if rested and now>=self.next_grant:
+                owner=secrets.randbelow(0x7ffffffe)+1;self.next_grant=now+1.0
+                if self.tx(f"AN,{owner},1"):self.regrant={"owner":owner,"until":now+.8,"why":"the gamepad","handback":True}
+            m["info"]=dict(m.get("info") or {},waiting="gamepad");return False
         if token==m["token"] and state in (NAV_TIMEOUT,NAV_DISABLED) and m.get("regrants",0)<REGRANT_LIMIT:
             owner=secrets.randbelow(0x7ffffffe)+1
             if self.tx(f"AN,{owner},1"):
@@ -420,7 +439,12 @@ class Autonomy:
             self.gap_since=None
         if not self.link.tel.get("balancing"):self.stop("controller disarmed/fell","aborted");return
         if not self.lease_ok(m,now):return
-        if now-self.last_operator>3:self.pause("supervisor disconnected/backgrounded");return
+        if now-self.last_operator>3:
+            # A recorded replay drives blind, so it still needs someone watching. A lidar mission
+            # plans and avoids by itself: losing the page (Wi-Fi out of range) must not strand it.
+            if not m.get("kind"):self.pause("supervisor disconnected/backgrounded");return
+            if not m.get("unsupervised"):m["unsupervised"]=True;self.event("Lost the supervising page (Wi-Fi?): the mission carries on")
+        elif m.get("unsupervised"):m["unsupervised"]=False;self.event("Supervising page is back")
         if m.get("kind") in ("roam","goto","explore"):
             self.planner_tick(m,now,dt);return
         if m["samples"]:

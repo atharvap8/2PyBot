@@ -4,7 +4,7 @@
 <meta charset="utf-8"><script>if(/[?&]embed=1/.test(location.search))document.documentElement.classList.add('embed')</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>2PyBot · Maps</title>
-<link rel="stylesheet" href="static/slam.css?v=51">
+<link rel="stylesheet" href="static/slam.css?v=52">
 </head>
 <body>
 <header class="top">
@@ -47,8 +47,9 @@
         <button class="btn danger" id="b-delete">Delete</button>
       </div>
       <div class="row btns">
-        <button class="btn" id="b-zip">Download</button>
-        <button class="btn" id="b-stl" title="Export the map as a 3D STL">Export STL</button>
+        <button class="btn" id="b-unload" title="Stop using the loaded map. The saved map is kept.">Unload</button>
+        <button class="btn" id="b-zip" title="Download the map as a zip">Download</button>
+        <button class="btn" id="b-stl" title="Export the map as a 3D STL">STL</button>
         <button class="btn" id="b-import">Import</button>
         <input type="file" id="imp-file" accept=".zip" hidden>
       </div>
@@ -123,6 +124,6 @@
   </section>
 </main>
 <script src="static/slam3d.js"></script>
-<script src="static/slam.js?v=51"></script>
+<script src="static/slam.js?v=52"></script>
 </body>
 </html>

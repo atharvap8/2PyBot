@@ -313,6 +313,7 @@ import subprocess  # noqa: E402
 import sys  # noqa: E402
 
 AUTO_CAP = 3          # max auto-heals of one action within the window
+SLOW_PROBE = 30.0     # s between service/network probes while the robot is balancing
 AUTO_WINDOW = 900     # seconds
 COOLDOWN = 120        # min seconds between auto attempts of the same action
 
@@ -333,30 +334,38 @@ def _dep_installed(name):
         return False
 
 
-def _service_state(name):
+def _probe(args, timeout=5):
+    """Run a short read-only command and return its output ('' on any failure).
+
+    The console is a large process, and on the robot's Python a normal subprocess call
+    fork()s it while holding the interpreter lock: about 0.1 s per call with everything
+    else frozen. close_fds=False with a full path lets Python use posix_spawn instead,
+    which does not copy the process. Python opens its own files close-on-exec, so
+    nothing leaks into the child.
+    """
+    exe = shutil.which(args[0])
+    if not exe:
+        return ""
     try:
-        return subprocess.run(["systemctl", "is-active", name], capture_output=True, text=True, timeout=4).stdout.strip()
+        return subprocess.run([exe, *args[1:]], capture_output=True, text=True, timeout=timeout, close_fds=False).stdout
     except Exception:  # noqa: BLE001
-        return "unknown"
+        return ""
+
+
+def _service_state(name):
+    return _probe(["systemctl", "is-active", name], 4).strip() or "unknown"
 
 
 def _batch(verb, names):
     """One systemctl call for many units; returns {unit: state}. Order is preserved."""
-    try:
-        out = subprocess.run(["systemctl", verb, *names], capture_output=True, text=True, timeout=5).stdout.split()
-    except Exception:  # noqa: BLE001
-        out = []
+    out = _probe(["systemctl", verb, *names]).split()
     return {n: (out[i] if i < len(out) else "unknown") for i, n in enumerate(names)}
 
 
 def _hotspot_ap_up():
     """True when wlan1 actually has an address (the access point is really up)."""
-    try:
-        out = subprocess.run(["ip", "-4", "-br", "addr", "show", "wlan1"],
-                             capture_output=True, text=True, timeout=4).stdout
-    except Exception:  # noqa: BLE001
-        return None
-    return bool(re.search(r"\d+\.\d+\.\d+\.\d+", out))
+    out = _probe(["ip", "-4", "-br", "addr", "show", "wlan1"], 4)
+    return bool(re.search(r"\d+\.\d+\.\d+\.\d+", out)) if out else None
 
 
 def _numpy_major():
@@ -401,6 +410,7 @@ class Doctor:
         self.history = []
         self._attempts = {}
         self._armed = False
+        self._probed, self._probed_at = None, 0.0     # last service/network probe (see collect)
         self.actions = {
             # non-sudo, idempotent
             "restart_stream": self._restart_stream,
@@ -430,9 +440,18 @@ class Doctor:
             pass
         vp = self.visual_pair.status() if self.visual_pair else {}
         events = getattr(link, "events", {}) or {}
-        services = _batch("is-active", list(_MONITORED))
-        enabled = _batch("is-enabled", list(_ENABLED_WATCH))
-        deploy_units = _batch("is-active", ["2pybot-deploy.timer", "2pybot-deploy.path"])
+        # The service and network probes start processes. Do that every period while parked, but
+        # only every SLOW_PROBE seconds while the robot is balancing: nothing here can be acted
+        # on then (restarts are skipped while armed) and the control path should be left alone.
+        now = time.monotonic()
+        armed = bool(tel.get("balancing") or tel.get("self_righting"))
+        if self._probed is None or now - self._probed_at >= (SLOW_PROBE if armed else 0):
+            active = _batch("is-active", [*_MONITORED, "2pybot-deploy.timer", "2pybot-deploy.path"])
+            self._probed = {"services": {k: active[k] for k in _MONITORED},
+                            "deploy_units": {k: active[k] for k in ("2pybot-deploy.timer", "2pybot-deploy.path")},
+                            "enabled": _batch("is-enabled", list(_ENABLED_WATCH)), "ap": _hotspot_ap_up()}
+            self._probed_at = now
+        services, enabled, deploy_units = self._probed["services"], self._probed["enabled"], self._probed["deploy_units"]
         return {
             "tel": {"asleep": tel.get("asleep"), "stale": tel.get("stale"),
                     "balancing": tel.get("balancing"), "self_righting": tel.get("self_righting")},
@@ -447,7 +466,7 @@ class Doctor:
                              "path": deploy_units.get("2pybot-deploy.path")},
             "services": services,
             "services_enabled": enabled,
-            "network": {"hotspot_ap_up": _hotspot_ap_up()},
+            "network": {"hotspot_ap_up": self._probed["ap"]},
             "deps": {"onnxruntime": _dep_installed("onnxruntime"), "numpy_major": _numpy_major()},
             "visual_pair": {"enabled": vp.get("enabled")},
             "system": _system_info(),
@@ -561,7 +580,10 @@ class Doctor:
         while True:
             await asyncio.sleep(period)
             try:
-                self.refresh()
+                # Off the event loop: the probes wait on other processes, and this loop also
+                # carries the serial link and the autopilot (a 0.3 to 0.5 s freeze every 5 s
+                # is what "Lost contact with the controller" was).
+                await asyncio.get_running_loop().run_in_executor(None, self.refresh)
                 await self.heal()
             except Exception as exc:  # noqa: BLE001 -- the monitor must never die
                 self.log("[doctor] loop error: %r" % exc)

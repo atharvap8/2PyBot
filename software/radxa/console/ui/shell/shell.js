@@ -161,24 +161,18 @@ $('d-pause').onclick = () => API.post('/api/autonomy/pause', {}).then(pollMissio
 $('d-end').onclick = () => API.post('/api/autonomy/stop', {}).then(pollMission).catch((e) => msg(e.message, true));
 
 // ------------------------------------------------------------------ live data
-// The robot's pose reaches us two ways: wheel odometry at telemetry rate (smooth, but
-// it drifts) and the SLAM pose a few times a second (true to the map, but steppy).
-// Drawing from SLAM alone makes the robot move in jerks, so the view follows the
-// odometry and only uses SLAM to correct where the odometry frame sits on the map.
-const fix = { on: false, th: Math.PI / 2, x: 0, y: 0 };   // map <- odometry (until SLAM says otherwise: start facing up the screen)
-const odom = () => [state.tel.x_m || 0, state.tel.y_m || 0, (state.tel.heading || 0) * D2R];
-function mapPose() {
-  const o = odom();
-  const c = Math.cos(fix.th), s = Math.sin(fix.th);
-  return [fix.x + c * o[0] - s * o[1], fix.y + s * o[0] + c * o[1], o[2] + fix.th];
-}
-function correctFix(p) {                              // p: SLAM pose on the map, taken about now
-  const o = odom(), th = p[2] - o[2], c = Math.cos(th), s = Math.sin(th);
-  const x = p[0] - (c * o[0] - s * o[1]), y = p[1] - (s * o[0] + c * o[1]);
-  const jump = !fix.on || Math.hypot(x - fix.x, y - fix.y) > 0.5 || Math.abs(angDiff(fix.th, th)) > 0.5;
-  const k = jump ? 1 : 0.25;                           // ease small corrections in; take a relocalisation at once
-  fix.x += (x - fix.x) * k; fix.y += (y - fix.y) * k; fix.th += angDiff(fix.th, th) * k; fix.on = true;
-  return jump;
+// The robot's pose comes from the robot 20 times a second: the last pose matched against
+// the map, carried forward by the odometry measured since (so it is current, and it moves
+// smoothly between matches). The engine eases towards it. The robot also counts the times
+// it moved the pose in one step (a map was loaded, or it found itself somewhere else after
+// checking twice); only then does the view cut instead of gliding across the map.
+const live = { pose: [0, 0, Math.PI / 2], at: 0, jumps: null };
+const mapPose = () => live.pose;
+function onPose(p, jumps) {
+  if (!p || !fin(p[0]) || !fin(p[1]) || !fin(p[2])) return;
+  const cut = live.jumps === null || (jumps != null && jumps !== live.jumps);
+  live.pose = p; live.at = performance.now(); if (jumps != null) live.jumps = jumps;
+  if (engine) { engine.setPose(p); if (cut) engine.snapPose(); }
 }
 function onConsole(m) {
   if (m.type === 'telemetry') {
@@ -201,10 +195,7 @@ function onTel() {
   const t = state.tel, now = performance.now(), dt = Math.min(0.2, (now - lastTel) / 1000 || 0.02); lastTel = now;
   if (t.hub) S.hub = t.hub;
   speed += (Math.abs(t.v_ms || 0) - speed) * Math.min(1, dt / 0.18);      // steady digits, no flicker between neighbours
-  if (engine) {
-    engine.setTelemetry({ pitch: Math.max(-25, Math.min(25, t.pitch || 0)), v: t.v_ms || 0, armed: armed() });
-    engine.setPose(mapPose());
-  }
+  if (engine) engine.setTelemetry({ pitch: Math.max(-25, Math.min(25, t.pitch || 0)), v: t.v_ms || 0, armed: armed() });
   updateMode();
 }
 function sectorClearance(scan) {                     // scan: [[forward, left], ...] in the robot frame
@@ -225,10 +216,10 @@ function routeFromRobot(plan) {                      // the planner's route star
   return [[p[0], p[1]], ...plan.slice(i)];
 }
 let sceneVersion = null, sceneAt = 0, sceneBusy = false, vectorOk = true;
-function fetchScene(version) {
+function fetchScene(version) {                       // version: map name and revision, so another map is always a new scene
   sceneBusy = true; sceneAt = Date.now();
-  const cells = () => API.get('/slam/api/scene3d').then((sc) => engine.setScene(sc));
-  (vectorOk ? API.get('/slam/api/scene_vector').then((v) => engine.setVector(v)).catch(() => { vectorOk = false; return cells(); }) : cells())
+  const cells = () => API.get('/slam/api/scene3d').then((sc) => engine.setScene({ ...sc, version }));
+  (vectorOk ? API.get('/slam/api/scene_vector').then((v) => engine.setVector({ ...v, version })).catch(() => { vectorOk = false; return cells(); }) : cells())
     .then(() => { sceneVersion = version; }).catch(() => {}).finally(() => { sceneBusy = false; });
 }
 function onSlam(s) {
@@ -236,14 +227,15 @@ function onSlam(s) {
   S.clear = sectorClearance(s.scan);
   const b = s.bubble || {}, mins = S.clear.filter(fin);
   S.near = !b.stale && fin(b.nearest_m) ? b.nearest_m : (mins.length ? Math.min(...mins) : null);
-  if (s.mode !== 'idle' && s.pose) { if (correctFix(s.pose) && engine) { engine.setPose(mapPose()); engine.snapPose(); } }
-  else fix.on = false;
+  if (performance.now() - live.at > 600) onPose(s.live_pose || s.pose, s.jumps);      // no fast pose stream: 5 Hz is still a pose
+  if (s.map_version === 0 && S.mapImg) { S.mapImg = S.mapMeta = null; $('sh-mini').classList.remove('has'); }   // map unloaded
   if (engine) {
     engine.setScan(s.scan || []);
     engine.setObstacles((s.tof || {}).obstacles, (s.tof || {}).cliffs);
     engine.setRoute(routeFromRobot(s.plan), s.goal);
     engine.setProximity(S.clear);
-    if (s.map_version !== sceneVersion && !sceneBusy && Date.now() - sceneAt > 2500 && !DEMO) fetchScene(s.map_version);
+    const scene = (s.map_name || '') + ':' + s.map_version;
+    if (scene !== sceneVersion && !sceneBusy && Date.now() - sceneAt > 2500 && !DEMO) fetchScene(scene);
   }
   updateMode();
 }
@@ -271,8 +263,10 @@ function connectConsole() {
   ws.onclose = () => { S.linkUp = false; updateMode(); setTimeout(connectConsole, 1500); };
 }
 function connectSlam() {
-  const ws = new WebSocket(wsUrl('/slam/ws'));
-  ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); if (m.map) onMap(m.map); if (m.state) onSlam(m.state); } catch (e) { console.error(e); } };
+  const ws = new WebSocket(wsUrl('/slam/ws?pose=1'));
+  ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data);
+    if (m.type === 'pose') return onPose(m.pose, m.jumps);
+    if (m.map) onMap(m.map); if (m.state) onSlam(m.state); } catch (e) { console.error(e); } };
   ws.onclose = () => setTimeout(connectSlam, 2000);
 }
 function onMission(r) {
@@ -298,7 +292,8 @@ const human = (r) => { for (const [re, tx] of REASONS) if (re.test(r || '')) ret
 function missionLine(m) {
   const i = m.info || {};
   if (i.waiting) return { planning: 'Planning a route', replanning: 'Finding a way round', localizing: 'Finding itself on the map',
-    'finding frontiers': 'Looking for unmapped edges', 'lidar bubble stale': 'Waiting for the lidar', 'controller link': 'Waiting for the controller' }[i.waiting] || 'Waiting: ' + i.waiting;
+    'finding frontiers': 'Looking for unmapped edges', 'lidar bubble stale': 'Waiting for the lidar', 'controller link': 'Waiting for the controller',
+    gamepad: 'You are driving. Autopilot resumes when you let go' }[i.waiting] || 'Waiting: ' + i.waiting;
   if (m.kind === 'goto') return fin(i.distance_m) ? fmt(i.distance_m, 1) + ' m to go' : 'On the way';
   const left = fin(i.remaining_s) ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, Math.round(i.remaining_s % 60))).padStart(2, '0')} left` : '';
   if (m.kind === 'roam') return [fmt(i.distance_m, 1) + ' m driven', left].filter(Boolean).join(' · ');
@@ -325,7 +320,7 @@ function pillState() {
 let placesKey = '';
 function paint() {
   const t = state.tel, b = bubble(), m = S.mission, s = S.slam, isArmed = armed();
-  const gear = m && m.state === 'running' ? 'A' : isArmed ? 'D' : 'P';
+  const gear = m && m.state === 'running' && !m.yielded ? 'A' : isArmed ? 'D' : 'P';
   for (const el of document.querySelectorAll('.sh-gear b')) el.classList.toggle('on', el.dataset.g === gear);
   $('sh-spd').textContent = Math.round(speed * 100);
   const cap = b && !b.stale ? b.forward_cap : null;
@@ -554,7 +549,7 @@ const clock = () => { $('sh-clock').textContent = new Date().toLocaleTimeString(
   if (DEMO) {
     $('sh-demo').hidden = false; S.linkUp = true; $('d-feednote').textContent = 'Live camera (off in demo)';
     await (await import('./demo.js')).startDemo({ console: onConsole, slam: onSlam, mission: onMission, map: onMap,
-      scene: (sc) => engine && engine.setScene(sc), vector: (v) => engine && engine.setVector(v),
+      scene: (sc) => engine && engine.setScene(sc), vector: (v) => engine && engine.setVector(v), pose: onPose,
       sys: (snap) => { S.sys = snap; paintParts(); } }, Q);
   } else {
     connectConsole(); connectSlam();

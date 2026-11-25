@@ -119,6 +119,14 @@ def create_app(engine, lidar, estop):
         except (ValueError, OSError) as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
+    @app.post("/api/maps/unload")
+    def unload():
+        """Stop using the loaded map (the saved files stay)."""
+        if engine.goal is not None:
+            return JSONResponse({"ok": False, "error": "Stop the mission first"}, status_code=409)
+        engine.unload()
+        return {"ok": True}
+
     @app.post("/api/maps/extend")
     def extend(body: NameBody):
         """Map correction: load a saved map and keep mapping on top of it."""
@@ -199,20 +207,33 @@ def create_app(engine, lidar, estop):
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
         await sock.accept()
-        last_map, last_map_t = -1, 0.0
+        # ?pose=1 (the console's 3D view): between the 5 Hz state messages, send the live
+        # pose at 20 Hz so the robot is drawn moving, not stepping.
+        fast = sock.query_params.get("pose") == "1"
+        last_map, last_map_t, tick = -1, 0.0, 0
         try:
             while True:
-                msg = {"type": "state", "state": state()}
-                now = asyncio.get_event_loop().time()
-                if engine.grid.version != last_map and now - last_map_t >= 1.0:   # map image at most 1 Hz
-                    last_map_t = now
-                    # PNG encode off the shared console event loop
-                    png, meta = await asyncio.get_event_loop().run_in_executor(None, engine.map_png)
-                    if png:
-                        msg["map"] = dict(meta, png=base64.b64encode(png).decode())
-                        last_map = engine.grid.version
-                await sock.send_json(msg)
-                await asyncio.sleep(0.2)
+                if tick % 4:
+                    pose, jumps = engine.live_pose()
+                    await sock.send_json({"type": "pose", "pose": [round(v, 4) for v in pose], "jumps": jumps})
+                else:
+                    msg = {"type": "state", "state": state()}
+                    now = asyncio.get_event_loop().time()
+                    version = engine.grid.version
+                    if version != last_map and now - last_map_t >= 1.0:   # map image at most 1 Hz
+                        last_map_t = now
+                        # PNG encode off the shared console event loop
+                        png, meta = await asyncio.get_event_loop().run_in_executor(None, engine.map_png)
+                        if png:
+                            msg["map"] = dict(meta, png=base64.b64encode(png).decode())
+                        last_map = version        # an empty map (unloaded, or mapping just started) has no picture
+                    await sock.send_json(msg)
+                tick += 1
+                if fast:
+                    await asyncio.sleep(0.05)
+                else:
+                    tick += 3
+                    await asyncio.sleep(0.2)
         except (WebSocketDisconnect, RuntimeError):
             pass
 

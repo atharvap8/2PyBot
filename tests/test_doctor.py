@@ -152,3 +152,38 @@ def test_to_dict_serialisable():
     import json
     for c in diagnose({"tel": {"asleep": True}}):
         json.dumps(c.to_dict())
+
+
+# ---- 5.3.0: the doctor must not freeze the console or poke the system while the robot balances ----
+def test_service_probes_slow_down_while_balancing(monkeypatch):
+    import console.doctor as doctor
+
+    calls = []
+    monkeypatch.setattr(doctor, "_batch", lambda verb, names: calls.append(verb) or {n: "active" for n in names})
+    monkeypatch.setattr(doctor, "_hotspot_ap_up", lambda: True)
+
+    class Link:
+        connected = True
+        tel = {"balancing": False, "stale": False}
+        events = {}
+
+    d = doctor.Doctor(Link())
+    d.collect(); d.collect()
+    parked = len(calls)
+    assert parked == 4, "parked: every pass looks at the services (one is-active and one is-enabled call each)"
+    Link.tel = {"balancing": True, "stale": False}
+    for _ in range(5):
+        signals = d.collect()
+    assert len(calls) == parked, "balancing: the last answer is reused, nothing is started"
+    assert signals["services"]["2pybot-console"] == "active" and signals["network"]["hotspot_ap_up"] is True
+
+
+def test_probes_start_without_copying_the_console():
+    import console.doctor as doctor
+    import inspect
+
+    src = inspect.getsource(doctor._probe)
+    assert "close_fds=False" in src and "shutil.which" in src, "this is what lets Python use posix_spawn instead of fork"
+    assert doctor._probe(["definitely-not-a-command-2pybot"]) == ""
+    run = inspect.getsource(doctor.Doctor.run)
+    assert "run_in_executor" in run, "the checks wait on other processes: never on the event loop"

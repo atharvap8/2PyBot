@@ -15,7 +15,11 @@ function connect() {
       img.onload = () => { mapImg = img; mapMeta = m.map; };
       img.src = "data:image/png;base64," + m.map.png;
     }
-    if (m.state) { S = m.state; render(); update3d(); }
+    if (m.state) {
+      S = m.state;
+      if (S.map_version === 0) { mapImg = null; mapMeta = null; }      // unloaded, or mapping has not drawn anything yet
+      render(); update3d();
+    }
   };
   ws.onclose = () => { setSay("Lost connection to the robot. Reconnecting…", "err"); setTimeout(connect, 1500); };
 }
@@ -55,6 +59,7 @@ function render() {
   $("b-stop").disabled = S.mode === "idle";
   $("b-save").disabled = S.map_version === 0;
   $("b-extend").disabled = S.mode === "mapping";
+  $("b-unload").disabled = S.mode === "idle" && S.map_version === 0;
 
   // meters + status
   const pts = L.points || (S.scan || []).length;
@@ -67,7 +72,7 @@ function render() {
   $("n-odom").textContent = live ? `${fmt(Math.hypot(S.odom.x, S.odom.y))} m (${S.odom.source})` : "–";
   $("n-range").textContent = S.gate.usable_range ? `${fmt(S.gate.usable_range, 1)} m` : "–";
 
-  const warn = /skipping|not sure|can't|Problem|error/i.test(S.message);
+  const warn = /skipping|not sure|can't|another part|Problem|error/i.test(S.message);
   setSay(S.message, warn ? "warn" : "");
   if (S.map_name && !$("map-name").value && document.activeElement !== $("map-name")) $("map-name").value = S.map_name;
   renderLabels();
@@ -321,7 +326,8 @@ function progressText(m) {
   const i = m.info || {};
   if (i.waiting) return { planning: "Planning a route…", localizing: "Finding itself on the map…", "finding frontiers": "Looking for unmapped edges…",
     "lidar bubble stale": "Waiting for the lidar…", replanning: "Finding a way round…",
-    "controller link": "Waiting for the controller…" }[i.waiting] || `Waiting: ${i.waiting}`;
+    "controller link": "Waiting for the controller…",
+    gamepad: "You are driving. Autopilot resumes when you let go." }[i.waiting] || `Waiting: ${i.waiting}`;
   if (m.kind === "goto") return i.distance_m !== undefined ? `${fmt(i.distance_m, 1)} m to go` : "On the way";
   const mins = i.remaining_s !== undefined ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, i.remaining_s % 60)).padStart(2, "0")} left` : "";
   if (m.kind === "roam") return [`${fmt(i.distance_m, 1)} m driven`, `${i.turns || 0} turns`, mins].join(" · ");
@@ -402,6 +408,10 @@ $("b-extend").onclick = async () => {
 $("b-delete").onclick = async () => {
   const n = $("map-list").value;
   if (n && confirm(`Delete map “${n}” permanently?`)) { await post("api/maps/delete", { name: n }); refreshMaps(); }
+};
+$("b-unload").onclick = async () => {
+  const r = await post("api/maps/unload");
+  if (!r.ok) setSay(r.error || "Could not unload the map.", "warn");
 };
 $("b-zip").onclick = () => { const n = $("map-list").value; if (n) location.href = base + "api/maps/" + encodeURIComponent(n) + "/zip"; };
 $("b-stl").onclick = () => { const n = $("map-list").value; if (n) location.href = base + "api/maps/" + encodeURIComponent(n) + "/stl"; };

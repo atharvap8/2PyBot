@@ -132,6 +132,7 @@ export async function startDemo(feed, query) {
   }
   function telTick() {                                // wheel odometry has its own frame: x forward at power-on, turned a quarter from the map
     const d = sample();
+    feed.pose([d.x, d.y, d.th], d.t >= T_DISARM ? 1 : 0);          // the robot's 20 Hz live pose; "1" = it was moved in one step
     feed.console({ type: 'telemetry', debug: {}, tel: { stale: false, rx_hz: 50, balancing: d.balancing, asleep: false, startup_state: 'READY',
       pitch: d.balancing ? 1.5 + d.v * 9 : 0, v_ms: d.v, heading: (d.th - Math.PI / 2) / D2R, x_m: d.y, y_m: -d.x } });
   }

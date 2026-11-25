@@ -277,7 +277,11 @@ field only triggers a balancing stop on a 1-to-0 transition. It never arms. A fi
   drops out no longer revokes the lease (before, it ended a mission mid-drive).
 
 Separate 10 Hz feedback leaves the 53-field debug schema unchanged:
-`NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<asleep>`.
+`NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<asleep>,<manual-idle-ms>`.
+The last field is new in 5.3.0: milliseconds since the operator last drove (a drive
+stick past the takeover threshold, a gesture or a mode button), capped at 3600000,
+which is also what it reads before any manual input. After a takeover (state 3) the
+host waits for this to pass 1500 before it asks for the lease again.
 The last field was always 0 before 4.7.7; it is now 1 while the controller is powered down (`SL,1`).
 States: 0 off, 1 granted, 2 driving, 3 takeover, 4 timeout, 5 stopped, 6 disabled.
 Camera/torch/payload position and controls do not gate or revoke navigation.

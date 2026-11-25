@@ -146,16 +146,19 @@ def test_arming_and_disarming_take_the_view_back_from_a_held_one():
     assert "held = null" in change and "leaveSystem()" in change
 
 
-def test_the_drawn_pose_follows_odometry_between_slam_fixes():
+def test_the_view_draws_the_robots_own_live_pose_and_cuts_only_on_a_confirmed_move():
     shell = text(UI / "shell/shell.js")
-    assert "function mapPose()" in shell and "function correctFix(" in shell
-    on_tel = shell[shell.index("function onTel()"):shell.index("function sectorClearance")]
-    assert "engine.setPose(mapPose())" in on_tel, "the robot must be redrawn on every telemetry message, not only at SLAM rate"
+    assert "/slam/ws?pose=1" in shell, "the 3D view asks the robot for its 20 Hz live pose"
+    on_pose = shell[shell.index("function onPose("):shell.index("function onConsole")]
+    assert "engine.setPose(p)" in on_pose and "if (cut) engine.snapPose()" in on_pose
+    assert "jumps !== live.jumps" in on_pose, "the view may only cut when the robot says it moved the pose in one step"
+    assert "correctFix" not in shell, "the browser no longer guesses the map position from two streams of different age"
 
 
 def test_maps_page_has_no_radar_and_a_flat_view_switch():
     page, code, css = text(UI / "slam/index.html"), text(UI / "slam/slam.js"), text(UI / "slam/slam.css")
     assert "v-radar" not in page and "adar" not in code
+    assert 'id="b-unload"' in page and "api/maps/unload" in code, "a loaded map can be unloaded"
     assert 'id="v-3d"' in page and 'id="v-map"' in page
     bar = re.search(r"\.viewbar \{([^}]*)\}", css).group(1)
     assert "position: absolute" in bar and "border-bottom" not in bar

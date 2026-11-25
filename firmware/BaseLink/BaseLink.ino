@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v5.2.0
+ *  BaseLink.ino — 2PyBot v5.3.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -137,6 +137,8 @@ uint32_t padRepairRestartAt = 0; // BT,FORGET: restart time after the pairing st
 AutoClimb autoClimb;
 DescentGuard descentGuard;
 NavigationLease navigation;
+uint32_t lastManualMs = 0;       // last time the operator drove (stick, gesture or mode button); 0 = never
+float lateBankMs = 0.0f;         // banked late-loop time while balancing (see the BALANCING branch)
 float climbXRef=0.0f,climbIntegral=0.0f,climbDriveRef=0.0f,climbRecovery=0.0f;
 bool climbReferenceInitialized=false;
 float requestedDriveV = 0.0f;
@@ -232,6 +234,7 @@ void updateStatusLed() {
 
 void resetController() {
     navigation.reset();
+    lateBankMs = 0.0f;
     autoClimb.resetDynamics();
     descentGuard.reset();
     climbXRef=posM;climbIntegral=climbDriveRef=climbRecovery=0;
@@ -853,7 +856,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v5.2.0");
+    Serial.println("     2PyBot BaseLink v5.3.0");
     Serial.println("==================================================");
 
     params_begin();
@@ -1039,6 +1042,8 @@ void loop() {
     const float manualFwd=clampf(joyForward*P.joyFwdSc,-1.0f,1.0f)*(joySpeedHigh?1.0f:P.spdLoDrv);
     const float manualSteer=clampf(joySteering*P.joyStrSc,-1.0f,1.0f)*(joySpeedHigh?1.0f:P.spdLoStr);
     const bool takeover=joyFresh && (fabsf(joyForward*P.joyFwdSc)>.12f || fabsf(joySteering*P.joyStrSc)>.18f);
+    // 5.3.0: the host waits for the operator to let go before it takes the drive back.
+    if(takeover || gestSeq || gestureRequest) { lastManualMs=millis(); if(!lastManualMs)lastManualMs=1; }
     const NavigationLease::State previousNavState=navigation.state;
     // 5.2.0: losing the gamepad no longer revokes the lease (it used to end a mission mid-drive).
     navigation.update(millis(),takeover,state==STATE_BALANCING && !startupGate.maintenance);
@@ -1131,20 +1136,23 @@ void loop() {
             cmdFwd=cmdSteer=0;
         }
     } else { // BALANCING: original fall limit remains separate from recovery
-        // 5.2.0: one late loop is survivable; cutting the motors for it is a certain fall.
-        // (Seen 6 s after a gamepad dropped out: the loop ran late once and the robot was
-        // switched off under a mission.) An isolated late loop is logged and ridden
-        // through. A long one, or a second within a second, still stops the motors, and
-        // the stall guard still zeroes them after 150 ms whatever this code decides.
-        static uint32_t lateLoopMs = 0;
+        // A late loop is survivable; cutting the motors for it is a certain fall.
+        // Measured on the robot (5.2.0 log): while a gamepad reconnects the loop runs late
+        // in a burst, 20 ms and 22 ms about 50 ms apart, roughly 2 s before the pad reports
+        // connected. 5.2.0 rode through one late loop but stopped for "a second within a
+        // second", so the robot was switched off every time a pad connected.
+        // 5.3.0 budgets late time instead: every late loop banks its length, the bank
+        // drains 100 ms per second, and the motors stop only for one loop over 100 ms or
+        // more than 250 ms banked (a loop that is late about a quarter of the time). The
+        // stall guard still zeroes the motors after 150 ms whatever this code decides.
+        lateBankMs = fmaxf(0.0f, lateBankMs - dt * 100.0f);
         bool overrun = false;
         if (elapsed > 20000) {
-            const uint32_t lateNow = millis();
-            overrun = elapsed > 100000 || (lateLoopMs && lateNow - lateLoopMs < 1000);
-            lateLoopMs = lateNow ? lateNow : 1;
-            if (!overrun && Serial.availableForWrite() >= 64)
-                Serial.printf("[MAIN] Late loop %lu ms ridden through (pad %u)\n",
-                              (unsigned long)(elapsed / 1000), (unsigned)btgamepad_connected());
+            lateBankMs += elapsed * 0.001f;
+            overrun = elapsed > 100000 || lateBankMs > 250.0f;
+            if (!overrun && Serial.availableForWrite() >= 72)
+                Serial.printf("[MAIN] Late loop %lu ms ridden through (banked %u ms, pad %u)\n",
+                              (unsigned long)(elapsed / 1000), (unsigned)lateBankMs, (unsigned)btgamepad_connected());
         }
         if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || overrun) {
             static char reason[192];
@@ -1206,9 +1214,10 @@ void loop() {
     static uint32_t lastNavMs=0;
     if(nowMs-lastNavMs>=100 && Serial.availableForWrite()>=96) {
         lastNavMs=nowMs;
-        Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u\n",(unsigned long)nowMs,(unsigned long)navigation.token,
+        const uint32_t manualIdle=lastManualMs ? nowMs-lastManualMs : 3600000UL;
+        Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u,%lu\n",(unsigned long)nowMs,(unsigned long)navigation.token,
                       (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
-                      (unsigned)btgamepad_connected(),sleepMode ? 1u : 0u);
+                      (unsigned)btgamepad_connected(),sleepMode ? 1u : 0u,(unsigned long)(manualIdle>3600000UL?3600000UL:manualIdle));
     }
     if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=128) {
         lastOdomMs = nowMs;
