@@ -10,6 +10,9 @@ export default function register(registerTab) {
   let tel = {}, dbg = {}, tof = {};
   const C = { acc: "#f08a4b", accDim: "rgba(240,138,75,", ok: "#34d399", warn: "#f0b84b", err: "#ff4d6d",
               ink: "#efe9e3", dim: "#73695f", floor: "#1b1815", line: "rgba(240,138,75,.10)" };
+  const botImg = new Image(); let botReady = false;
+  botImg.onload = () => { botReady = true; };
+  botImg.src = "/ui/sysmap/bot_front.png";
 
   function resize() {
     cv.width = Math.max(1, Math.round(cv.clientWidth * devicePixelRatio));
@@ -96,37 +99,22 @@ export default function register(registerTab) {
   }
 
   function drawRobot(cx, baseY, H, dpr) {
-    const u = H * 0.12;                                    // robot unit scale
-    const lean = Math.max(-0.5, Math.min(0.5, (tel.pitch || 0) / 35));  // radians-ish visual lean
-    // ground shadow
-    g.save(); g.translate(cx, baseY);
-    g.fillStyle = "rgba(0,0,0,.45)";
-    g.beginPath(); g.ellipse(0, u * 0.08, u * 1.25, u * 0.28, 0, 0, 7); g.fill();
-    // wheels (behind body)
-    const wheel = (sx) => { g.fillStyle = "#0f0d0c"; g.strokeStyle = "rgba(240,138,75,.5)"; g.lineWidth = 2 * dpr;
-      g.beginPath(); g.ellipse(sx, -u * 0.55, u * 0.34, u * 0.62, 0, 0, 7); g.fill(); g.stroke();
-      g.strokeStyle = "rgba(240,138,75,.25)"; g.beginPath(); g.ellipse(sx, -u * 0.55, u * 0.17, u * 0.34, 0, 0, 7); g.stroke(); };
-    wheel(-u * 0.95); wheel(u * 0.95);
-    // body leans with pitch about the axle
-    g.translate(0, -u * 0.55); g.rotate(lean); g.translate(0, u * 0.55);
-    const bodyGrad = g.createLinearGradient(0, -u * 1.7, 0, -u * 0.2);
-    bodyGrad.addColorStop(0, "#f6a763"); bodyGrad.addColorStop(1, "#d9772f");
-    g.fillStyle = bodyGrad; g.strokeStyle = "rgba(0,0,0,.3)"; g.lineWidth = 1.5 * dpr;
-    roundRect(-u * 0.72, -u * 1.75, u * 1.44, u * 1.55, u * 0.22); g.fill();
-    // glow rim
-    g.strokeStyle = "rgba(240,138,75,.55)"; g.lineWidth = 2 * dpr;
-    roundRect(-u * 0.72, -u * 1.75, u * 1.44, u * 1.55, u * 0.22); g.stroke();
-    // camera head
-    g.fillStyle = "#1b1613"; roundRect(-u * 0.34, -u * 2.12, u * 0.68, u * 0.5, u * 0.14); g.fill();
-    g.fillStyle = (tel.balancing ? C.ok : C.acc);
-    g.beginPath(); g.arc(0, -u * 1.87, u * 0.1, 0, 7); g.fill();
-    g.restore();
-  }
-
-  function roundRect(x, y, w, h, r) {
-    g.beginPath();
-    g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
-    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+    // The real robot, upright and grounded (pitch is shown on the gauge, not by
+    // tilting the whole robot - that read as "falling over" at rest).
+    const hh = H * 0.46, asp = botReady && botImg.naturalHeight ? botImg.naturalWidth / botImg.naturalHeight : 0.82;
+    const ww = hh * asp, top = baseY - hh;
+    // contact shadow
+    g.fillStyle = "rgba(0,0,0,.5)";
+    g.beginPath(); g.ellipse(cx, baseY - 4 * dpr, ww * 0.42, hh * 0.07, 0, 0, 7); g.fill();
+    // soft accent glow behind
+    const glow = g.createRadialGradient(cx, top + hh * 0.5, 0, cx, top + hh * 0.5, ww * 0.85);
+    glow.addColorStop(0, "rgba(240,138,75,.12)"); glow.addColorStop(1, "rgba(240,138,75,0)");
+    g.fillStyle = glow; g.fillRect(cx - ww, top - hh * 0.1, ww * 2, hh * 1.2);
+    if (botReady) {
+      g.drawImage(botImg, cx - ww / 2, top, ww, hh);
+    } else {                                               // fallback until the photo loads
+      g.fillStyle = C.acc; g.beginPath(); g.arc(cx, baseY - hh * 0.4, hh * 0.3, 0, 7); g.fill();
+    }
   }
 
   function paintHud() {
