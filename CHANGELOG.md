@@ -18,16 +18,16 @@ Firmware changes compile but have not been driven yet.
   The gestures moved to LT held + Y / B / X / A. D-pad, sticks, LB, RB, START and
   SELECT are unchanged. The buttons only report a key to the host (`PK,GO` ...);
   they are not a takeover and they never arm.
-- **The flashlight looks after itself.** While the robot is balancing: dark for
-  1.5 s switches it on at 25 %, then it steps its own brightness to keep
-  the picture's mean luma between 75 and 150, steps down hard when washed out,
-  and switches off when there is enough light without it. It also aims: the beam
-  leads into turns and is kept at its widest (the other end of the zoom is a small
-  dot). Use the flashlight from the gamepad and the bot hands over at
-  once: it takes what you set as its starting point and carries on 1.5 s after
-  your last touch. Parked or powered down, a light the bot switched on goes off.
-  The camera's automatic re-exposure steps back while the light can still act.
-  Switches in the Camera app; firmware command `TL,<on>,<percent>` (same 90 % cap).
+- **The flashlight comes on by itself in the dark.** While the robot is balancing:
+  a fully dark picture (mean luma under 25) for 1.5 s switches it on at full
+  brightness, with the head centred and the beam at its widest, and it is then
+  left exactly like that. When the darkness is gone it switches off and the
+  flashlight is the gamepad's again. A first version also regulated brightness
+  and aimed the beam; on the robot that was restless, so it was removed. Use the
+  flashlight from the gamepad and the bot takes what you set and waits 1.5 s after
+  your last touch. Parked or powered down, the light goes off. The camera's
+  automatic re-exposure steps back while darkness is the light's job. Switch in
+  the Camera app; firmware command `TL,<on>,<percent>` (same 90 % cap).
 - **Safety bubble 1 cm smaller on every side.** The body box is now the measured
   body (it was drawn 1 cm larger). What counts as the robot's own body in the scan
   has not moved.

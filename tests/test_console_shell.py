@@ -256,4 +256,5 @@ def test_maps_can_build_a_route_of_several_stops():
 
 def test_camera_app_has_the_flashlight_switches():
     tab = text(UI / "tabs/camera.js")
-    assert "/api/torch/auto" in tab and "id=atOn" in tab and "id=atAim" in tab
+    assert "/api/torch/auto" in tab and "id=atOn" in tab
+    assert "atAim" not in tab, "no aiming switch: the light has one fixed position"

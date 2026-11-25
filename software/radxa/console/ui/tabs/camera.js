@@ -42,11 +42,7 @@ export default function register(registerTab) {
       <div class=card><h3>Flashlight</h3>
         <div class=bar>
           <label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type=checkbox id=atOn>
-            Switch on by itself in the dark, and set its own brightness</label>
-        </div>
-        <div class=bar>
-          <label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type=checkbox id=atAim>
-            Aim the beam: lead into turns, and keep it at its widest</label>
+            Switch on by itself, at full brightness, when the picture is fully dark</label>
         </div>
         <p class=hint id=atNote></p>
       </div>
@@ -169,21 +165,21 @@ export default function register(registerTab) {
       };
       c.API.get('/api/camera/auto_exposure').then(showAe).catch(() => {});
 
-      const atOn = el.querySelector('#atOn'), atAim = el.querySelector('#atAim'), atNote = el.querySelector('#atNote');
+      const atOn = el.querySelector('#atOn'), atNote = el.querySelector('#atNote');
       const showAt = (a) => {
         if (!a || !atOn.isConnected) return;
-        atOn.checked = !!a.enabled; atAim.checked = !!a.aim; atAim.disabled = !a.enabled;
+        atOn.checked = !!a.enabled;
         atNote.textContent = !a.enabled ? 'Off: the flashlight is only what you set from the gamepad.'
-          : a.holding_s > 0 ? 'You are setting the flashlight: the bot carries on from there in a moment.'
+          : a.holding_s > 0 ? 'You are setting the flashlight from the gamepad.'
           : !a.available ? 'Waiting for the controller (needs firmware 5.4.0, and the robot awake).'
-          : a.on ? `On at ${a.percent}%. ${a.action || ''}`
-          : (a.action ? a.action + '. ' : '') + `Works while the robot is balancing: on when the mean luma stays below ${a.dark_below} for 1.5 s.`;
+          : a.on ? `${a.action || 'On'}. It goes off, and back to the gamepad, when the darkness is gone.`
+          : (a.action ? a.action + '. ' : '') + `Works while the robot is balancing: full brightness when the mean luma stays below ${a.dark_below} for 1.5 s. The head is centred and left there.`;
       };
       const sendAt = async () => {
-        try { showAt(await c.API.post('/api/torch/auto', { enabled: atOn.checked, aim: atAim.checked })); }
+        try { showAt(await c.API.post('/api/torch/auto', { enabled: atOn.checked })); }
         catch (e) { c.msg(e.message, true); }
       };
-      atOn.onchange = sendAt; atAim.onchange = sendAt;
+      atOn.onchange = sendAt;
       c.API.get('/api/torch/auto').then(showAt).catch(() => {});
 
       lumaTimer = setInterval(async () => {
