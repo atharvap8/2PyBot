@@ -46,23 +46,27 @@ fun SplashScreen(onDone: () -> Unit) {
             .padding(horizontal = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.weight(0.16f))
+        // the wordmark, the photo and the bar all span the same width so their
+        // left and right edges line up and read as one proportioned block.
+        val block = Modifier.fillMaxWidth(0.72f)
+        Spacer(Modifier.weight(0.12f))
         Image(
             painter = painterResource(R.drawable.logo_wordmark),
             contentDescription = "2PyBot",
-            modifier = Modifier.height(40.dp),
+            contentScale = ContentScale.FillWidth,
+            modifier = block,
         )
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(26.dp))
         Image(
             painter = painterResource(R.drawable.bot_front),
             contentDescription = "2PyBot robot, front view",
             contentScale = ContentScale.Fit,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
+            modifier = block,
         )
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.weight(1f))
         LinearProgressIndicator(
             progress = progress.value,
-            modifier = Modifier.fillMaxWidth().height(4.dp),
+            modifier = block.height(4.dp),
             color = Accent,
             trackColor = Line,
         )
