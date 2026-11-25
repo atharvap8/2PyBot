@@ -98,7 +98,7 @@ Bluetooth TX power is raised from the ESP32 defaults (BR/EDR 0..+3 dBm, BLE +3 d
 | D-pad DOWN | Toggle climb mode |
 | D-pad LEFT / RIGHT | Dim / brighten torch; repeat while held |
 | A / B / X / Y | Autopilot go or resume / pause / end / roam (reported to the host as `PK,<key>`) |
-| RT (analog) | Precision: scales the left stick down, to a quarter at full pull |
+| RT (analog) | Autopilot speed boost: reported to the host (last field of `NR`); no effect on manual drive |
 | LT held + Y / B / X / A | Nod yes / nod no / spin / dance |
 
 LOW mode defaults to half drive and steering authority. Boot defaults to LOW. Speed mode remains selected across arm/disarm and reconnection.

@@ -296,7 +296,7 @@ function missionLine(m) {
     gamepad: 'You are driving. Autopilot resumes when you let go' }[i.waiting] || 'Waiting: ' + i.waiting;
   if (m.kind === 'goto') {
     const togo = fin(i.distance_m) ? fmt(i.distance_m, 1) + ' m to go' : 'On the way';
-    return i.legs > 1 ? `Stop ${i.leg} of ${i.legs} · ${togo}` : togo;
+    return (i.legs > 1 ? `Stop ${i.leg} of ${i.legs} · ${togo}` : togo) + (m.boost > 0.05 ? ' · boost' : '');
   }
   const left = fin(i.remaining_s) ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, Math.round(i.remaining_s % 60))).padStart(2, '0')} left` : '';
   if (m.kind === 'roam') return [fmt(i.distance_m, 1) + ' m driven', left].filter(Boolean).join(' · ');

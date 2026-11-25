@@ -451,7 +451,9 @@ class SerialLink:
                 self.nav={"ms":int(ms),"token":int(token),"state":int(state),"sequence":int(sequence),
                            "age_ms":int(age),"pad":bool(int(pad)),"last_rx":time.time(),"received_monotonic":time.monotonic(),
                            # 5.3.0+: ms since the operator last drove; None on older firmware
-                           "idle_ms":int(fields[8]) if len(fields)>8 else None}
+                           "idle_ms":int(fields[8]) if len(fields)>8 else None,
+                           # 5.5.0+: RT pull in percent, the autopilot's speed boost
+                           "boost":int(fields[9]) if len(fields)>9 else 0}
                 self.tel["asleep"]=sleep=="1"   # 4.7.7+: controller power-down state (was always 0)
                 self._publish({"type":"navigation","nav":self.nav})
                 return

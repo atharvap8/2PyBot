@@ -113,6 +113,7 @@ class Autonomy:
         self.regrant=None       # lease renewal in flight: {"owner","until","why"}
         self.yielded=None       # when the operator took over with the gamepad (mission waits, then resumes)
         self.last_task=None     # arguments of the last lidar mission started, for the gamepad's GO key
+        self.boost=0.0          # the gamepad's RT, 0 to 1, eased: how far above its chosen speed the mission drives
         self.next_grant=0.0
         self.slam=None          # SlamEngine (set by the server): map pose + lidar safety bubble
         self.planner=None       # RoamPlanner / GotoPlanner / ExplorePlanner for lidar missions
@@ -230,6 +231,15 @@ class Autonomy:
         except Exception:depth_cap=None
         depth_cap=9.0 if not isinstance(depth_cap,(int,float)) else float(depth_cap)
         measured=float(self.link.debug.get("v",self.link.tel.get("v_ms",0)) or 0)
+        # RT on the gamepad is a speed governor, not a takeover: the autopilot keeps the drive
+        # and RT says how far above the chosen speed it may go. Eased over about half a second.
+        nav=self.link.nav
+        pull=nav.get("boost",0)/100 if nav.get("pad") else 0.0
+        self.boost+=clip(pull-self.boost,-2*dt,2*dt)
+        from .missions import TOP_SPEED,boosted
+        top=min(TOP_SPEED,float(self.link.derived.get("VDRIVE") or TOP_SPEED))
+        self.planner.speed=boosted(self.planner.base_speed,self.boost,top)
+        m["speed_mps"]=round(self.planner.speed,3);m["boost"]=round(self.boost,2)
         args=(now,dt,pose,bubble,depth_cap,measured)
         step=self.planner.step(*args) if kind=="roam" else self.planner.step(*args,localized=localized)
         m["elapsed_s"]=round(m["elapsed_s"]+dt,2);m["info"]=step.info

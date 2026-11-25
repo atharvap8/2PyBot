@@ -3,6 +3,20 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 5.5.0: RT is the autopilot's speed boost
+
+Firmware change compiles but has not been driven yet.
+
+- **RT speeds the autopilot up.** RT no longer slows the manual drive. During a
+  lidar mission it is a speed governor: released, the mission drives at the speed
+  chosen in Maps; fully pulled, one step faster (slow to normal, normal to fast,
+  fast to the robot's top speed, 0.9 m/s or the controller's own limit if that is
+  lower); proportional in between, eased over about half a second. The autopilot
+  keeps steering, RT is not a takeover, and the safety bubble still caps the speed
+  from what is ahead. Go-to missions now also slow for corners so a boosted robot
+  stays on its route. The controller reports the pull as the last field of `NR`.
+  RT does nothing while driving by hand.
+
 ## 5.4.0: routes with several stops, autopilot on the gamepad, a flashlight that looks after itself
 
 Firmware changes compile but have not been driven yet.

@@ -54,3 +54,13 @@ def test_the_safety_bubble_is_the_measured_body_with_nothing_added():
     b = bubble.Bubble()
     # what counts as the robot itself has not moved: the body plus 2.5 cm, as when the box was 1 cm larger
     assert abs((0.06 + b.cfg["self_tol"]) - (0.07 + 0.015)) < 1e-9
+
+
+def test_the_rt_pull_arrives_with_the_navigation_feedback():
+    l = link()
+    l._handle("NR,1,0,0,0,0,1,0,5000,73")
+    assert l.nav["boost"] == 73 and l.nav["idle_ms"] == 5000
+    l._handle("NR,1,0,0,0,0,1,0,5000")            # 5.3.0 / 5.4.0 firmware: no boost field
+    assert l.nav["boost"] == 0
+    l._handle("NR,1,0,0,0,0,1,0")                 # older still
+    assert l.nav["boost"] == 0 and l.nav["idle_ms"] is None

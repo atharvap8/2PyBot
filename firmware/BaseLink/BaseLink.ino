@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v5.4.0
+ *  BaseLink.ino — 2PyBot v5.5.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -872,7 +872,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v5.4.0");
+    Serial.println("     2PyBot BaseLink v5.5.0");
     Serial.println("==================================================");
 
     params_begin();
@@ -1239,9 +1239,10 @@ void loop() {
     if(nowMs-lastNavMs>=100 && Serial.availableForWrite()>=96) {
         lastNavMs=nowMs;
         const uint32_t manualIdle=lastManualMs ? nowMs-lastManualMs : 3600000UL;
-        Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u,%lu\n",(unsigned long)nowMs,(unsigned long)navigation.token,
+        Serial.printf("NR,%lu,%lu,%u,%lu,%lu,%u,%u,%lu,%u\n",(unsigned long)nowMs,(unsigned long)navigation.token,
                       (unsigned)navigation.state,(unsigned long)navigation.sequence,(unsigned long)(nowMs-navigation.lastRx),
-                      (unsigned)btgamepad_connected(),sleepMode ? 1u : 0u,(unsigned long)(manualIdle>3600000UL?3600000UL:manualIdle));
+                      (unsigned)btgamepad_connected(),sleepMode ? 1u : 0u,(unsigned long)(manualIdle>3600000UL?3600000UL:manualIdle),
+                      (unsigned)joyBoostPct);
     }
     if (nowMs - lastOdomMs >= ODOM_PERIOD_MS && RADXA_STREAM && Serial.availableForWrite()>=128) {
         lastOdomMs = nowMs;

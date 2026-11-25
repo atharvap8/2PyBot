@@ -33,6 +33,19 @@ def clip(v, lo, hi):
 
 
 MAX_W = 0.85            # rad/s for spins and tracking (firmware allows ~4 rad/s)
+TOP_SPEED = 0.9         # m/s: the most a boosted mission asks for (the controller clamps to its own limit too)
+
+
+def boosted(base, boost, top=TOP_SPEED):
+    """Mission speed with the gamepad's RT pulled `boost` (0 to 1).
+
+    Released it is the speed chosen for the mission. Fully pulled it is one step up the
+    Maps page's own ladder: slow -> normal, normal -> fast, fast -> the robot's top speed.
+    In between it is proportional. Whatever comes out, the safety bubble and the
+    slow-for-corners rule still cap what is actually driven."""
+    boost = clip(float(boost), 0.0, 1.0)
+    ceiling = 0.25 if base < 0.20 else 0.40 if base < 0.33 else max(base, float(top))
+    return base + (max(base, ceiling) - base) * boost
 
 
 class Step:
@@ -58,7 +71,7 @@ class RoamPlanner:
     kind = "roam"
 
     def __init__(self, speed=0.25, duration_s=600.0, seed=None):
-        self.speed = clip(float(speed), 0.08, 0.6)
+        self.speed = self.base_speed = clip(float(speed), 0.08, 0.6)
         self.duration = clip(float(duration_s), 10.0, 7200.0)
         self.rng = random.Random(seed)
         self.state = "cruise"
@@ -186,7 +199,7 @@ class GotoPlanner:
     def __init__(self, engine, goal, speed=0.30):
         self.engine = engine
         self.goal = dict(goal)
-        self.speed = clip(float(speed), 0.08, 0.6)
+        self.speed = self.base_speed = clip(float(speed), 0.08, 0.6)
         self.path = []
         self.index = 0
         self.replans = 0
@@ -373,7 +386,8 @@ class GotoPlanner:
             self._request(now, pose)
             return Step(info=dict(info, waiting="replanning", blocked="no way round yet"))
         la = self.index
-        while la < len(self.path) - 1 and math.hypot(self.path[la][0] - pose[0], self.path[la][1] - pose[1]) < self.LOOKAHEAD:
+        look = max(self.LOOKAHEAD, 0.7 * self.speed)   # look further ahead when boosted (unchanged up to 0.5 m/s)
+        while la < len(self.path) - 1 and math.hypot(self.path[la][0] - pose[0], self.path[la][1] - pose[1]) < look:
             la += 1
         tx, ty = self.path[la]
         alpha = wrap(math.atan2(ty - pose[1], tx - pose[0]) - pose[2])
@@ -395,6 +409,10 @@ class GotoPlanner:
         self.backed = False
         v = min(v, cap)
         L = max(0.15, math.hypot(tx - pose[0], ty - pose[1]))
+        # Slow for corners: never ask for more speed than the turn rate can steer along this
+        # curve. At the usual speeds this changes nothing; boosted, it is what keeps the robot
+        # on the route instead of running wide.
+        v = min(v, MAX_W * L / max(0.05, 2.0 * abs(math.sin(alpha))))
         w = clip(2.0 * max(v, 0.1) * math.sin(alpha) / L, -MAX_W, MAX_W)
         return Step(max(0.0, v), w, info=info)
 
@@ -436,13 +454,14 @@ class RoutePlanner:
         self.stops = [dict(g) for g in goals]
         self.leg = 0
         self.goto = GotoPlanner(engine, self.stops[0], speed)
-        self.speed = self.goto.speed
+        self.speed = self.base_speed = self.goto.speed
 
     def _info(self, info):
         stops = [{"name": s.get("name"), "x": s["x"], "y": s["y"], "done": i < self.leg} for i, s in enumerate(self.stops)]
         return dict(info, leg=min(self.leg + 1, len(self.stops)), legs=len(self.stops), stops=stops)
 
     def step(self, now, dt, pose, bubble, depth_cap, measured_v, localized=True):
+        self.goto.speed = self.speed                      # the route's speed (possibly boosted) is each leg's
         st = self.goto.step(now, dt, pose, bubble, depth_cap, measured_v, localized)
         if not st.done:
             st.info = self._info(st.info)
@@ -453,7 +472,7 @@ class RoutePlanner:
         self.leg += 1
         if self.leg >= len(self.stops):
             return Step(done=True, reason="goal reached", info=self._info(st.info))
-        self.goto = GotoPlanner(self.engine, self.stops[self.leg], self.speed)
+        self.goto = GotoPlanner(self.engine, self.stops[self.leg], self.base_speed)
         return Step(info=self._info(st.info))
 
 
@@ -463,7 +482,7 @@ class ExplorePlanner:
 
     def __init__(self, engine, speed=0.25, duration_s=1200.0):
         self.engine = engine
-        self.speed = clip(float(speed), 0.08, 0.5)
+        self.speed = self.base_speed = clip(float(speed), 0.08, 0.5)
         self.duration = clip(float(duration_s), 30.0, 7200.0)
         self.elapsed = 0.0
         self.goto = None
@@ -504,6 +523,7 @@ class ExplorePlanner:
             self.visited_goals.append(g)
             self.goto = GotoPlanner(self.engine, {"name": "frontier", "x": g[0], "y": g[1]}, self.speed)
             return Step(info=info)
+        self.goto.speed = self.speed
         st = self.goto.step(now, dt, pose, bubble, depth_cap, measured_v, localized)
         if st.done:
             if st.reason == "goal reached":

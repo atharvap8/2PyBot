@@ -371,7 +371,8 @@ function progressText(m) {
     gamepad: "You are driving. Autopilot resumes when you let go." }[i.waiting] || `Waiting: ${i.waiting}`;
   if (m.kind === "goto") {
     const togo = i.distance_m !== undefined ? `${fmt(i.distance_m, 1)} m to go` : "On the way";
-    return i.legs > 1 ? `Stop ${i.leg} of ${i.legs} · ${i.goal || ""} · ${togo}` : togo;
+    const fast = m.boost > 0.05 ? ` · boosted to ${fmt(m.speed_mps, 2)} m/s` : "";
+    return (i.legs > 1 ? `Stop ${i.leg} of ${i.legs} · ${i.goal || ""} · ${togo}` : togo) + fast;
   }
   const mins = i.remaining_s !== undefined ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, i.remaining_s % 60)).padStart(2, "0")} left` : "";
   if (m.kind === "roam") return [`${fmt(i.distance_m, 1)} m driven`, `${i.turns || 0} turns`, mins].join(" · ");

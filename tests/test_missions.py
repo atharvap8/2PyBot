@@ -62,7 +62,7 @@ class World:
         local = self.robot_frame(self.seen + self.low)
         ahead = (local[:, 0] > 0.0) & (local[:, 0] < 0.30) & (np.abs(local[:, 1]) < 0.13)
         behind = (local[:, 0] < 0.0) & (local[:, 0] > -0.28) & (np.abs(local[:, 1]) < 0.13)
-        return {"forward_cap": 0.0 if ahead.any() else 0.5, "reverse_cap": 0.0 if behind.any() else 0.3,
+        return {"forward_cap": 0.0 if ahead.any() else 1.5, "reverse_cap": 0.0 if behind.any() else 0.3,
                 "turn_left_ok": True, "turn_right_ok": True, "stale": False}
 
     def run(self, seconds, until=None):
@@ -200,3 +200,55 @@ def test_a_stop_that_cannot_be_reached_ends_the_route_and_names_it():
 def test_a_route_needs_a_stop():
     with pytest.raises(ValueError):
         missions.RoutePlanner(Engine(room()), [])
+
+
+# ---- 5.5.0: RT on the gamepad is the autopilot's speed boost ----
+def test_boost_is_one_step_up_the_speed_ladder():
+    assert missions.boosted(0.25, 0.0) == 0.25, "released: the speed chosen for the mission"
+    assert missions.boosted(0.15, 1.0) == pytest.approx(0.25), "slow -> normal"
+    assert missions.boosted(0.25, 1.0) == pytest.approx(0.40), "normal -> fast"
+    assert missions.boosted(0.40, 1.0) == pytest.approx(0.90), "fast -> the robot's top speed"
+    assert missions.boosted(0.40, 1.0, top=0.7) == pytest.approx(0.70), "or the controller's own limit if that is lower"
+    assert missions.boosted(0.25, 0.5) == pytest.approx(0.325), "proportional in between"
+    assert missions.boosted(0.40, 5.0) == pytest.approx(0.90) and missions.boosted(0.40, -1.0) == 0.40
+    assert missions.boosted(0.60, 1.0, top=0.5) == 0.60, "never slower than what was chosen"
+
+
+def test_a_boosted_goto_arrives_sooner_and_still_arrives():
+    plain = make()
+    plain.run(60)
+    fast = make()
+    fast.planner.speed = missions.boosted(fast.planner.base_speed, 1.0)
+    assert fast.planner.speed == pytest.approx(0.4) and fast.planner.base_speed == pytest.approx(0.3)
+    fast.planner.speed = 0.9
+    fast.run(60)
+    assert plain.done == fast.done == "goal reached"
+    assert fast.t < plain.t * 0.75, "it must actually drive faster"
+    assert max(s.v for s in fast.steps) > 0.6
+
+
+def test_it_slows_for_corners_so_a_boosted_robot_stays_on_the_route():
+    w = make(walls=[(0.0, -2.0, 0.1, 0.6)], goal=(2.0, -1.2))       # round the end of a wall: a real corner
+    w.planner.speed = 0.9
+    worst = []
+
+    def off_route(w):
+        p = w.planner
+        if p.path:
+            worst.append(min(math.hypot(q[0] - w.pose[0], q[1] - w.pose[1]) for q in p.path))
+        return False
+    w.run(90, until=off_route)
+    assert w.done == "goal reached"
+    assert max(worst) < 0.35, "it must not run wide of its own route"
+    assert max(s.v for s in w.steps) > 0.7, "boosted on the straights"
+    corner = [s.v for s in w.steps if s.v > 0.05 and abs(s.w) > 0.5]
+    assert corner and min(corner) < 0.8, "and slower through the corner"
+    assert max(abs(s.w) for s in w.steps) <= missions.MAX_W + 1e-9
+
+
+def test_a_route_passes_its_boosted_speed_to_every_leg():
+    w = route([("a", 0.0, 1.2), ("b", 2.0, -1.0)])
+    w.planner.speed = 0.8
+    w.run(60)
+    assert w.done == "goal reached" and max(s.v for s in w.steps) > 0.55
+    assert w.planner.base_speed == pytest.approx(0.3)

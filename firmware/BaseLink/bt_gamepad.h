@@ -15,7 +15,7 @@
  *  Arduino IDE (see README_BT.md). BT stack runs on core 0; the
  *  balance loop and 20 kHz stepper ISR stay on core 1.
  *
- *  CONTROLS  (5.4.0: face buttons drive the autopilot, triggers assigned)
+ *  CONTROLS  (5.5.0: RT is the autopilot's speed boost)
  *    LEFT STICK  = the robot        RIGHT STICK = the flashlight head
  *      Left  Y      drive             Right X      servo YAW / pan
  *      Left  X      steer             Right Y      servo ZOOM
@@ -24,8 +24,10 @@
  *    B              autopilot PAUSE (press A to carry on)
  *    X              autopilot END the mission
  *    Y              autopilot ROAM
- *    RT (analog)    precision: the further it is pulled, the slower and finer
- *                   the left stick (down to a quarter of its normal authority)
+ *    RT (analog)    autopilot speed boost: released = the speed chosen for the
+ *                   mission, fully pulled = one step faster (normal -> fast,
+ *                   fast -> the robot's top speed). The autopilot keeps the
+ *                   drive; RT only tells it how fast. Does nothing by hand.
  *    LT (hold)      shift: LT + Y / B / X / A = nod-yes / nod-no / spin / DANCE
  *    LB             toggle SPEED LOW <-> HIGH
  *    RB             toggle FLASHLIGHT
@@ -83,6 +85,10 @@ volatile float         joyZoomY        = 0.0f;   // + = stick forward
 // arbitration; sticky across arm/disarm and pad reconnects on purpose
 // (predictable — the mode you left is the mode you get back).
 volatile uint8_t       joySpeedHigh    = SPEED_BOOT_HIGH;
+
+// RT pull in percent, deadzoned. Reported to the host (last field of NR), which uses
+// it as the autopilot's speed boost. It never touches the manual drive.
+volatile uint8_t       joyBoostPct     = 0;
 
 // ---- Bluepad32 bitmasks (verify with the [PAD] debug print) ----
 #define PAD_BTN_A        0x0001
@@ -302,6 +308,7 @@ inline void btgamepad_update() {
     if (!_txPowerDone) _applyTxPower();
 
     if (!btgamepad_connected() || _sleep) {
+        joyBoostPct = 0;
         joyForward = 0.0f;
         joySteering = 0.0f;
         joyPanX     = 0.0f;   // rate control -> servos simply hold still
@@ -380,13 +387,13 @@ inline void btgamepad_update() {
     fwdNorm   *= P.padFwdSgn;
     steerNorm *= P.padStrSgn;
 
-    // RT = precision. Analog where the pad has it, the digital bit otherwise.
+    // RT = the autopilot's speed boost. Analog where the pad has it; a pad with only the
+    // digital bit gives all or nothing. The manual drive is not affected.
     {
         float rt = ((float)_pad->throttle() / 1023.0f - 0.08f) / 0.92f;
         if (rt < 0.0f) rt = 0.0f;
-        if (rt > 1.0f || (_pad->buttons() & PAD_BTN_RT)) rt = 1.0f;
-        const float fine = 1.0f - 0.75f * rt;
-        fwdNorm *= fine; steerNorm *= fine;
+        if (rt > 1.0f || (_pad->throttle() < 8 && (_pad->buttons() & PAD_BTN_RT))) rt = 1.0f;
+        joyBoostPct = (uint8_t)(rt * 100.0f + 0.5f);
     }
 
     joyForward  = -5.0f * fwdNorm;   // legacy units; .ino scales by -0.2

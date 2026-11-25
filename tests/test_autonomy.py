@@ -358,3 +358,39 @@ def test_gamepad_keys_never_arm(tmp_path):
     m,link,clock=mapped(tmp_path)
     for key in ("GO","ROAM","PAUSE","END","NONSENSE"):asyncio.run(m.pad_key(key))
     assert not any(line=="E" for line in link.sent)
+
+
+# ---- 5.5.0: RT on the gamepad is the autopilot's speed boost ----
+def test_rt_speeds_the_mission_up_and_releasing_it_brings_the_chosen_speed_back(tmp_path):
+    m,link,clock=roaming(tmp_path)
+    assert m.mission["speed_mps"]==pytest.approx(.25) and m.mission["boost"]==0
+    link.nav.update(pad=True,boost=100)
+    step(m,link,clock)
+    assert .25<m.mission["speed_mps"]<.40, "eased in, not a step"
+    for _ in range(12):step(m,link,clock)
+    assert m.mission["speed_mps"]==pytest.approx(.40) and m.mission["boost"]==1.0, "normal -> fast at full pull"
+    assert m.mission["state"]=="running" and m.planner.base_speed==pytest.approx(.25)
+    link.nav["boost"]=50
+    for _ in range(12):step(m,link,clock)
+    assert m.mission["speed_mps"]==pytest.approx(.325)
+    link.nav["boost"]=0
+    for _ in range(12):step(m,link,clock)
+    assert m.mission["speed_mps"]==pytest.approx(.25)
+
+
+def test_rt_is_not_a_takeover_and_needs_a_connected_pad(tmp_path):
+    m,link,clock=roaming(tmp_path);before=grants(link)
+    link.nav.update(pad=False,boost=100)                        # a stale value from a pad that is gone
+    for _ in range(12):step(m,link,clock)
+    assert m.mission["speed_mps"]==pytest.approx(.25)
+    link.nav.update(pad=True,boost=100)
+    for _ in range(12):step(m,link,clock)
+    assert not m.mission.get("yielded") and grants(link)==before and m.mission["command_v"]>0
+
+
+def test_boost_respects_the_controllers_own_top_speed(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);m.slam=Slam();link.debug["v"]=.2
+    link.derived["VDRIVE"]=.6
+    asyncio.run(m.start_task("roam",speed=.4));link.nav.update(pad=True,boost=100)
+    for _ in range(14):step(m,link,clock)
+    assert m.mission["speed_mps"]==pytest.approx(.6)

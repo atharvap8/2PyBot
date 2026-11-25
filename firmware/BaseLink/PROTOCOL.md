@@ -277,7 +277,9 @@ field only triggers a balancing stop on a 1-to-0 transition. It never arms. A fi
   drops out no longer revokes the lease (before, it ended a mission mid-drive).
 
 Separate 10 Hz feedback leaves the 53-field debug schema unchanged:
-`NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<asleep>,<manual-idle-ms>`.
+`NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<asleep>,<manual-idle-ms>,<boost-percent>`.
+`<boost-percent>` (5.5.0) is the gamepad's RT pull, 0 to 100, deadzoned: the host uses it as
+the autopilot's speed boost. It has no effect in the controller itself.
 The last field is new in 5.3.0: milliseconds since the operator last drove (a drive
 stick past the takeover threshold, a gesture or a mode button), capped at 3600000,
 which is also what it reads before any manual input. After a takeover (state 3) the
