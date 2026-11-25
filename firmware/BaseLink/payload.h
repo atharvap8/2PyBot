@@ -214,6 +214,18 @@ inline void payload_torchSetPct(int pct) {
     Serial.printf("[PAY] Torch %d%% (%s)\n", _torchPct, _torchOn ? "on" : "off");
 }
 
+// Explicit on/off with a brightness, for the host's automatic light (a toggle cannot be
+// used blind). Same clamp and the same hard cap as every other path.
+inline void payload_torchSet(bool on, int pct) {
+    if (pct < P.torchMin) pct = P.torchMin;
+    if (pct > TORCH_MAX_PCT) pct = TORCH_MAX_PCT;
+    _torchPct = (uint8_t)pct;
+    _torchOn = on;
+    _torchApply();
+    if (on) Serial.printf("[PAY] Torch ON (%d%%)\n", _torchPct);
+    else    Serial.println("[PAY] Torch off");
+}
+
 inline void payload_setYaw(float deg) {
     _yawDeg = constrain(deg, (float)P.svYawMin, (float)P.svYawMax);
     _servoCommand(_yawOut);

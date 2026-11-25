@@ -1,11 +1,12 @@
 """Lidar safety bubble around the robot body (v2).
 
-Footprint from the C1 lidar centre (owner-measured) plus 1 cm all round:
-right 11 cm, left 18 cm, front 7 cm, back 8 cm. The lidar sits 31 mm right of
-the centreline on the axle line, so in the base frame (x forward, y left,
-origin = axle centre) the body is the rectangle
+Footprint from the C1 lidar centre, as measured by the owner: right 10 cm,
+left 17 cm, front 6 cm, back 7 cm. (Until 5.4.0 it was drawn 1 cm larger on
+every side; the owner asked for that centimetre back.) The lidar sits 31 mm
+right of the centreline on the axle line, so in the base frame (x forward,
+y left, origin = axle centre) the body is the rectangle
 
-    x in [-0.08, +0.07],  y in [-0.141, +0.149]
+    x in [-0.07, +0.06],  y in [-0.131, +0.139]
 
 Each scan produces:
   * front_m / back_m: free travel to the nearest return inside the corridor the
@@ -31,7 +32,7 @@ import time
 import numpy as np
 
 LIDAR_Y = -0.031
-GROW = 0.01                                       # owner: +1 cm on every side
+GROW = 0.0                                        # extra on every side (was 0.01 until 5.4.0)
 EXTENT = {"front": 0.06 + GROW, "back": 0.07 + GROW, "right": 0.10 + GROW, "left": 0.17 + GROW}
 
 
@@ -46,7 +47,10 @@ def diagonals(ext=EXTENT):
 
 
 DEFAULTS = {
-    "self_tol": 0.015,      # returns this close to the body are the robot itself
+    # Returns this close to the body are the robot itself. 1 cm more than before 5.4.0, so the
+    # region treated as "self" is exactly what it was while the body box was drawn 1 cm larger:
+    # only the stopping and corridor geometry moved in.
+    "self_tol": 0.025,
     "side_margin": 0.03,    # corridor = body width + this on each side
     "turn_margin": 0.025,   # rotating in place must keep corners this far from returns
     "support_scan": 0.06,   # a return needs a neighbour this close in the same scan...

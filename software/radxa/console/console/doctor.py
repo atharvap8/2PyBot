@@ -16,7 +16,10 @@ recoveries are limited to things the non-root console can safely do and that are
 idempotent (restart the camera stream, install a missing Python dependency).
 Anything that needs sudo or touches the controller (service restart, deploy
 timer, re-pair, reflash) is ``confirm``/``manual`` and surfaced to the operator
-in the CLI/TUI, which can elevate. Design notes: docs/DOCTOR_SELF_HEALER.md.
+in the CLI/TUI, which can elevate. One exception since 5.4.0: when the
+controller's Bluetooth is provably stuck and the robot is idle (motors off, no
+mission), the doctor restarts the controller, because nothing short of that
+brings the gamepad back. Design notes: docs/DOCTOR_SELF_HEALER.md.
 """
 from __future__ import annotations
 
@@ -134,6 +137,23 @@ def rule_rs485(s):
                 "warn", {"timeouts": stats.get("timeout")},
                 [Recovery(f"Inspect the {side} motor cable, connector and transceiver DE line", "manual")])
     return None
+
+
+def rule_gamepad_stuck(s):
+    pad = s.get("gamepad") or {}
+    if not pad.get("stuck"):
+        return None
+    tel = s.get("tel") or {}
+    busy = bool(tel.get("balancing") or tel.get("self_righting"))
+    cause = ("The controller's Bluetooth is stuck after a gamepad reconnect (" + str(pad.get("why") or "no input") + "). "
+             "The gamepad cannot connect or connects without doing anything until the controller restarts. ")
+    cause += ("The robot is balancing, so it is left alone: press STOP on the console and it restarts by itself."
+              if busy else "The robot is idle, so the controller is restarted (about 10 s; pairings are kept).")
+    return Case("gamepad_bt_stuck", "Gamepad Bluetooth is stuck", cause, "warn",
+                {"why": pad.get("why"), "count": pad.get("count"), "balancing": busy},
+                [Recovery("Restart the controller's Bluetooth", "auto", "restart_controller_bt",
+                          "Only with the motors off. Pairings, settings and calibration are kept."),
+                 Recovery("Or pair the gamepad in another mode (it reconnects more reliably over classic Bluetooth)", "manual")])
 
 
 def rule_powered_down(s):
@@ -282,7 +302,7 @@ def rule_numpy2(s):
 RULES = [rule_deploy_deferring, rule_deploy_failed, rule_console_crash, rule_serial_stale,
          rule_hotspot, rule_services, rule_camera_down, rule_onnxruntime_missing, rule_numpy2,
          rule_rs485, rule_cpu_hot, rule_mem_pressure, rule_disk_full, rule_deploy_disabled,
-         rule_powered_down]
+         rule_gamepad_stuck, rule_powered_down]
 
 
 def diagnose(signals):
@@ -324,7 +344,8 @@ _MONITORED = ("2pybot-console", "2pybot-mediamtx", "2pybot-firmware",
               "2pybot-hotspot", "2pybot-imx708", "2pybot-boot-gate")
 _ENABLED_WATCH = ("2pybot-hotspot", "2pybot-mediamtx", "2pybot-firmware", "2pybot-imx708")
 # auto actions that restart a unit: not run while the robot is balancing
-_SERVICE_RESTART_ACTIONS = {"restart_hotspot", "restart_mediamtx", "restart_firmware", "restart_imx708"}
+_SERVICE_RESTART_ACTIONS = {"restart_hotspot", "restart_mediamtx", "restart_firmware", "restart_imx708",
+                            "restart_controller_bt"}
 
 
 def _dep_installed(name):
@@ -422,6 +443,7 @@ class Doctor:
             "restart_mediamtx": lambda: self._restart_service("2pybot-mediamtx.service"),
             "restart_firmware": lambda: self._restart_service("2pybot-firmware.service"),
             "restart_imx708": lambda: self._restart_service("2pybot-imx708.service"),
+            "restart_controller_bt": self._restart_controller_bt,
             # confirm-only actions (surfaced to the operator, elevated by the CLI/TUI)
             "enable_deploy": self._enable_deploy,
             "run_deploy": self._run_deploy,
@@ -469,6 +491,7 @@ class Doctor:
             "network": {"hotspot_ap_up": self._probed["ap"]},
             "deps": {"onnxruntime": _dep_installed("onnxruntime"), "numpy_major": _numpy_major()},
             "visual_pair": {"enabled": vp.get("enabled")},
+            "gamepad": dict(getattr(link, "pad_stuck", None) or {}, stuck=bool(getattr(link, "pad_stuck", None))),
             "system": _system_info(),
         }
 
@@ -501,6 +524,20 @@ class Doctor:
             return False, "no streamer"
         ok, msg = self.streamer.start()
         return ok, msg
+
+    def _restart_controller_bt(self):
+        """BT,RESTART: the controller restarts itself if (and only if) its motors are off."""
+        link = self.link
+        tel = getattr(link, "tel", {}) or {}
+        if tel.get("balancing") or tel.get("self_righting") or tel.get("asleep") or tel.get("stale", True):
+            return False, "the robot is not idle"
+        if getattr(link, "maintenance", False) or (getattr(link, "derived", {}) or {}).get("PADRESTART") != 1:
+            return False, "controller firmware cannot restart Bluetooth on request (needs 5.4.0)"
+        ok = bool(link.send("BT,RESTART"))
+        if ok:
+            link.pad_stuck = {}
+            self.log("[doctor] gamepad Bluetooth was stuck: restarting the controller (pairings kept)")
+        return ok, "sent BT,RESTART" if ok else "serial command unavailable"
 
     def _pip_onnxruntime(self):
         try:

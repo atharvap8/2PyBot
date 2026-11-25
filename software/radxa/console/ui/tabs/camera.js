@@ -39,6 +39,17 @@ export default function register(registerTab) {
         <div class=bar id=profs></div>
         <pre class=log id=calLog style="max-height:150px">idle</pre>
       </div>
+      <div class=card><h3>Flashlight</h3>
+        <div class=bar>
+          <label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type=checkbox id=atOn>
+            Switch on by itself in the dark, and set its own brightness</label>
+        </div>
+        <div class=bar>
+          <label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type=checkbox id=atAim>
+            Aim the beam: lead into turns, tight when the way is open, wide when something is close</label>
+        </div>
+        <p class=hint id=atNote></p>
+      </div>
       <div class=card><h3>Stream</h3>
         <div class=bar>
           <label style="color:var(--dim);font-size:12px">max width
@@ -158,11 +169,29 @@ export default function register(registerTab) {
       };
       c.API.get('/api/camera/auto_exposure').then(showAe).catch(() => {});
 
+      const atOn = el.querySelector('#atOn'), atAim = el.querySelector('#atAim'), atNote = el.querySelector('#atNote');
+      const showAt = (a) => {
+        if (!a || !atOn.isConnected) return;
+        atOn.checked = !!a.enabled; atAim.checked = !!a.aim; atAim.disabled = !a.enabled;
+        atNote.textContent = !a.enabled ? 'Off: the flashlight is only what you set from the gamepad.'
+          : a.holding_s > 0 ? `You used the flashlight: the bot leaves it alone for ${Math.ceil(a.holding_s / 60)} more min.`
+          : !a.available ? 'Waiting for the controller (needs firmware 5.4.0, and the robot awake).'
+          : a.on ? `On at ${a.percent}%. ${a.action || ''}`
+          : (a.action ? a.action + '. ' : '') + `Works while the robot is balancing: on when the mean luma stays below ${a.dark_below} for 3 s.`;
+      };
+      const sendAt = async () => {
+        try { showAt(await c.API.post('/api/torch/auto', { enabled: atOn.checked, aim: atAim.checked })); }
+        catch (e) { c.msg(e.message, true); }
+      };
+      atOn.onchange = sendAt; atAim.onchange = sendAt;
+      c.API.get('/api/torch/auto').then(showAt).catch(() => {});
+
       lumaTimer = setInterval(async () => {
         try { const l = await c.API.get('/api/camera/luma');
               const e = el.querySelector('#cLuma');
               if (e && l.luma != null) e.textContent = `luma ${l.luma.toFixed(0)}`; } catch {}
         c.API.get('/api/camera/auto_exposure').then(showAe).catch(() => {});
+        c.API.get('/api/torch/auto').then(showAt).catch(() => {});
       }, 4000);
     },
     onLeave() { viewer?.stop(); viewer = null; clearInterval(lumaTimer); }

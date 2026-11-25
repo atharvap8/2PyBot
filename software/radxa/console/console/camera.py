@@ -223,8 +223,9 @@ class ExposureWatch:
     LOW, HIGH, TARGET = 55.0, 185.0, 110.0
     REST, REST_AT_LIMIT = 30.0, 300.0        # s left alone after a walk; longer when the sensor ran out of range
 
-    def __init__(self, log=print, settings=None, measure=None, calibrate=None, clock=time.monotonic):
+    def __init__(self, log=print, settings=None, measure=None, calibrate=None, clock=time.monotonic, defer=None):
         self.log, self.clock = log, clock
+        self.defer = defer                       # defer(side) -> True while something else (the flashlight) is dealing with it
         self.settings = settings or os.path.join(os.path.dirname(CAM_PROFILES), "auto_exposure.json")
         self.measure = measure or self.fresh_luma
         self.calibrate = calibrate or (lambda: autocalibrate(target=self.TARGET))
@@ -269,6 +270,9 @@ class ExposureWatch:
             self.bad = 0
             return False
         side = "dark" if luma < self.LOW else "bright"
+        if self.defer is not None and self.defer(side):
+            self.bad = 0                         # the automatic flashlight is on the case: leave the exposure alone
+            return False
         # Out of range in the dark, then the light comes on (or the lens is uncovered): do not sit out the long rest.
         flipped = self.limit_side is not None and side != self.limit_side and now >= self.walked_at + self.REST
         if now < self.rest_until and not flipped:
@@ -283,8 +287,12 @@ class ExposureWatch:
         self.rest_until = now + (self.REST if settled else self.REST_AT_LIMIT)
         self.walked_at, self.limit_side = now, None if settled else ("dark" if luma < self.LOW else "bright")
         why = "too dark" if luma < self.LOW else "too bright"
-        outcome = (f"now {result.get('luma', 0):.0f}" if settled
-                   else result.get("error") or "the sensor ran out of range for this light")
+        if result.get("ok") is False:            # the walk never ran (no control channel, no picture): try again soon
+            self.rest_until, self.limit_side = now + self.REST, None
+            self.last.update(action=f"Picture was {why} ({luma:.0f}) but could not re-expose: {result.get('error')}", at=time.time())
+            self.log("[camera] " + self.last["action"])
+            return
+        outcome = f"now {result.get('luma', 0):.0f}" if settled else "the sensor ran out of range for this light"
         self.last.update(action=f"Picture was {why} ({luma:.0f}): re-exposed, {outcome}", at=time.time())
         self.log("[camera] " + self.last["action"])
 

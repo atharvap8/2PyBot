@@ -222,11 +222,12 @@ class MissionInput(BaseModel):
     speed_mps: Optional[float]=None
     duration_s: Optional[float]=None
     goal: Optional[dict]=None       # {"label": name} or {"x": m, "y": m, "name": str}
+    goals: Optional[list]=None      # several of those, visited in this order (go-to only)
 
 
 @app.post("/api/autonomy/mission/start")
 async def autonomy_mission(body: MissionInput):
-    try:return await autonomy.start_task(body.kind,body.speed_mps,body.duration_s,body.goal)
+    try:return await autonomy.start_task(body.kind,body.speed_mps,body.duration_s,body.goal,body.goals)
     except ValueError as error:raise HTTPException(409,str(error)) from error
 
 
@@ -439,6 +440,10 @@ async def _startup():
                                   asyncio.create_task(doctor.run())]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
     app.state.background_tasks.append(asyncio.create_task(exposure_watch.run()))
+    app.state.background_tasks.append(asyncio.create_task(auto_torch.run()))
+    link.add_text_listener(auto_torch.on_line)
+    # A / B / X / Y on the gamepad: the controller reports the key, the autopilot acts on it
+    link.add_key_listener(lambda key: asyncio.ensure_future(autonomy.pad_key(key)))
     app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
     power.lidar_enabled = os.environ.get("BOT_LIDAR", "1") != "0"
@@ -666,7 +671,27 @@ async def cam_autocal(target: float = 110.0):
     return res
 
 
-exposure_watch = camera.ExposureWatch(log=link._log)   # re-exposes when the light changes
+from .torch import AutoTorch
+# The flashlight looks after itself in the dark; the exposure watch steps back while it can act.
+auto_torch = AutoTorch(link, camera.ExposureWatch.fresh_luma, log=link._log,
+                       front_m=lambda: slam_engine.bubble.status().get("front_m"))
+exposure_watch = camera.ExposureWatch(log=link._log, defer=auto_torch.handles)   # re-exposes when the light changes
+
+
+class AutoTorchInput(BaseModel):
+    enabled: Optional[bool] = None
+    aim: Optional[bool] = None
+
+
+@app.get("/api/torch/auto")
+def torch_auto():
+    return auto_torch.status()
+
+
+@app.post("/api/torch/auto")
+def torch_auto_set(body: AutoTorchInput):
+    return auto_torch.set(body.enabled, body.aim)
+
 
 
 class AutoExposureInput(BaseModel):

@@ -4,7 +4,7 @@
 <meta charset="utf-8"><script>if(/[?&]embed=1/.test(location.search))document.documentElement.classList.add('embed')</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>2PyBot · Maps</title>
-<link rel="stylesheet" href="static/slam.css?v=52">
+<link rel="stylesheet" href="static/slam.css?v=53">
 </head>
 <body>
 <header class="top">
@@ -48,7 +48,7 @@
       </div>
       <div class="row btns">
         <button class="btn" id="b-unload" title="Stop using the loaded map. The saved map is kept.">Unload</button>
-        <button class="btn" id="b-zip" title="Download the map as a zip">Download</button>
+        <button class="btn" id="b-zip" title="Download the map as a zip">Zip</button>
         <button class="btn" id="b-stl" title="Export the map as a 3D STL">STL</button>
         <button class="btn" id="b-import">Import</button>
         <input type="file" id="imp-file" accept=".zip" hidden>
@@ -79,9 +79,10 @@
           <button data-kind="explore" aria-selected="false">Explore</button>
         </div>
         <div class="kind-opts" data-for="goto">
-          <select id="goal-label"><option value="">Choose a place…</option></select>
-          <button class="btn tool" data-tool="goal" id="t-goal" title="Tap the map to pick a spot">Pick on map</button>
+          <select id="goal-label"><option value="">Add a place…</option></select>
+          <button class="btn tool" data-tool="goal" id="t-goal" title="Tap the map to add stops, in the order to visit">Pick on map</button>
         </div>
+        <ol class="stops kind-opts" data-for="goto" id="stop-list"></ol>
         <div class="auto-params">
           <label>Speed <select id="m-speed"><option value="0.15">Slow</option><option value="0.25" selected>Normal</option><option value="0.4">Fast</option></select></label>
           <label class="kind-opts" data-for="roam explore">For <select id="m-time"><option value="120">2 min</option><option value="600" selected>10 min</option><option value="1800">30 min</option></select></label>
@@ -124,6 +125,6 @@
   </section>
 </main>
 <script src="static/slam3d.js"></script>
-<script src="static/slam.js?v=52"></script>
+<script src="static/slam.js?v=53"></script>
 </body>
 </html>

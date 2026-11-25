@@ -97,6 +97,9 @@ class SerialLink:
         self._parameter_request=None
         self._dirty_params=set()
         self._line_listeners=[]
+        self._key_listeners=[]          # fn(key) for PK,<key> (gamepad autopilot keys)
+        self._text_listeners=[]         # fn(line) for every plain log line from the controller
+        self.pad_stuck={}               # evidence that the controller's Bluetooth is stuck (see _pad_health)
 
     # ---------------- lifecycle ----------------
     @staticmethod
@@ -363,6 +366,31 @@ class SerialLink:
         raise. Used by the SLAM module; it can only read, never send."""
         self._line_listeners.append(fn)
 
+    def add_key_listener(self, fn):
+        """Call fn(key) when the gamepad's A/B/X/Y autopilot keys are pressed (GO, PAUSE, END, ROAM)."""
+        self._key_listeners.append(fn)
+
+    def add_text_listener(self, fn):
+        """Call fn(line) for every plain log line from the controller. Must be quick and not raise."""
+        self._text_listeners.append(fn)
+
+    def _pad_health(self, line):
+        """Is the controller's Bluetooth stuck? Two things say so for certain: its stack refusing
+        a connection because a client from an earlier one never finished, and the firmware
+        dropping a link that delivered nothing. Proof of life (a button, a healthy link check,
+        a restart) clears it. The doctor restarts the controller when it is safe to."""
+        if line.startswith(("Failed to set device information client", "[PAD] DEAD LINK")):
+            self.pad_stuck = {"since": self.pad_stuck.get("since") or time.time(), "why": line[:90],
+                              "count": self.pad_stuck.get("count", 0) + 1}
+        elif line.startswith(("[PAD] btn=", "[PAD] ARM", "[PAD] DISARM", "[PAD] SPEED", "[PAD] Bluepad32 ready", "[BOOT] ")):
+            self.pad_stuck = {}
+        elif line.startswith("[PAD] link check:"):
+            try:
+                if int(line.split(":")[1].split()[0]) > 0:
+                    self.pad_stuck = {}
+            except (ValueError, IndexError):
+                pass
+
     def _mirror(self,line:str):
         if not self._line_listeners or line[:2] not in ("O,","D,"):
             return
@@ -426,6 +454,14 @@ class SerialLink:
                            "idle_ms":int(fields[8]) if len(fields)>8 else None}
                 self.tel["asleep"]=sleep=="1"   # 4.7.7+: controller power-down state (was always 0)
                 self._publish({"type":"navigation","nav":self.nav})
+                return
+            if line.startswith("PK,"):
+                key=line[3:].strip().upper()
+                self.pad_stuck={}
+                self._log("[PAD] autopilot key "+key)
+                for fn in list(self._key_listeners):
+                    try:fn(key)
+                    except Exception:pass
                 return
             if line in ("SL!,1","SL!,0"):
                 self.tel["asleep"]=line.endswith("1")
@@ -570,6 +606,10 @@ class SerialLink:
         except (ValueError, IndexError):
             pass
 
+        self._pad_health(line)
+        for fn in list(self._text_listeners):
+            try:fn(line)
+            except Exception:pass
         self._log(line)
         self._publish({"type": "log", "text": line})
 

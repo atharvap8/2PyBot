@@ -302,6 +302,19 @@ never limited. `BG,0,0,0` releases it. Accepted during self-uprighting. See
 
 ### Gamepad re-pair (4.7.6, reworked in 4.7.7)
 
+`BT,RESTART` (5.4.0, `PR,PADRESTART,1`, stopped motors only) restarts the controller to
+bring a stuck Bluetooth stack back. Pairings, parameters and calibration are kept. The
+host's doctor sends it when the stack refuses connections (`Failed to set device
+information client`) or the firmware reports `[PAD] DEAD LINK`, and the robot is idle.
+
+`PK,<GO|PAUSE|END|ROAM>` (5.4.0, `PR,PADKEYS,1`, controller to host) reports the gamepad's
+A / B / X / Y. The host's autopilot acts on them; the keys move nothing by themselves and
+are not a takeover. With LT held the same buttons are the gestures instead.
+
+`TL,<0|1>,<percent>` (5.4.0, `PR,TORCHSET,1`) sets the flashlight explicitly, for the
+host's automatic light. Same clamp and the same 90 % hard cap as every other path; forced
+off while powered down.
+
 `BT,FORGET` (stopped motors only) clears every gamepad pairing. With `PR,PADREPAIR,2`
 (4.7.8) the controller erases the NVS namespaces `BTstack` (link keys, BLE bonds, BLE
 root keys) and `bp32` (Bluepad32 settings), logs

@@ -244,3 +244,16 @@ def test_map_cells_merge_into_few_boxes_and_drop_specks():
     assert got["room"] == [[0, 0, 20, 10]]
     assert got["speck"] == [[300, 300, 2, 1]], "a lone cell is noise and must be dropped; a pair is kept"
     assert got["sectors"] == 8 and got["views"] == ["parked", "drive", "park", "system"]
+
+
+def test_maps_can_build_a_route_of_several_stops():
+    page, code, css = text(UI / "slam/index.html"), text(UI / "slam/slam.js"), text(UI / "slam/slam.css")
+    assert 'id="stop-list"' in page and ".stops li" in css
+    assert "body.goals = stops.map" in code and "data-up" in code and "data-down" in code and "data-rm" in code
+    assert "__picked" not in code, "the single picked spot became the first of a list of stops"
+    assert "Stop ${i.leg} of ${i.legs}" in code and "Stop ${i.leg} of ${i.legs}" in text(UI / "shell/shell.js")
+
+
+def test_camera_app_has_the_flashlight_switches():
+    tab = text(UI / "tabs/camera.js")
+    assert "/api/torch/auto" in tab and "id=atOn" in tab and "id=atAim" in tab

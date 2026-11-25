@@ -42,8 +42,9 @@ y ∈ [−0.131, 0.139] m. The diagonals (corners) from the lidar centre are:
 | Back-left | 0.184 m |
 | Back-right | 0.122 m |
 
-- Returns inside the body plus 1.5 cm are treated as the robot itself. The bubble
-  uses every return beyond 3 cm, not the 12 cm SLAM self radius.
+- Returns inside the body plus 2.5 cm are treated as the robot itself. The bubble
+  uses every return beyond 3 cm, not the 12 cm SLAM self radius. Until 5.4.0 the
+  body box itself was drawn 1 cm larger on every side; it is now the measured body.
 - Beams are floor-clipped for the current lean, as in SLAM.
 - **Forward and reverse caps:** the corridor is the body width plus 3 cm on each
   side. The cap is the braking speed for (free distance − 6 cm), with a = 0.6 m/s²
@@ -63,7 +64,7 @@ y ∈ [−0.131, 0.139] m. The diagonals (corners) from the lidar centre are:
 
 | Method | Path | Body |
 |--------|------|------|
-| POST | `/api/autonomy/mission/start` | `{kind: roam\|goto\|explore, speed_mps?, duration_s?, goal?: {label} \| {x, y, name?}}` → `{mission_id, lease_key}` |
+| POST | `/api/autonomy/mission/start` | `{kind: roam\|goto\|explore, speed_mps?, duration_s?, goal?: {label} \| {x, y, name?}, goals?: [goal, ...]}` → `{mission_id, lease_key}`. `goals` (up to 12) are visited in the order given. |
 | GET | `/api/autonomy/mission` | Mission, per-kind blocking reasons, bubble status |
 | POST | `/api/autonomy/heartbeat` | Unchanged: required every < 3 s |
 | POST | `/api/autonomy/pause`, `/resume`, `/stop` | Unchanged |

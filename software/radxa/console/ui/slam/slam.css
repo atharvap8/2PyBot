@@ -171,6 +171,16 @@ p.kind-opts { margin: 0 0 8px; }
 .dot.bad { background: var(--err); } .dot.off { background: var(--mute); }
 .brand img.brand-logo{height:24px;width:auto;flex:none}
 
+/* the stops of a go-to, in the order they are visited */
+.stops { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 4px; }
+.stops[hidden] { display: none; }
+.stops li { display: flex; align-items: center; gap: 6px; background: var(--card2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 4px 4px 8px; font-size: 13px; }
+.stops li i { font-style: normal; width: 18px; height: 18px; border-radius: 50%; background: #38bdf8; color: #06202e; font-size: 11px; font-weight: 700; display: grid; place-items: center; flex: none; }
+.stops li b { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stops li button { color: var(--sub); padding: 2px 7px; border-radius: 4px; }
+.stops li button:hover { color: var(--acc); } .stops li button:disabled { opacity: .25; cursor: default; }
+.stops li.none { border-style: dashed; background: none; color: var(--mute); font-size: 12.5px; padding: 6px 8px; }
+
 /* ---- consistent panel sections (same refined look as Autopilot) ---- */
 .steps .step { padding: 14px 16px 15px; }
 .steps .step h2 { padding-bottom: 9px; margin-bottom: 11px; border-bottom: 1px solid var(--line); }

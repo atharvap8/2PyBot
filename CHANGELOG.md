@@ -3,6 +3,46 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
+## 5.4.0: routes with several stops, autopilot on the gamepad, a flashlight that looks after itself
+
+Firmware changes compile but have not been driven yet.
+
+- **Routes with several stops.** In Maps, add places from the list or tap the map
+  for each stop, reorder them with the arrows, and Start drives them in that
+  order. One stop is a plain go-to. The map shows the numbered stops and the order;
+  the mission shows "Stop 2 of 4". A stop that cannot be reached ends the route and
+  names it. API: `goals: [...]` (up to 12) on `/api/autonomy/mission/start`.
+- **Autopilot on the gamepad.** A = go (resume a paused mission, or repeat the last
+  one), B = pause, X = end, Y = roam. RT is an analog precision trigger: the
+  further it is pulled, the slower and finer the left stick, down to a quarter.
+  The gestures moved to LT held + Y / B / X / A. D-pad, sticks, LB, RB, START and
+  SELECT are unchanged. The buttons only report a key to the host (`PK,GO` ...);
+  they are not a takeover and they never arm.
+- **The flashlight looks after itself.** While the robot is balancing: dark for
+  three seconds switches it on at 25 %, then it steps its own brightness to keep
+  the picture's mean luma between 75 and 150, steps down hard when washed out,
+  and switches off when there is enough light without it. It also aims: the beam
+  leads into turns and is tight when the way ahead is open, wide when something is
+  within 0.8 m. Use the flashlight from the gamepad and the bot leaves it alone
+  for five minutes. Parked or powered down, a light the bot switched on goes off.
+  The camera's automatic re-exposure steps back while the light can still act.
+  Switches in the Camera app; firmware command `TL,<on>,<percent>` (same 90 % cap).
+- **Safety bubble 1 cm smaller on every side.** The body box is now the measured
+  body (it was drawn 1 cm larger). What counts as the robot's own body in the scan
+  has not moved.
+- **A gamepad that connects but does nothing.** The robot's log shows the cause is
+  in the controller's Bluetooth stack: after some reconnects it delivers no input
+  ("connected", then not one button), and every later attempt is refused with
+  `Failed to set device information client: 0xc` until the controller restarts.
+  That stack is a prebuilt library, so this is contained rather than cured: the
+  firmware now counts the input of each connection and drops a link that delivers
+  nothing (`[PAD] DEAD LINK`), and when the stack is provably stuck and the robot
+  is idle, the doctor restarts the controller (`BT,RESTART`, about 10 s, pairings
+  kept). While the robot is balancing it is left alone: press STOP and it recovers.
+- A re-exposure that could not run (camera control channel not ready) now says so
+  and is tried again after 30 s, instead of reading as "re-exposed" and resting
+  five minutes.
+
 ## 5.3.0: gamepad reconnect no longer drops the robot, missions survive Wi-Fi loss, no more room-hopping on the map
 
 The firmware changes compile but have not been driven yet. The causes below were

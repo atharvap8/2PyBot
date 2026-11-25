@@ -294,7 +294,10 @@ function missionLine(m) {
   if (i.waiting) return { planning: 'Planning a route', replanning: 'Finding a way round', localizing: 'Finding itself on the map',
     'finding frontiers': 'Looking for unmapped edges', 'lidar bubble stale': 'Waiting for the lidar', 'controller link': 'Waiting for the controller',
     gamepad: 'You are driving. Autopilot resumes when you let go' }[i.waiting] || 'Waiting: ' + i.waiting;
-  if (m.kind === 'goto') return fin(i.distance_m) ? fmt(i.distance_m, 1) + ' m to go' : 'On the way';
+  if (m.kind === 'goto') {
+    const togo = fin(i.distance_m) ? fmt(i.distance_m, 1) + ' m to go' : 'On the way';
+    return i.legs > 1 ? `Stop ${i.leg} of ${i.legs} · ${togo}` : togo;
+  }
   const left = fin(i.remaining_s) ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, Math.round(i.remaining_s % 60))).padStart(2, '0')} left` : '';
   if (m.kind === 'roam') return [fmt(i.distance_m, 1) + ' m driven', left].filter(Boolean).join(' · ');
   if (m.kind === 'explore') return [(i.frontiers_reached || 0) + ' edges reached', left].filter(Boolean).join(' · ');

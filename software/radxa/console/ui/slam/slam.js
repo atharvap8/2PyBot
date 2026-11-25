@@ -182,7 +182,7 @@ function setTool(t) {
   document.querySelectorAll(".btn.tool").forEach((b) => b.setAttribute("aria-pressed", b.dataset.tool === tool));
   if (tool && view !== "map") setView("map");
   $("view-note").textContent = tool === "label" ? "Tap a spot to name it"
-    : tool === "erase" ? "Tap to erase (drag still pans)" : tool === "goal" ? "Tap where the robot should go"
+    : tool === "erase" ? "Tap to erase (drag still pans)" : tool === "goal" ? "Tap the map for each stop, in order. Press Pick on map again when done"
     : "Scroll or pinch to zoom · drag to move";
 }
 document.querySelectorAll(".btn.tool").forEach((b) => (b.onclick = () => setTool(b.dataset.tool)));
@@ -195,12 +195,11 @@ async function toolTap(x, y) {
   } else if (tool === "erase") {
     const r = await post("api/map/erase", { x, y, r: +$("erase-r").value });
     if (!r.ok) setSay(r.error || "Could not erase.", "warn");
-  } else if (tool === "goal") {
-    picked = { x, y };                                        // chosen; Start sends it
-    setKind("goto"); renderLabels.key = null; renderLabels();
-    $("goal-label").value = "__picked";
-    setTool("goal");                                          // one tap = one spot
-    draw();
+  } else if (tool === "goal") {                               // every tap adds a stop; the tool stays on for the next
+    if (stops.length >= 12) return setSay("A route can have at most 12 stops.", "warn");
+    points += 1;
+    stops.push({ name: "point " + points, x, y });
+    setKind("goto"); renderStops(); draw();
   }
 }
 function renderLabels() {
@@ -214,14 +213,41 @@ function renderLabels() {
     `<button data-go="${esc(l.name)}" title="Drive there">Go</button><button data-del="${esc(l.name)}" title="Delete">✕</button></li>`).join("")
     || `<li class="sub">No labels yet.</li>`;
   const sel = $("goal-label"), cur = sel.value;
-  sel.innerHTML = `<option value="">${labels.length ? "Choose a place…" : "No places yet: name one in step 7"}</option>`
-    + labels.map((l) => `<option>${esc(l.name)}</option>`).join("")
-    + (picked ? `<option value="__picked">Spot picked on map (${picked.x.toFixed(1)}, ${picked.y.toFixed(1)})</option>` : "");
-  sel.value = cur === "__picked" && picked ? cur : labels.some((l) => l.name === cur) ? cur : "";
+  sel.innerHTML = `<option value="">${labels.length ? "Add a place…" : "No places yet: use Label, or Pick on map"}</option>`
+    + labels.map((l) => `<option>${esc(l.name)}</option>`).join("");
+  sel.value = "";
   $("label-list").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => post("api/labels/delete", { name: b.dataset.del })));
   $("label-list").querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => {
-    setKind("goto"); $("goal-label").value = b.dataset.go; startMission();
+    setKind("goto"); stops = [{ name: b.dataset.go, label: true }]; renderStops(); startMission();
   }));
+  renderStops();
+}
+// The stops of a go-to, in the order they will be visited. One stop is a plain go-to.
+function renderStops() {
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const known = new Set(((S && S.labels) || []).map((l) => l.name));
+  stops = stops.filter((s) => !s.label || known.has(s.name) || !S);          // a deleted label drops out
+  const list = $("stop-list");
+  list.innerHTML = stops.map((s, i) => `<li><i>${i + 1}</i><b>${esc(s.name)}</b>` +
+    `<button data-up="${i}" title="Earlier" ${i ? "" : "disabled"}>↑</button>` +
+    `<button data-down="${i}" title="Later" ${i < stops.length - 1 ? "" : "disabled"}>↓</button>` +
+    `<button data-rm="${i}" title="Remove">✕</button></li>`).join("")
+    || `<li class="none">Add the places to visit, in order. One place is a plain go-to.</li>`;
+  const move = (i, d) => { const [s] = stops.splice(i, 1); stops.splice(i + d, 0, s); renderStops(); draw(); };
+  list.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => move(+b.dataset.up, -1)));
+  list.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => move(+b.dataset.down, 1)));
+  list.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => { stops.splice(+b.dataset.rm, 1); renderStops(); draw(); }));
+}
+$("goal-label").onchange = (e) => {
+  const name = e.target.value; e.target.value = "";
+  if (!name) return;
+  if (stops.length >= 12) return setSay("A route can have at most 12 stops.", "warn");
+  stops.push({ name, label: true }); renderStops(); draw();
+};
+function stopXY(s) {                                           // a label stop follows its label
+  if (!s.label) return s;
+  const l = ((S && S.labels) || []).find((x) => x.name === s.name);
+  return l ? { x: l.x, y: l.y } : null;
 }
 function drawOverlays(pose) {
   // planned path + goal
@@ -230,10 +256,26 @@ function drawOverlays(pose) {
     S.plan.forEach((p, i) => { const [x, y] = w2s(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke(); ctx.setLineDash([]);
   }
-  if (picked && !S.goal) {                                     // chosen but not started yet
-    const [px, py] = w2s(picked.x, picked.y);
-    ctx.strokeStyle = "#38bdf8"; ctx.setLineDash([4, 4]); ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(px, py, 10, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+  // the stops: the running mission's (done ones dimmed), or the ones being put together
+  const m = lastPoll && lastPoll.mission, running = m && (m.state === "running" || m.state === "paused");
+  const marks = running ? ((m.info || {}).stops || []) : stops.map((s) => ({ ...stopXY(s), name: s.name })).filter((s) => s.x !== undefined);
+  if (marks.length > 1 || (marks.length && !running)) {
+    ctx.font = "700 11px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    if (!running) {                                           // the order, as a dashed line from the robot
+      ctx.strokeStyle = "rgba(56,189,248,.55)"; ctx.setLineDash([4, 5]); ctx.lineWidth = 1.5; ctx.beginPath();
+      ctx.moveTo(...w2s(pose[0], pose[1]));
+      for (const s of marks) ctx.lineTo(...w2s(s.x, s.y));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    marks.forEach((s, i) => {
+      const [px, py] = w2s(s.x, s.y);
+      ctx.globalAlpha = s.done ? 0.35 : 1;
+      ctx.fillStyle = "#38bdf8"; ctx.beginPath(); ctx.arc(px - 16, py, 9, 0, 2 * Math.PI); ctx.fill();   // beside the point: the label sits above it
+      ctx.fillStyle = "#06202e"; ctx.fillText(String(i + 1), px - 16, py + 0.5);
+      ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px, py, 4, 0, 2 * Math.PI); ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+    ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
   }
   if (S.goal) {
     const [gx, gy] = w2s(S.goal.x, S.goal.y);
@@ -271,7 +313,7 @@ function drawOverlays(pose) {
 }
 
 // ---------------------------------------------------------------- autonomy
-let sup = null, guard = null, picked = null, kind = "goto", lastPoll = null, flash = null;   // sup: {id, key}
+let sup = null, guard = null, stops = [], points = 0, kind = "goto", lastPoll = null, flash = null;   // sup: {id, key}
 async function api(path, body) {
   const r = await fetch(path, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" },
                                  body: body === undefined ? undefined : JSON.stringify(body) });
@@ -291,10 +333,9 @@ async function startMission() {
   const body = { kind, speed_mps: +$("m-speed").value };
   if (kind !== "goto") body.duration_s = +$("m-time").value;
   else {
-    const v = $("goal-label").value;
-    if (v === "__picked" && picked) body.goal = { x: picked.x, y: picked.y, name: "picked spot" };
-    else if (v) body.goal = { label: v };
-    else return showFlash("Choose a place, or press Pick on map and tap the map.");
+    if (!stops.length) return showFlash("Add a place from the list, or press Pick on map and tap the map.");
+    body.goals = stops.map((s) => (s.label ? { label: s.name } : { x: s.x, y: s.y, name: s.name }));
+    if (tool === "goal") setTool("goal");
   }
   try {
     const r = await api("/api/autonomy/mission/start", body);
@@ -328,7 +369,10 @@ function progressText(m) {
     "lidar bubble stale": "Waiting for the lidar…", replanning: "Finding a way round…",
     "controller link": "Waiting for the controller…",
     gamepad: "You are driving. Autopilot resumes when you let go." }[i.waiting] || `Waiting: ${i.waiting}`;
-  if (m.kind === "goto") return i.distance_m !== undefined ? `${fmt(i.distance_m, 1)} m to go` : "On the way";
+  if (m.kind === "goto") {
+    const togo = i.distance_m !== undefined ? `${fmt(i.distance_m, 1)} m to go` : "On the way";
+    return i.legs > 1 ? `Stop ${i.leg} of ${i.legs} · ${i.goal || ""} · ${togo}` : togo;
+  }
   const mins = i.remaining_s !== undefined ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, i.remaining_s % 60)).padStart(2, "0")} left` : "";
   if (m.kind === "roam") return [`${fmt(i.distance_m, 1)} m driven`, `${i.turns || 0} turns`, mins].join(" · ");
   if (m.kind === "explore") return [`${i.frontiers_reached || 0} edges reached`, mins].join(" · ");
@@ -357,7 +401,7 @@ function renderMission() {
     const reasons = (r.blocked_reasons || {})[kind] || [];
     const last = m && (m.state === "completed" || m.state === "aborted" || m.state === "stopped") ? m : null;
     if (reasons.length) { title = "Not ready"; detail = reasons[0]; tone = "off"; }
-    else { title = "Ready"; detail = kind === "goto" ? "Choose a place and press Start." : "Press Start."; tone = "ok"; }
+    else { title = "Ready"; detail = kind === "goto" ? (stops.length > 1 ? `${stops.length} stops, in the order listed. Press Start.` : stops.length ? "Press Start." : "Add a place and press Start.") : "Press Start."; tone = "ok"; }
     if (last && Date.now() - (renderMission.lastSeen || 0) < 15000) {
       title = last.state === "completed" ? (last.kind === "goto" ? `Arrived · ${last.name.replace(/^Go to /, "")}` : `Done · ${last.name}`) : `Stopped · ${last.name}`;
       detail = human(last.reason); tone = last.state === "completed" ? "ok" : "warn";
@@ -399,7 +443,7 @@ $("b-mresume").onclick = async () => {
   try { const r = await api("/api/autonomy/resume", {}); sup = { id: r.mission_id, key: r.lease_key }; pollMission(); }
   catch (e) { showFlash(e.message); }
 };
-setKind("goto");
+setKind("goto"); renderStops();
 $("b-extend").onclick = async () => {
   const n = $("map-list").value; if (!n) return;
   const r = await post("api/maps/extend", { name: n });

@@ -282,3 +282,79 @@ def test_select_during_a_takeover_still_ends_the_mission(tmp_path):
     link.nav.update(state=nav.NAV_TAKEOVER,idle_ms=0);step(m,link,clock)
     link.tel["balancing"]=False;step(m,link,clock)
     assert m.mission["state"]=="aborted"
+
+
+# ---- 5.4.0: routes with several stops; A / B / X / Y on the gamepad ----
+def mapped(tmp_path):
+    """A manager with a loaded map (a mapped 6 m room) and two named places."""
+    import threading
+    import numpy as np
+    grid_mod=importlib.import_module("console.slam.grid")
+    m,link,clock,current,route=setup(tmp_path);link.debug["v"]=.2
+    g=grid_mod.OccupancyGrid(size_m=12.0,res=0.05)
+    (r0,c0),(r1,c1)=g.to_cell(np.float64(-3),np.float64(-2)),g.to_cell(np.float64(3),np.float64(2))
+    g.logodds[r0:r1+1,c0:c1+1]=-2.0;g.touched[r0:r1+1,c0:c1+1]=True;g.version=1
+    slam=Slam();slam.grid=g;slam.pose=np.zeros(3);slam.bubble_pts=np.zeros((0,2))
+    slam.snapshot=lambda:(g.copy(),slam.pose.copy(),slam.mode,True)
+    places={"desk":{"name":"desk","x":1.5,"y":1.0},"door":{"name":"door","x":-2.0,"y":-1.0}}
+    slam.label=lambda name:places.get(name)
+    m.slam=slam
+    return m,link,clock
+
+
+def test_a_goto_with_several_goals_becomes_one_route_in_that_order(tmp_path):
+    m,link,clock=mapped(tmp_path)
+    asyncio.run(m.start_task("goto",goals=[{"label":"desk"},{"x":0.5,"y":-1.5,"name":"point 1"},{"label":"door"}]))
+    assert m.mission["name"]=="Go to desk, point 1, door" and m.mission["state"]=="running"
+    assert [s["name"] for s in m.planner.stops]==["desk","point 1","door"]
+    for _ in range(6):
+        step(m,link,clock)
+        if m.planner.goto._job is not None:m.planner.goto._job.join()
+    assert m.mission["info"]["legs"]==3 and m.mission["info"]["leg"]==1
+
+
+def test_one_goal_is_still_a_plain_goto_and_an_unknown_place_is_refused(tmp_path):
+    m,link,clock=mapped(tmp_path)
+    asyncio.run(m.start_task("goto",goals=[{"label":"desk"}]))
+    assert m.mission["name"]=="Go to desk" and type(m.planner).__name__=="GotoPlanner"
+    m.stop()
+    with pytest.raises(ValueError,match="Unknown area label"):asyncio.run(m.start_task("goto",goals=[{"label":"desk"},{"label":"nowhere"}]))
+    with pytest.raises(ValueError,match="at most 12"):asyncio.run(m.start_task("goto",goals=[{"label":"desk"}]*13))
+
+
+def test_gamepad_keys_pause_resume_and_end_a_mission(tmp_path):
+    m,link,clock=roaming(tmp_path)
+    asyncio.run(m.pad_key("PAUSE"))
+    assert m.mission["state"]=="paused" and "operator" in m.mission["reason"]
+    asyncio.run(m.pad_key("GO"));step(m,link,clock)
+    assert m.mission["state"]=="running" and m.mission["by_gamepad"]
+    for _ in range(80):step(m,link,clock,heartbeat=False)             # nobody is watching a page: it carries on
+    assert m.mission["state"]=="running"
+    assert not any("supervising page" in e["text"].lower() for e in m.events), "started by hand: no page was ever expected"
+    asyncio.run(m.pad_key("END"))
+    assert m.mission["state"]=="stopped"
+
+
+def test_gamepad_go_repeats_the_last_mission_and_roam_starts_roaming(tmp_path):
+    m,link,clock=mapped(tmp_path)
+    asyncio.run(m.pad_key("GO"))
+    assert m.mission is None and "Maps" in m.events[-1]["text"], "nothing to repeat yet: it says so and does nothing"
+    asyncio.run(m.start_task("goto",goals=[{"label":"desk"},{"label":"door"}]));m.stop()
+    asyncio.run(m.pad_key("GO"))
+    assert m.mission["state"]=="running" and m.mission["name"]=="Go to desk, door"
+    asyncio.run(m.pad_key("ROAM"))
+    assert m.mission["name"]=="Go to desk, door", "ROAM does not replace a mission that is under way"
+    m.stop();asyncio.run(m.pad_key("ROAM"))
+    assert m.mission["kind"]=="roam" and m.mission["state"]=="running"
+
+
+def test_a_gamepad_start_that_is_not_possible_is_reported_not_raised(tmp_path):
+    m,link,clock=mapped(tmp_path);link.tel["balancing"]=False
+    asyncio.run(m.pad_key("ROAM"))
+    assert m.mission is None and "refused" in m.events[-1]["text"]
+
+
+def test_gamepad_keys_never_arm(tmp_path):
+    m,link,clock=mapped(tmp_path)
+    for key in ("GO","ROAM","PAUSE","END","NONSENSE"):asyncio.run(m.pad_key(key))
+    assert not any(line=="E" for line in link.sent)

@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v5.3.0
+ *  BaseLink.ino — 2PyBot v5.4.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -441,6 +441,22 @@ void handleLine(char* line) {
         Serial.println("[PAD] Re-pair: restarting the controller to finish clearing pairings");
         return;
     }
+    if (!strcmp(line, "BT,RESTART")) {
+        // 5.4.0: bring a stuck Bluetooth stack back by restarting the controller. Pairings,
+        // parameters and calibration are untouched. Only with the motors off.
+        if (state != STATE_IDLE) { Serial.println("PE,stop the motors before restarting Bluetooth"); return; }
+        padRepairRestartAt = millis() + 300;
+        Serial.println("[PAD] Restarting the controller to bring Bluetooth back (pairings kept)");
+        return;
+    }
+    if (!strncmp(line, "TL,", 3)) {
+        // 5.4.0: TL,<0|1>,<percent>: the host's automatic light. Explicit state, hard cap unchanged.
+        int on = 0, pct = 0; char extra = 0;
+        if (sscanf(line + 3, "%d,%d%c", &on, &pct, &extra) != 2 || (on != 0 && on != 1)) return;
+        if (sleepMode) on = 0;
+        payload_torchSet(on == 1, pct);
+        return;
+    }
     if (!strcmp(line, "SL,1") || !strcmp(line, "SL,0")) {
         const bool on = line[3] == '1';
         if (on && state != STATE_IDLE) { Serial.println("PE,stop the motors (SELECT) before powering down"); return; }
@@ -856,7 +872,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v5.3.0");
+    Serial.println("     2PyBot BaseLink v5.4.0");
     Serial.println("==================================================");
 
     params_begin();
@@ -999,6 +1015,14 @@ void loop() {
                 }
         default: break;
     }
+    // Autopilot keys (A/B/X/Y without LT): reported to the host, which owns the missions.
+    switch (btgamepad_takeAutopilotKey()) {
+        case 1: Serial.println("PK,GO");    break;
+        case 2: Serial.println("PK,PAUSE"); break;
+        case 3: Serial.println("PK,END");   break;
+        case 4: Serial.println("PK,ROAM");  break;
+        default: break;
+    }
 
     // ---- 2b. camera payload: right stick pans/zooms, RB torch,
     //          D-pad LEFT/RIGHT dims. Deliberately OUTSIDE the state
@@ -1017,7 +1041,7 @@ void loop() {
     if (padRepairRestartAt && (int32_t)(millis() - padRepairRestartAt) >= 0) {
         if (state == STATE_IDLE) { Serial.flush(); esp_restart(); }
         padRepairRestartAt = 0;
-        Serial.println("[PAD] Re-pair restart cancelled: robot is not idle");
+        Serial.println("[PAD] Restart cancelled: robot is not idle");
     }
 
 

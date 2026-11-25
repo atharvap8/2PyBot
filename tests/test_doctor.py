@@ -187,3 +187,36 @@ def test_probes_start_without_copying_the_console():
     assert doctor._probe(["definitely-not-a-command-2pybot"]) == ""
     run = inspect.getsource(doctor.Doctor.run)
     assert "run_in_executor" in run, "the checks wait on other processes: never on the event loop"
+
+
+# ---- 5.4.0: a stuck gamepad Bluetooth ----
+def test_stuck_gamepad_bluetooth_is_restarted_only_when_the_robot_is_idle():
+    idle = diagnose({"gamepad": {"stuck": True, "why": "Failed to set device information client: 0xc"}, "tel": {"balancing": False}})
+    case = [c for c in idle if c.id == "gamepad_bt_stuck"][0]
+    assert case.recoveries[0].action == "restart_controller_bt" and case.recoveries[0].safety == "auto"
+    assert "idle" in case.cause
+    busy = [c for c in diagnose({"gamepad": {"stuck": True}, "tel": {"balancing": True}}) if c.id == "gamepad_bt_stuck"][0]
+    assert "STOP" in busy.cause
+    assert "gamepad_bt_stuck" not in ids({"gamepad": {"stuck": False}})
+
+    import console.doctor as doctor
+    assert "restart_controller_bt" in doctor._SERVICE_RESTART_ACTIONS, "never while the robot is balancing"
+
+    class Link:
+        connected, maintenance, sent = True, False, []
+        tel = {"balancing": True, "stale": False}
+        derived = {"PADRESTART": 1}
+        pad_stuck = {"why": "x"}
+
+        def send(self, line):
+            self.sent.append(line)
+            return True
+
+    link = Link()
+    d = doctor.Doctor(link)
+    assert d._restart_controller_bt()[0] is False and not Link.sent, "balancing: hands off"
+    Link.tel = {"balancing": False, "stale": False}
+    Link.derived = {}
+    assert d._restart_controller_bt()[0] is False and not Link.sent, "older firmware has no such command"
+    Link.derived = {"PADRESTART": 1}
+    assert d._restart_controller_bt()[0] is True and Link.sent == ["BT,RESTART"] and link.pad_stuck == {}

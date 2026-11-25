@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "software/radxa/console"))
 missions = importlib.import_module("console.missions")
@@ -70,8 +71,9 @@ class World:
             with self.engine.lock:
                 self.engine.bubble_pts = self.robot_frame(self.seen)
             step = self.planner.step(self.t, DT, tuple(self.pose), self.bubble(), 9.0, 0.0)
-            if self.planner._job is not None:
-                self.planner._job.join()                  # planning is a thread on the robot; here it is instant
+            job = getattr(self.planner, '_job', None) or getattr(getattr(self.planner, 'goto', None), '_job', None)
+            if job is not None:
+                job.join()                                # planning is a thread on the robot; here it is instant
             self.steps.append(step)
             if step.done:
                 self.done = step.reason
@@ -155,3 +157,46 @@ def test_no_route_on_the_map_is_reported_at_once():
     w.run(10)
     assert w.done and "path" in w.done.lower()
     assert w.t < 2
+
+
+# ---- 5.4.0: several stops, in the order given ----
+def route(stops, walls=()):
+    engine = Engine(room(walls))
+    planner = missions.RoutePlanner(engine, [{"name": n, "x": x, "y": y} for n, x, y in stops], speed=0.3)
+    return World(planner, engine)
+
+
+def test_a_route_visits_its_stops_in_the_order_given():
+    w = route([("a", 0.0, 1.2), ("b", 2.0, -1.0), ("c", -1.0, -1.2)])
+    visited = []
+
+    def watch(w):
+        for name, x, y in (("a", 0.0, 1.2), ("b", 2.0, -1.0), ("c", -1.0, -1.2)):
+            if name not in visited and math.hypot(w.pose[0] - x, w.pose[1] - y) < 0.25:
+                visited.append(name)
+        return False
+    w.run(120, until=watch)
+    assert w.done == "goal reached" and visited == ["a", "b", "c"]
+    info = w.steps[-1].info
+    assert info["legs"] == 3 and all(s["done"] for s in info["stops"])
+
+
+def test_a_route_reports_which_leg_it_is_on():
+    w = route([("a", 0.0, 1.2), ("b", 2.0, -1.0)])
+    w.run(2)
+    info = w.steps[-1].info
+    assert (info["leg"], info["legs"], info["goal"]) == (1, 2, "a")
+    assert [s["done"] for s in info["stops"]] == [False, False]
+    w.run(60, until=lambda w: w.steps[-1].info.get("leg") == 2)
+    assert w.steps[-1].info["stops"][0]["done"] and not w.done
+
+
+def test_a_stop_that_cannot_be_reached_ends_the_route_and_names_it():
+    w = route([("a", -1.0, 1.0), ("behind the wall", 2.0, 0.0), ("c", -1.0, -1.0)], walls=[(0.5, -2.0, 0.6, 2.0)])
+    w.run(120)
+    assert w.done.startswith("stop 2 (behind the wall):") and w.pose[0] < 0.5
+
+
+def test_a_route_needs_a_stop():
+    with pytest.raises(ValueError):
+        missions.RoutePlanner(Engine(room()), [])

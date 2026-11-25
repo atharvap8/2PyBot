@@ -112,6 +112,7 @@ class Autonomy:
         self.gap_since=None     # start of the current gap in controller feedback
         self.regrant=None       # lease renewal in flight: {"owner","until","why"}
         self.yielded=None       # when the operator took over with the gamepad (mission waits, then resumes)
+        self.last_task=None     # arguments of the last lidar mission started, for the gamepad's GO key
         self.next_grant=0.0
         self.slam=None          # SlamEngine (set by the server): map pose + lidar safety bubble
         self.planner=None       # RoamPlanner / GotoPlanner / ExplorePlanner for lidar missions
@@ -153,8 +154,32 @@ class Autonomy:
         except (KeyError,TypeError,ValueError):raise ValueError("Goal needs x and y (metres) or a label")
         if not (math.isfinite(x) and math.isfinite(y)):raise ValueError("Goal must be finite")
         return {"name":str(goal.get("name") or "point")[:32],"x":x,"y":y}
-    async def start_task(self,kind,speed=None,duration_s=None,goal=None):
-        from .missions import ExplorePlanner,GotoPlanner,RoamPlanner
+    async def pad_key(self,key):
+        """A / B / X / Y on the gamepad (5.4.0 firmware reports them as PK,<key>).
+
+        GO resumes a paused mission, or repeats the last one. PAUSE holds it, END ends it,
+        ROAM starts roaming. Starting from the gamepad needs the same conditions as from the
+        Maps page; the gamepad is the operator's own hand on the robot, so nothing else has
+        to be watching."""
+        m=self.mission;state=m["state"] if m else None
+        try:
+            if key=="PAUSE":
+                if state in ENGAGED:self.pause("operator_pause (gamepad)")
+            elif key=="END":
+                if state in ("running","paused"):self.stop("operator_stop (gamepad)")
+            elif key=="GO":
+                if state=="paused":await self.resume()
+                elif state in ENGAGED:return
+                elif self.last_task:await self.start_task(**self.last_task)
+                else:self.event("Gamepad GO: choose where to go in Maps once; after that A repeats it");return
+            elif key=="ROAM":
+                if state in ENGAGED or state=="paused":return
+                await self.start_task("roam")
+            else:return
+            if self.mission and self.mission["state"] in ENGAGED:self.mission["by_gamepad"]=True   # no page is expected to watch
+        except ValueError as error:self.event("Gamepad "+key+" refused: "+str(error))
+    async def start_task(self,kind,speed=None,duration_s=None,goal=None,goals=None):
+        from .missions import ExplorePlanner,GotoPlanner,RoamPlanner,RoutePlanner
         async with self.lock:
             if self.mission and self.mission["state"] in ENGAGED:raise ValueError("A mission is already engaged")
             if self.teach:raise ValueError("Save or cancel route teaching first")
@@ -166,7 +191,15 @@ class Autonomy:
             if kind=="roam":planner=RoamPlanner(speed or .25,duration_s or 600);name="Roam"
             elif kind=="explore":planner=ExplorePlanner(self.slam,speed or .25,duration_s or 1200);name="Explore and map"
             else:
-                target=self.resolve_goal(goal);planner=GotoPlanner(self.slam,target,speed or .30);name="Go to "+target["name"]
+                # one place, or several in the order given
+                wanted=list(goals) if isinstance(goals,(list,tuple)) and goals else [goal]
+                if len(wanted)>12:raise ValueError("A route can have at most 12 stops")
+                targets=[self.resolve_goal(g) for g in wanted]
+                if len(targets)==1:planner=GotoPlanner(self.slam,targets[0],speed or .30);name="Go to "+targets[0]["name"]
+                else:
+                    planner=RoutePlanner(self.slam,targets,speed or .30)
+                    name="Go to "+", ".join(t["name"] for t in targets)
+                    if len(name)>58:name=f"Go to {targets[0]['name']} and {len(targets)-1} more"
             generation=self.action_epoch;owner=await self.grant()
             if generation!=self.action_epoch:
                 self.tx(f"AN,{owner},0");raise ValueError("Start was cancelled")
@@ -176,6 +209,7 @@ class Autonomy:
                 "replay_mode":kind,"distance_m":0,"command_v":0,"command_w":0,"epoch":self.link.pose_epoch,"token":owner,"info":{}}
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock()
             self.gap_since=self.regrant=self.yielded=None
+            self.last_task={"kind":kind,"speed":speed,"duration_s":duration_s,"goal":goal,"goals":goals}
             self.last_v=self.last_w=0;self.event("Mission started: "+name)
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
     def clear_plan(self):
@@ -443,8 +477,12 @@ class Autonomy:
             # A recorded replay drives blind, so it still needs someone watching. A lidar mission
             # plans and avoids by itself: losing the page (Wi-Fi out of range) must not strand it.
             if not m.get("kind"):self.pause("supervisor disconnected/backgrounded");return
-            if not m.get("unsupervised"):m["unsupervised"]=True;self.event("Lost the supervising page (Wi-Fi?): the mission carries on")
-        elif m.get("unsupervised"):m["unsupervised"]=False;self.event("Supervising page is back")
+            if not m.get("unsupervised"):
+                m["unsupervised"]=True
+                if not m.get("by_gamepad"):self.event("Lost the supervising page (Wi-Fi?): the mission carries on")
+        elif m.get("unsupervised"):
+            m["unsupervised"]=False
+            if not m.get("by_gamepad"):self.event("Supervising page is back")
         if m.get("kind") in ("roam","goto","explore"):
             self.planner_tick(m,now,dt);return
         if m["samples"]:

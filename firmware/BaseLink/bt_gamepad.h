@@ -15,17 +15,26 @@
  *  Arduino IDE (see README_BT.md). BT stack runs on core 0; the
  *  balance loop and 20 kHz stepper ISR stay on core 1.
  *
- *  CONTROLS  (remapped for the camera payload)
- *    LEFT STICK  = the robot        RIGHT STICK = the camera
+ *  CONTROLS  (5.4.0: face buttons drive the autopilot, triggers assigned)
+ *    LEFT STICK  = the robot        RIGHT STICK = the flashlight head
  *      Left  Y      drive             Right X      servo YAW / pan
  *      Left  X      steer             Right Y      servo ZOOM
  *    START          arm              SELECT        disarm (E-STOP)
- *    Y / B / X / A  nod-yes / nod-no / spin / DANCE
+ *    A              autopilot GO: resume a paused mission, or repeat the last one
+ *    B              autopilot PAUSE (press A to carry on)
+ *    X              autopilot END the mission
+ *    Y              autopilot ROAM
+ *    RT (analog)    precision: the further it is pulled, the slower and finer
+ *                   the left stick (down to a quarter of its normal authority)
+ *    LT (hold)      shift: LT + Y / B / X / A = nod-yes / nod-no / spin / DANCE
  *    LB             toggle SPEED LOW <-> HIGH
  *    RB             toggle FLASHLIGHT
  *    D-pad UP       toggle stiff hold   D-pad DOWN  toggle CLIMB mode
  *    D-pad LEFT     torch dimmer        D-pad RIGHT torch brighter
  *                   (both auto-repeat while held)
+ *  The face buttons only report a key (PK,GO / PAUSE / END / ROAM) to the host,
+ *  which owns the missions. They never move the robot by themselves and they
+ *  do not count as taking over from the autopilot.
  *
  *  TWO DELIBERATE CHANGES vs the old map, both forced by the
  *  payload needing the whole right stick and the RB button:
@@ -98,6 +107,14 @@ static uint16_t      _btnPrev  = 0;
 static uint16_t      _miscPrev = 0;
 static uint8_t       _dpadPrev = 0;
 static uint8_t       _gestReq  = 0;      // 1 yes, 2 no, 3 spin, 4 dance, 5 stiff-toggle, 6 climb-toggle
+static uint8_t       _apReq    = 0;      // autopilot key: 1 go, 2 pause, 3 end, 4 roam
+// Link health. This pad sometimes connects but delivers nothing (seen after a
+// reconnect: "connected", then not one button for 43 s). Count the input reports
+// of each connection so that can be told apart from a pad nobody is touching.
+static uint32_t      _reports     = 0;   // input reports since this connection
+static uint32_t      _connectMs   = 0;
+static bool          _linkChecked = false;
+static bool          _padStreams  = false;   // learned: a healthy connection reports continuously
 static uint8_t       _torchToggleReq = 0;   // pending RB presses
 static int8_t        _torchStepReq   = 0;   // net D-pad L/R clicks, signed
 static uint32_t      _dpadRepeatMs   = 0;   // next auto-repeat due
@@ -116,6 +133,7 @@ static void _onPadConnect(ControllerPtr ctl) {
     _pad = ctl;
     _freshConnect = true;
     _camArmed = false; _camNeutralSince = 0;
+    _reports = 0; _connectMs = millis(); _linkChecked = false;
     Serial.printf("[PAD] Connected: %s\n", ctl->getModelName().c_str());
 }
 static void _onPadDisconnect(ControllerPtr ctl) {
@@ -227,6 +245,11 @@ inline uint8_t btgamepad_takeGesture() {
     uint8_t g = _gestReq; _gestReq = 0; return g;
 }
 
+// Pending autopilot key (1 go, 2 pause, 3 end, 4 roam), once.
+inline uint8_t btgamepad_takeAutopilotKey() {
+    uint8_t k = _apReq; _apReq = 0; return k;
+}
+
 // True once per RB press (torch toggle). Coalesces if the loop
 // ever falls behind: an odd number of presses is still one toggle.
 inline bool btgamepad_takeTorchToggle() {
@@ -289,6 +312,22 @@ inline void btgamepad_update() {
         return;
     }
 
+    // Link check, 3 s into each connection. A healthy link that streams reports and a dead one
+    // look the same to isConnected(); the report count tells them apart once we have seen
+    // this pad stream. A dead link is dropped so the pad can try again and the console
+    // stops showing a gamepad that does nothing.
+    if (_pad->hasData()) _reports++;
+    if (!_linkChecked && millis() - _connectMs > 3000) {
+        _linkChecked = true;
+        if (_reports >= 20) _padStreams = true;
+        if (_reports == 0 && _padStreams) {
+            Serial.println("[PAD] DEAD LINK: connected but no input in 3 s; dropping the connection");
+            _pad->disconnect();
+            return;
+        }
+        Serial.printf("[PAD] link check: %lu input reports in the first 3 s\n", (unsigned long)_reports);
+    }
+
         // raw, centre-corrected, normalised. Bluepad32 is -511..512, up = -Y.
     float rawX  =  (float)_pad->axisX()  / 512.0f - _cx;
     float rawY  = -(float)_pad->axisY()  / 512.0f - _cy;
@@ -341,6 +380,15 @@ inline void btgamepad_update() {
     fwdNorm   *= P.padFwdSgn;
     steerNorm *= P.padStrSgn;
 
+    // RT = precision. Analog where the pad has it, the digital bit otherwise.
+    {
+        float rt = ((float)_pad->throttle() / 1023.0f - 0.08f) / 0.92f;
+        if (rt < 0.0f) rt = 0.0f;
+        if (rt > 1.0f || (_pad->buttons() & PAD_BTN_RT)) rt = 1.0f;
+        const float fine = 1.0f - 0.75f * rt;
+        fwdNorm *= fine; steerNorm *= fine;
+    }
+
     joyForward  = -5.0f * fwdNorm;   // legacy units; .ino scales by -0.2
     joySteering = steerNorm;
 
@@ -364,10 +412,19 @@ inline void btgamepad_update() {
     if (mNew & PAD_MISC_START)  { _armed = true;  _enableEvent = +1; Serial.println("[PAD] ARM"); }
     if (mNew & PAD_MISC_SELECT) { _armed = false; _enableEvent = -1; Serial.println("[PAD] DISARM (e-stop)"); }
 
-    if (bNew & PAD_BTN_Y)    _gestReq = 1;   // nod yes
-    if (bNew & PAD_BTN_B)    _gestReq = 2;   // nod no
-    if (bNew & PAD_BTN_X)    _gestReq = 3;   // spin
-    if (bNew & PAD_BTN_A)    _gestReq = 4;   // dance!
+    // LT held = shift: the face buttons are the old expressions. Otherwise they are autopilot keys.
+    const bool shift = (btn & PAD_BTN_LT) || _pad->brake() > 520;
+    if (shift) {
+        if (bNew & PAD_BTN_Y)    _gestReq = 1;   // nod yes
+        if (bNew & PAD_BTN_B)    _gestReq = 2;   // nod no
+        if (bNew & PAD_BTN_X)    _gestReq = 3;   // spin
+        if (bNew & PAD_BTN_A)    _gestReq = 4;   // dance!
+    } else {
+        if (bNew & PAD_BTN_A)    _apReq = 1;     // autopilot go / resume
+        if (bNew & PAD_BTN_B)    _apReq = 2;     // autopilot pause
+        if (bNew & PAD_BTN_X)    _apReq = 3;     // autopilot end
+        if (bNew & PAD_BTN_Y)    _apReq = 4;     // autopilot roam
+    }
     if (dNew & PAD_DPAD_UP)   _gestReq = 5;   // stiff hold toggle
     if (dNew & PAD_DPAD_DOWN) _gestReq = 6;   // cliff/climb mode toggle
 

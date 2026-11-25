@@ -421,6 +421,42 @@ class GotoPlanner:
         return Step(info=dict(info, waiting="replanning", blocked=why))
 
 
+class RoutePlanner:
+    """Several stops, visited in the order given: one go-to after another.
+
+    A stop that cannot be reached ends the route and says which one, rather than
+    skipping it silently and arriving somewhere the operator did not expect.
+    """
+    kind = "goto"
+
+    def __init__(self, engine, goals, speed=0.30):
+        if not goals:
+            raise ValueError("A route needs at least one stop")
+        self.engine = engine
+        self.stops = [dict(g) for g in goals]
+        self.leg = 0
+        self.goto = GotoPlanner(engine, self.stops[0], speed)
+        self.speed = self.goto.speed
+
+    def _info(self, info):
+        stops = [{"name": s.get("name"), "x": s["x"], "y": s["y"], "done": i < self.leg} for i, s in enumerate(self.stops)]
+        return dict(info, leg=min(self.leg + 1, len(self.stops)), legs=len(self.stops), stops=stops)
+
+    def step(self, now, dt, pose, bubble, depth_cap, measured_v, localized=True):
+        st = self.goto.step(now, dt, pose, bubble, depth_cap, measured_v, localized)
+        if not st.done:
+            st.info = self._info(st.info)
+            return st
+        if st.reason != "goal reached":
+            name = self.stops[self.leg].get("name") or "point"
+            return Step(done=True, reason=f"stop {self.leg + 1} ({name}): {st.reason}", info=self._info(st.info))
+        self.leg += 1
+        if self.leg >= len(self.stops):
+            return Step(done=True, reason="goal reached", info=self._info(st.info))
+        self.goto = GotoPlanner(self.engine, self.stops[self.leg], self.speed)
+        return Step(info=self._info(st.info))
+
+
 class ExplorePlanner:
     """Autonomous mapping: drive to frontier after frontier while SLAM maps."""
     kind = "explore"
