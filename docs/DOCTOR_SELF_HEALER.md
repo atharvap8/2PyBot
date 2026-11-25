@@ -1,9 +1,13 @@
 # Doctor: auto-diagnose and self-heal
 
-Status: plan. Not implemented yet. Captures what the "doctor" should become after
-the deploy-loop incident (a transient deploy deferral retried forever and made the
-robot glitch). The goal: when something breaks, the robot works out the root cause
-on its own and either fixes it or tells the operator exactly what to do, in the TUI.
+Status: Phase 1 implemented on branch `feature/doctor`
+(`console/doctor.py` pure rule engine + runtime, `tests/test_doctor.py`,
+`GET /api/doctor` + `POST /api/doctor/heal`, a background heal task, and doctor
+cases in `2pybot doctor`). Phases 2 to 4 (TUI page, broader auto-heal, more rules)
+remain. Captures what the "doctor" should become after the deploy-loop incident
+(a transient deploy deferral retried forever and made the robot glitch): when
+something breaks, the robot works out the root cause on its own and either fixes
+it or tells the operator exactly what to do.
 
 ## What exists today (reuse, do not rebuild)
 

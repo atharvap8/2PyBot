@@ -284,6 +284,27 @@ class VisualPairInput(BaseModel):
     enabled: bool
 
 
+@app.get("/api/doctor")
+def doctor_status():
+    doctor.refresh()
+    return doctor.status()
+
+
+class DoctorHeal(BaseModel):
+    action: str
+
+
+@app.post("/api/doctor/heal")
+async def doctor_heal(body: DoctorHeal):
+    fn = doctor.actions.get(body.action)
+    if not fn:
+        raise HTTPException(400, "unknown recovery action")
+    import asyncio as _asyncio
+    result = await fn() if _asyncio.iscoroutinefunction(fn) else fn()
+    ok, note = result if isinstance(result, tuple) else (bool(result), "")
+    return {"ok": ok, "note": note}
+
+
 @app.get("/api/visual_pair")
 def visual_pair_status():
     return visual_pair.status()
@@ -402,7 +423,8 @@ async def _startup():
                                    asyncio.create_task(autonomy.run()),
                                   asyncio.create_task(publish_ready(link, host_ready)),
                                   asyncio.create_task(power.run()),
-                                  asyncio.create_task(visual_pair.run())]
+                                  asyncio.create_task(visual_pair.run()),
+                                  asyncio.create_task(doctor.run())]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
     app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
@@ -728,6 +750,8 @@ from .power import Power
 power = Power(link, stream.streamer, lidar, tof, autonomy, detector, link._log)   # console power-down mode
 from .visual_pair import VisualPair
 visual_pair = VisualPair(link, power, log=link._log)   # show the gamepad to the camera to re-pair
+from .doctor import Doctor
+doctor = Doctor(link, power, stream.streamer, visual_pair, link._log)   # root-cause + bounded self-heal
 # Threads start in _startup(), not at import: the deployer's import check
 # must not open /dev/ttyAS4 next to the running console.
 slam_web = slam_app.create_app(slam_engine, lidar, estop)
