@@ -171,6 +171,9 @@ the VSINPU EP already exist and are the supported path.
   resolves to CPU (no XNNPACK in the aarch64 wheel, no VSINPU driver).
 - Phase 1: NPU proven on the robot (VIPLite + `vpm_run`, about 3 ms on a sample
   NBG). Converting our own model is blocked only on an x86 ACUITY host.
-- Phase 2: path decided (VIPLite + NBG + a thin ctypes/C bridge, not VSINPU).
-  Not started; needs the NBG from Phase 1 first.
+- Phase 2: console seam in place. `console/npu.py` detects the VIPLite device,
+  driver libraries and a compiled NBG, and reports readiness in the detector
+  status; `scripts/vision/npu_bench.sh` reproduces the on-device proof. The only
+  remaining step is dropping in an ACUITY-compiled NBG (Phase 1, x86) and a thin
+  VIPLite inference call; until then detection stays on ONNX/CPU.
 - Phase 3 (GPU): not needed unless the NBG route stalls.

@@ -79,9 +79,10 @@ class ObjectDetector:
     def status(self):
         with self.lock:
             result=copy.deepcopy(self.result)
+            from .npu import status as npu_status
             result.update(enabled=self.enabled,threshold=self.threshold,people_only=self.people_only,corrected=self.corrected,
                           model_installed=self.model_path.is_file(),runtime_available=importlib.util.find_spec("onnxruntime") is not None,
-                          model="SSD-MobileNetV1 INT8",provider=self.provider,
+                          model="SSD-MobileNetV1 INT8",provider=self.provider,npu=npu_status(),
                           age_ms=round((time.monotonic()-self.last_inference)*1000) if self.last_inference else None,
                           measured_distance_available=False)
             return result
