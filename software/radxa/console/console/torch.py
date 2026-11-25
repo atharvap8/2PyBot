@@ -118,7 +118,10 @@ class AutoTorch:
     def on_line(self, line):
         """A flashlight line from the controller that the bot did not cause means the operator
         used the gamepad: the light is theirs for a while."""
-        if not line.startswith("[PAY] Torch"):
+        # "[PAY] Torch ON (25%)", "[PAY] Torch off", "[PAY] Torch 35%": a change of state.
+        # Not the boot banner ("[PAY] Torch GPIO2 off, 25% preset, ...").
+        if not line.startswith(("[PAY] Torch ON", "[PAY] Torch off")) and not (
+                line.startswith("[PAY] Torch ") and line[12:13].isdigit()):
             return
         now = self.clock()
         if self._sent and now - self._sent[2] < 1.5:

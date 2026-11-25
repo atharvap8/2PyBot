@@ -117,6 +117,18 @@ def test_using_the_flashlight_from_the_gamepad_makes_the_bot_keep_off(tmp_path):
     assert t.on
 
 
+def test_the_controllers_boot_banner_is_not_the_operator_using_the_flashlight(tmp_path):
+    t, link, clock, _ = make(tmp_path)
+    t.on_line("[PAY] Torch GPIO2 off, 25% preset, HARD CAP 90% duty @ 20 kHz")     # printed at every controller start
+    t.on_line("[PAY] Servos re-centred")
+    assert t.status()["holding_s"] == 0
+    feed(t, clock, [20, 20, 20])
+    assert t.on
+    clock.t += 5
+    t.on_line("[PAY] Torch 35%")                       # D-pad on the gamepad
+    assert t.status()["holding_s"] > 250
+
+
 def test_old_firmware_or_a_sleeping_robot_is_not_commanded(tmp_path):
     t, link, clock, _ = make(tmp_path)
     link.derived = {}
