@@ -4,7 +4,7 @@
 <meta charset="utf-8"><script>if(/[?&]embed=1/.test(location.search))document.documentElement.classList.add('embed')</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>2PyBot · Maps</title>
-<link rel="stylesheet" href="static/slam.css">
+<link rel="stylesheet" href="static/slam.css?v=51">
 </head>
 <body>
 <header class="top">
@@ -111,11 +111,10 @@
       <div class="seg" role="tablist">
         <button id="v-3d" aria-selected="true">3D</button>
         <button id="v-map" aria-selected="false">Map</button>
-        <button id="v-radar" aria-selected="false">Radar</button>
       </div>
       <span class="sub" id="view-note">45° corner view · drag to rotate · pinch or scroll to zoom</span>
       <div class="spacer"></div>
-      <button class="btn small" id="b-center">Center on robot</button>
+      <button class="btn small" id="b-center" title="Center on the robot">Center</button>
     </div>
     <canvas id="cv" hidden></canvas>
     <canvas id="cv3"></canvas>
@@ -124,6 +123,6 @@
   </section>
 </main>
 <script src="static/slam3d.js"></script>
-<script src="static/slam.js"></script>
+<script src="static/slam.js?v=51"></script>
 </body>
 </html>

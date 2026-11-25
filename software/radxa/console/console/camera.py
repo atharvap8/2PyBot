@@ -12,7 +12,7 @@ Two jobs:
 Snapshots come from the stream pipeline (ffmpeg writes a JPEG once a
 second to /dev/shm), so we never fight the encoder for the device.
 """
-import json, os, re, subprocess, time
+import asyncio, json, os, re, subprocess, threading, time
 from typing import Dict, List
 
 from .config import CAMERA_DEV, SNAPSHOT_PATH, CAM_PROFILES
@@ -138,6 +138,9 @@ def measure_luma(path: str = SNAPSHOT_PATH):
         return float(match.group(1)) if match else None
 
 
+_CALIBRATING = threading.Lock()      # one exposure walk at a time (button or watcher)
+
+
 def autocalibrate(target: float = 110.0, tol: float = 8.0, max_iter: int = 12,
                   dev: str = CAMERA_DEV, progress=None):
     """
@@ -146,6 +149,15 @@ def autocalibrate(target: float = 110.0, tol: float = 8.0, max_iter: int = 12,
     gain second (keeps the frame rate, costs noise). Stops as soon as
     it is inside tolerance, so it doesn't gratuitously crank the gain.
     """
+    if not _CALIBRATING.acquire(blocking=False):
+        return {"ok": False, "error": "a calibration is already running"}
+    try:
+        return _autocalibrate(target, tol, max_iter, dev, progress)
+    finally:
+        _CALIBRATING.release()
+
+
+def _autocalibrate(target, tol, max_iter, dev, progress):
     have = {c["name"]: c for c in list_controls(dev)}
     exp_key = next((k for k in ("exposure_us", "exposure_time_absolute", "exposure_absolute") if k in have), None)
     gain_key = next((k for k in ("gain", "analogue_gain") if k in have), None)
@@ -193,6 +205,98 @@ def autocalibrate(target: float = 110.0, tol: float = 8.0, max_iter: int = 12,
     return {"ok": True, "converged": False, "steps": steps,
             "note": "hit a control limit before reaching target; the sensor "
                     "may simply be out of light. Add illumination or a faster lens."}
+
+
+class ExposureWatch:
+    """Re-exposes the camera by itself when the picture stays too dark or too bright.
+
+    A fixed exposure keeps the frame rate steady but is only right for the light it
+    was set in: drive from a bright room into a dim one and the picture stays dark.
+    Every PERIOD seconds this measures the picture's mean brightness. If it has been
+    outside LOW..HIGH for NEED checks in a row, it runs the same exposure walk as the
+    Auto-calibrate button, then leaves the camera alone for a while. The gap between
+    the trigger band and the walk's target is what stops it hunting.
+    """
+    PERIOD, NEED = 5.0, 3
+    LOW, HIGH, TARGET = 55.0, 185.0, 110.0
+    REST, REST_AT_LIMIT = 60.0, 300.0        # s left alone after a walk; longer when the sensor ran out of range
+
+    def __init__(self, log=print, settings=None, measure=None, calibrate=None, clock=time.monotonic):
+        self.log, self.clock = log, clock
+        self.settings = settings or os.path.join(os.path.dirname(CAM_PROFILES), "auto_exposure.json")
+        self.measure = measure or self.fresh_luma
+        self.calibrate = calibrate or (lambda: autocalibrate(target=self.TARGET))
+        self.enabled = True
+        try:
+            with open(self.settings) as f:
+                self.enabled = bool(json.load(f).get("enabled", True))
+        except (OSError, ValueError, AttributeError):
+            pass
+        self.bad, self.rest_until, self.busy = 0, 0.0, False
+        self.last = {"luma": None, "action": "", "at": None}
+
+    @staticmethod
+    def fresh_luma(path=SNAPSHOT_PATH, max_age=5.0):
+        """Brightness of the latest snapshot, or None when the camera is off or the picture is old."""
+        try:
+            if time.time() - os.path.getmtime(path) > max_age:
+                return None
+        except OSError:
+            return None
+        return measure_luma(path)
+
+    def set_enabled(self, on):
+        self.enabled, self.bad = bool(on), 0
+        try:
+            os.makedirs(os.path.dirname(self.settings), exist_ok=True)
+            with open(self.settings, "w") as f:
+                json.dump({"enabled": self.enabled}, f)
+        except OSError:
+            pass                                    # still applies until the console restarts
+        return self.status()
+
+    def status(self):
+        return {"enabled": self.enabled, "busy": self.busy, "low": self.LOW, "high": self.HIGH, "target": self.TARGET,
+                "resting_s": max(0.0, round(self.rest_until - self.clock(), 1)), **self.last}
+
+    def due(self, luma, now):
+        """One brightness reading in; True when it is time to re-expose."""
+        self.last["luma"] = None if luma is None else round(luma, 1)
+        if not self.enabled or luma is None or now < self.rest_until or self.LOW <= luma <= self.HIGH:
+            self.bad = 0
+            return False
+        self.bad += 1
+        return self.bad >= self.NEED
+
+    def finished(self, result, luma, now):
+        self.bad = 0
+        settled = bool(result.get("ok") and result.get("converged"))
+        self.rest_until = now + (self.REST if settled else self.REST_AT_LIMIT)
+        why = "too dark" if luma < self.LOW else "too bright"
+        outcome = (f"now {result.get('luma', 0):.0f}" if settled
+                   else result.get("error") or "the sensor ran out of range for this light")
+        self.last.update(action=f"Picture was {why} ({luma:.0f}): re-exposed, {outcome}", at=time.time())
+        self.log("[camera] " + self.last["action"])
+
+    async def run(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(self.PERIOD)
+            try:
+                luma = await loop.run_in_executor(None, self.measure) if self.enabled else None
+                if self.due(luma, self.clock()) and not _CALIBRATING.locked():
+                    self.busy = True
+                    try:
+                        result = await loop.run_in_executor(None, self.calibrate)
+                    finally:
+                        self.busy = False
+                    self.finished(result or {}, luma, self.clock())
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:  # noqa: BLE001 - a camera hiccup must not end the watch
+                self.bad = 0
+                self.rest_until = self.clock() + self.REST
+                self.last.update(action=f"Exposure check failed: {error}", at=time.time())
 
 
 def snapshot_bytes():

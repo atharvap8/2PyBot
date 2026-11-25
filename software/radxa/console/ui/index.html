@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0e0c0b">
 <title>2PyBot Console</title>
-<link rel="stylesheet" href="/ui/style.css?v=50">
-<link rel="stylesheet" href="/ui/calibration.css?v=50">
-<link rel="stylesheet" href="/ui/shell/shell.css?v=50">
+<link rel="stylesheet" href="/ui/style.css?v=51">
+<link rel="stylesheet" href="/ui/calibration.css?v=51">
+<link rel="stylesheet" href="/ui/shell/shell.css?v=51">
 </head>
 <body data-mode="parked" data-pane="closed">
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
@@ -30,6 +30,7 @@
   <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4 3 20h18zM12 10v5M12 17.5v.5"/></symbol>
   <symbol id="i-view" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
 </defs></svg>
 
 <div id="sh">
@@ -37,11 +38,13 @@
   <div id="sh-viz">
     <canvas id="sh-gl"></canvas>
     <svg id="sh-leaders"></svg>
-    <div id="sh-labels">
-      <div class="sh-callout" data-k="lidar"><u>Lidar</u><b>-</b></div>
-      <div class="sh-callout" data-k="camera"><u>Camera</u><b>-</b></div>
-      <div class="sh-callout" data-k="wheel"><u>Motors</u><b>-</b></div>
-      <div class="sh-goal" id="sh-goal" hidden></div>
+    <div id="sh-labels"><div class="sh-goal" id="sh-goal" hidden></div></div>
+    <!-- system view: every part of the robot as a block, wired to where it sits on the model -->
+    <div id="sh-sys">
+      <div class="sys-col l" id="sys-l"></div>
+      <div class="sys-col r" id="sys-r"></div>
+      <div class="sys-row" id="sys-b"></div>
+      <div class="sys-head"><b>System</b><span id="sys-sum">Reading the robot</span><a href="/sysmap/" target="_blank" rel="noopener">Full diagram and logs</a></div>
     </div>
     <div id="sh-cluster">
       <div class="sh-gear"><b data-g="P" title="Parked: disarmed">P</b><b data-g="D" title="Driving: balancing under the gamepad">D</b><b data-g="A" title="Autopilot: a mission is driving">A</b></div>
@@ -87,7 +90,6 @@
       <nav class="sh-subnav" id="sub-controls"></nav><div class="sh-tabhost" id="host-controls"></div></div>
     <div class="sh-app sh-frame" data-app="maps" data-src="/slam/?embed=1"></div>
     <div class="sh-app sh-frame" data-app="ml" data-src="/ui/ai.html?embed=1"></div>
-    <div class="sh-app sh-frame" data-app="system" data-src="/sysmap/?embed=1"></div>
     <div class="sh-app sh-frame" data-app="terminal" data-src="/terminal?embed=1"></div>
     <div class="sh-app sh-frame" data-app="deploy" data-src="/deploy?embed=1"></div>
   </div>
@@ -114,8 +116,8 @@
       <button class="sh-stop" id="sh-stop" title="Stops the motors. Never arms.">STOP</button>
     </div>
   </div>
-  <div id="sh-toast"><span id="msg"></span></div>
+  <span id="msg" hidden></span>
 </div>
-<script type="module" src="/ui/shell/shell.js?v=50"></script>
+<script type="module" src="/ui/shell/shell.js?v=51"></script>
 </body>
 </html>

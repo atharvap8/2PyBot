@@ -74,6 +74,15 @@ def create_app(engine, lidar, estop):
     def api_scene3d():
         return JSONResponse(_safe(engine.scene3d()))
 
+    @app.get("/api/scene_vector")
+    def api_scene_vector():
+        """The map as clean outlines for the 3D console view; 501 when the robot
+        has no OpenCV, in which case the viewer uses /api/scene3d instead."""
+        scene = engine.scene_vector()
+        if scene is None:
+            return JSONResponse({"error": "outlines need OpenCV"}, status_code=501)
+        return JSONResponse(_safe(scene))
+
     @app.post("/api/mapping/start")
     def mapping_start(fresh: bool = True):
         engine.start_mapping(fresh)

@@ -21,17 +21,21 @@ export default function register(registerTab) {
         </div>
       </div>
       <div class=card><h3>Low-light calibration</h3>
-        <p class=hint>Auto-exposure is why the frame rate collapses in dim rooms —
-          the sensor lengthens exposure instead of dropping brightness. This locks
+        <p class=hint>The sensor's own auto-exposure is why the frame rate collapses in dim rooms:
+          it lengthens exposure instead of dropping brightness. Calibration locks
           exposure, then walks exposure and gain to hit a target mean luma.
           Exposure first (adds motion blur), gain second (adds noise). CSI exposure
-          is in microseconds and capped to one sensor frame. No calibration is
-          performed until you press the button.</p>
+          is in microseconds and capped to one sensor frame.</p>
         <div class=bar>
           <button class="act primary" id=bAuto>Auto-calibrate</button>
           <label style="color:var(--dim);font-size:12px">target luma
             <input type=number id=tgt value=110 min=40 max=200 style="width:70px"></label>
         </div>
+        <div class=bar>
+          <label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type=checkbox id=aeOn>
+            Re-expose by itself when the picture stays too dark or too bright</label>
+        </div>
+        <p class=hint id=aeNote></p>
         <div class=bar id=profs></div>
         <pre class=log id=calLog style="max-height:150px">idle</pre>
       </div>
@@ -140,10 +144,25 @@ export default function register(registerTab) {
         } catch (e) { log.textContent = e.message; c.msg(e.message, true); }
       };
 
+      const aeOn = el.querySelector('#aeOn'), aeNote = el.querySelector('#aeNote');
+      const showAe = (a) => {
+        if (!a || !aeOn.isConnected) return;
+        aeOn.checked = !!a.enabled;
+        aeNote.textContent = !a.enabled ? 'Off: the exposure stays where you set it.'
+          : a.busy ? 'Re-exposing now.'
+          : (a.action ? a.action + '. ' : '') + `Acts when the mean luma stays below ${a.low} or above ${a.high} for 15 s.`;
+      };
+      aeOn.onchange = async () => {
+        try { showAe(await c.API.post('/api/camera/auto_exposure', { enabled: aeOn.checked })); }
+        catch (e) { c.msg(e.message, true); }
+      };
+      c.API.get('/api/camera/auto_exposure').then(showAe).catch(() => {});
+
       lumaTimer = setInterval(async () => {
         try { const l = await c.API.get('/api/camera/luma');
               const e = el.querySelector('#cLuma');
               if (e && l.luma != null) e.textContent = `luma ${l.luma.toFixed(0)}`; } catch {}
+        c.API.get('/api/camera/auto_exposure').then(showAe).catch(() => {});
       }, 4000);
     },
     onLeave() { viewer?.stop(); viewer = null; clearInterval(lumaTimer); }

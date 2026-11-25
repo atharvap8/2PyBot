@@ -91,7 +91,6 @@ function draw() {
   ctx.fillStyle = "#0f0d0c"; ctx.fillRect(0, 0, r.width, r.height);
   if (!S) return;
   const pose = S.pose;
-  if (view === "radar") return drawRadar(r);
   if (cam.follow) { cam.x = pose[0]; cam.y = pose[1]; }
   // grid lines every metre
   ctx.strokeStyle = "#1e1a17"; ctx.lineWidth = 1;
@@ -140,23 +139,6 @@ function drawRobot(x, y, th) {
   ctx.fillStyle = "#f08a4b"; ctx.strokeStyle = "#141210"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-9, 9); ctx.lineTo(-5, 0); ctx.lineTo(-9, -9); ctx.closePath();
   ctx.fill(); ctx.stroke(); ctx.restore();
-}
-function drawRadar(r) {
-  const cx = r.width / 2, cy = r.height / 2, R = Math.min(cx, cy) - 20;
-  const maxM = 6, k = R / maxM;
-  ctx.strokeStyle = "#2a241f"; ctx.fillStyle = "#73695f"; ctx.font = "12px sans-serif";
-  for (let m = 1; m <= maxM; m++) {
-    ctx.beginPath(); ctx.arc(cx, cy, m * k, 0, 2 * Math.PI); ctx.stroke();
-    ctx.fillText(`${m} m`, cx + 4, cy - m * k + 14);
-  }
-  ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
-  ctx.fillStyle = "#f08a4b"; ctx.fillText("FRONT", cx - 20, cy - R - 6);
-  ctx.fillStyle = "#60a5fa";                                    // robot frame: x forward = up
-  for (const p of S.scan || []) {
-    const x = cx - p[1] * k, y = cy - p[0] * k;
-    ctx.fillRect(x - 1.5, y - 1.5, 3, 3);
-  }
-  drawRobot(cx, cy, Math.PI / 2);
 }
 
 // ---------------------------------------------------------------- input
@@ -321,8 +303,9 @@ async function heartbeat() {
 }
 const REASONS = [
   [/supervisor|backgrounded/, "The page was hidden or lost its connection."],
-  [/gamepad takeover|lease lost/, "You took over with the gamepad."],
-  [/feedback lost|telemetry/, "Lost contact with the controller."],
+  [/gamepad takeover/, "You took over with the gamepad."],
+  [/lease lost/, "The controller ended the drive."],
+  [/feedback lost|telemetry/, "The controller stopped answering for over 2 s."],
   [/disarmed|fell/, "The robot stopped balancing."],
   [/bubble stale/, "The lidar stopped seeing (lean or lidar off)."],
   [/boxed in/, "Boxed in: no room to turn or back out."],
@@ -337,7 +320,8 @@ function human(reason) {
 function progressText(m) {
   const i = m.info || {};
   if (i.waiting) return { planning: "Planning a route…", localizing: "Finding itself on the map…", "finding frontiers": "Looking for unmapped edges…",
-    "lidar bubble stale": "Waiting for the lidar…" }[i.waiting] || `Waiting: ${i.waiting}`;
+    "lidar bubble stale": "Waiting for the lidar…", replanning: "Finding a way round…",
+    "controller link": "Waiting for the controller…" }[i.waiting] || `Waiting: ${i.waiting}`;
   if (m.kind === "goto") return i.distance_m !== undefined ? `${fmt(i.distance_m, 1)} m to go` : "On the way";
   const mins = i.remaining_s !== undefined ? `${Math.floor(i.remaining_s / 60)}:${String(Math.max(0, i.remaining_s % 60)).padStart(2, "0")} left` : "";
   if (m.kind === "roam") return [`${fmt(i.distance_m, 1)} m driven`, `${i.turns || 0} turns`, mins].join(" · ");
@@ -468,18 +452,16 @@ async function update3d(force) {
 function setView(v) {
   if (v === "3d" && !s3d) { setSay("3D needs WebGL, which this browser does not provide.", "warn"); v = "map"; }
   view = v;
-  for (const k of ["map", "radar", "3d"]) $("v-" + k).setAttribute("aria-selected", v === k);
+  for (const k of ["map", "3d"]) $("v-" + k).setAttribute("aria-selected", v === k);
   cv.hidden = v === "3d"; cv3.hidden = v !== "3d";
   $("legend3d").hidden = v !== "3d";
   if (s3d) s3d.show(v === "3d");
   $("view-note").textContent = v === "map" ? "Scroll or pinch to zoom · drag to move"
-    : v === "radar" ? "Live scan around the robot (top = front)"
-    : "45° corner view · drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
+    : "Drag to rotate · two fingers or right-drag to pan · pinch or scroll to zoom";
   if (v === "3d") update3d(true);
   else resize();
 }
 $("v-map").onclick = () => setView("map");
-$("v-radar").onclick = () => setView("radar");
 $("v-3d").onclick = () => setView("3d");
 $("b-center").onclick = () => { cam.follow = true; if (view === "3d" && s3d) s3d.center(); draw(); };
 $("estop").onclick = () => post("api/estop");
@@ -499,4 +481,4 @@ $("b-find").onclick = async () => {
 };
 window.addEventListener("resize", resize);
 resize(); connect(); refreshMaps();
-setView({ map: "map", radar: "radar", "3d": "3d" }[new URLSearchParams(location.search).get("view")] || "3d");
+setView({ map: "map", "3d": "3d" }[new URLSearchParams(location.search).get("view")] || "3d");

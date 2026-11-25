@@ -677,6 +677,35 @@ class SlamEngine:
         return {"grid_res": g.res, "grid_origin": g.origin,
                 "walls": walls[:, ::-1].tolist(), "floor": floor[:, ::-1].tolist(),
                 "pose": pose, "path": path, "version": g.version}
+
+    def scene_vector(self):
+        """The map as a few clean outlines (walls and known floor) instead of raw
+        cells, for the console's 3D view. Cached per map version; None when OpenCV
+        is not available, so the viewer falls back to scene3d()."""
+        from . import vectorize
+        if not vectorize.available():
+            return None
+        with self.lock:
+            g = self.grid
+            version = g.version
+            cached = getattr(self, "_vector_cache", None)
+            if cached and cached[0] == version:
+                return cached[1]
+            bbox = g.known_bbox()
+            if bbox is None:
+                occupied = free = None
+            else:
+                r0, r1, c0, c1 = bbox
+                occupied = (g.logodds[r0:r1, c0:c1] > 0.6).copy()                     # copy only; trace off the lock
+                free = ((g.logodds[r0:r1, c0:c1] < -0.4) & g.touched[r0:r1, c0:c1]).copy()
+            res, origin = g.res, g.origin
+        if occupied is None:
+            result = {"walls": [], "floor": []}
+        else:
+            result = vectorize.vectorize(occupied, free, res, origin, row0=r0, col0=c0)
+        result.update(version=version, grid_res=res)
+        self._vector_cache = (version, result)
+        return result
     def map_png(self):
         with self.lock:                          # copy only; encode off the lock (see save())
             g = self.grid.copy()

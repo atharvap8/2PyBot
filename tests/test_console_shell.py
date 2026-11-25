@@ -116,6 +116,52 @@ def test_the_shell_can_stop_motion_but_never_start_it():
         assert allowed in code
 
 
+def test_controller_log_lines_never_float_over_the_view():
+    shell, html = text(UI / "shell/shell.js"), text(UI / "index.html")
+    assert "sh-toast" not in html + shell + text(UI / "shell/shell.css")
+    branch = next(line for line in shell.splitlines() if "m.type === 'log'" in line)
+    assert "logline" in branch and "msg(" not in branch, "raw log lines belong in the Console log only"
+    assert "consolemsg" in shell, "results of your own actions show in the status pill"
+
+
+def test_every_label_and_system_block_points_at_a_real_part():
+    shell, engine = text(UI / "shell/shell.js"), text(UI / "viz/engine.js")
+    anchors = set(re.findall(r"(\w+): \[", re.search(r"const ANCHORS = \{(.*?)\};", engine, re.S).group(1)))
+    blocks = re.findall(r"(\w+): \['([lrb])', '(\w+)'", re.search(r"const BLOCKS = \{(.*?)\};", shell, re.S).group(1))
+    labels = re.findall(r"\['(\w+)', '(\w+)', '([lr])'", re.search(r"const LABELS = \[(.*?)\];", shell, re.S).group(1))
+    assert len(blocks) >= 12 and len(labels) == 7
+    health = text(ROOT / "software/radxa/console/console/sysmap_health.py") + text(UI / "sysmap/model.js")
+    for key, _, anchor in blocks:
+        assert anchor in anchors, key + " is wired to a point the model does not have"
+        assert key in health, key + " is not a part the system map reports"
+    for key, anchor, _ in labels:
+        assert anchor in anchors and key in health
+    # left and right are the robot's own: its left wheel is at -x, on your right when it faces you
+    assert re.search(r"wheel_l: \[-0\.\d+, 0, AXLE\]", engine) and re.search(r"wheel_r: \[0\.\d+, 0, AXLE\]", engine)
+
+
+def test_arming_and_disarming_take_the_view_back_from_a_held_one():
+    shell = text(UI / "shell/shell.js")
+    change = shell[shell.index("if (isArmed !== wasArmed)"):][:400]
+    assert "held = null" in change and "leaveSystem()" in change
+
+
+def test_the_drawn_pose_follows_odometry_between_slam_fixes():
+    shell = text(UI / "shell/shell.js")
+    assert "function mapPose()" in shell and "function correctFix(" in shell
+    on_tel = shell[shell.index("function onTel()"):shell.index("function sectorClearance")]
+    assert "engine.setPose(mapPose())" in on_tel, "the robot must be redrawn on every telemetry message, not only at SLAM rate"
+
+
+def test_maps_page_has_no_radar_and_a_flat_view_switch():
+    page, code, css = text(UI / "slam/index.html"), text(UI / "slam/slam.js"), text(UI / "slam/slam.css")
+    assert "v-radar" not in page and "adar" not in code
+    assert 'id="v-3d"' in page and 'id="v-map"' in page
+    bar = re.search(r"\.viewbar \{([^}]*)\}", css).group(1)
+    assert "position: absolute" in bar and "border-bottom" not in bar
+    assert ".embed .view{order:-1" in css, "inside the console the map sits on top and the settings get the room below"
+
+
 def test_the_classic_console_is_kept_as_a_fallback():
     classic = text(UI / "classic.html")
     assert "/ui/app.js" in classic and "href=/ui/classic.html" in classic
@@ -151,4 +197,4 @@ def test_map_cells_merge_into_few_boxes_and_drop_specks():
     assert got["wall"] == [[100, 50, 40, 1]]
     assert got["room"] == [[0, 0, 20, 10]]
     assert got["speck"] == [[300, 300, 2, 1]], "a lone cell is noise and must be dropped; a pair is kept"
-    assert got["sectors"] == 8 and got["views"] == ["parked", "drive", "park"]
+    assert got["sectors"] == 8 and got["views"] == ["parked", "drive", "park", "system"]

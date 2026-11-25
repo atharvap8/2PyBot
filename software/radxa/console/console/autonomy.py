@@ -12,6 +12,12 @@ from .firmware import atomic_json,read_json
 
 ROOT=Path(os.environ.get("BOT_AUTONOMY_DIR","/var/lib/2pybot/autonomy"))
 ENGAGED={"running"}
+# A mission rides out short gaps in controller feedback instead of pausing. The
+# controller is the safety net here, not the host: it drops the drive lease and
+# stops by itself 0.5 s after the last command it received.
+FEEDBACK_GRACE=2.0      # s without fresh odometry / lease feedback before a mission pauses
+REGRANT_LIMIT=3         # times a mission may renew a lease the controller timed out
+NAV_TAKEOVER,NAV_TIMEOUT,NAV_DISABLED,NAV_REFUSED=3,4,6,9
 
 
 def wrap(angle):return math.atan2(math.sin(angle),math.cos(angle))
@@ -102,6 +108,8 @@ class Autonomy:
         self.last_operator=0;self.sequence=0;self.last_tick=clock();self.last_progress=clock();self.best_metric=math.inf
         self.last_v=self.last_w=0;self.events=[];self.lock=asyncio.Lock()
         self.action_epoch=0
+        self.gap_since=None     # start of the current gap in controller feedback
+        self.regrant=None       # lease renewal in flight: {"owner","until","why"}
         self.slam=None          # SlamEngine (set by the server): map pose + lidar safety bubble
         self.planner=None       # RoamPlanner / GotoPlanner / ExplorePlanner for lidar missions
     # ---------------------------------------------------------------- lidar missions
@@ -164,6 +172,7 @@ class Autonomy:
                 "origin":None,"points":[],"index":0,"speed_mps":planner.speed,"elapsed_s":0,"samples":[],"sample_index":0,
                 "replay_mode":kind,"distance_m":0,"command_v":0,"command_w":0,"epoch":self.link.pose_epoch,"token":owner,"info":{}}
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock()
+            self.gap_since=self.regrant=None
             self.last_v=self.last_w=0;self.event("Mission started: "+name)
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
     def clear_plan(self):
@@ -266,7 +275,6 @@ class Autonomy:
         if not link.connected or link.tel.get("stale",True) or self.clock()-link.last_odom_monotonic>.30:reasons.append("Controller telemetry is stale")
         if not link.tel.get("startup_ready") or not link.tel.get("balancing"):reasons.append("Press local START and wait for balancing")
         if self.clock()-nav.get("received_monotonic",0)>.35:reasons.append("Navigation feedback is stale")
-        if not nav.get("pad"):reasons.append("Connect the local gamepad")
         try:self.pose()
         except ValueError:reasons.append("Odometry pose is invalid")
         return reasons
@@ -297,7 +305,7 @@ class Autonomy:
             nav=self.link.nav
             if nav.get("token")==owner:
                 if nav.get("state") in (1,2):self.sequence=0;return owner
-                if nav.get("state")==9:raise ValueError("Controller refused: centre drive sticks and wait for stable balance")
+                if nav.get("state")==9:raise ValueError("Controller refused the drive lease: centre the sticks and wait for stable balance (firmware before 5.2.0 also needs the gamepad connected)")
             await asyncio.sleep(.02)
         self.tx(f"AN,{owner},0");raise ValueError("Navigation grant timed out")
     async def start(self,identifier,speed=None):
@@ -315,6 +323,7 @@ class Autonomy:
                 "samples":route.get("samples",[]),"sample_index":0,"replay_mode":"original" if route.get("samples") else "legacy_waypoints",
                 "distance_m":0,"command_v":0,"command_w":0,"epoch":self.link.pose_epoch,"token":owner}
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock();self.best_metric=math.inf
+            self.gap_since=self.regrant=None
             self.last_v=self.last_w=0;self.event("Replay started: "+route["name"])
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
     def heartbeat(self,identifier,key):
@@ -322,12 +331,12 @@ class Autonomy:
             raise ValueError("Supervision lease is not current; resume explicitly")
         self.last_operator=self.clock()
     def pause(self,reason="operator_pause"):
-        self.action_epoch+=1
+        self.action_epoch+=1;self.gap_since=self.regrant=None
         if self.mission and self.mission["state"] in ENGAGED:
             self.tx(f"AN,{self.mission['token']},0");self.mission.update(state="paused",reason=reason,command_v=0,command_w=0)
             self.last_v=self.last_w=0;self.lease_key=None;self.event(self.mission["name"]+" paused: "+reason)
     def stop(self,reason="operator_stop",state="stopped"):
-        self.action_epoch+=1
+        self.action_epoch+=1;self.gap_since=self.regrant=None
         if self.mission:
             if self.mission["state"] in ENGAGED or self.mission["state"]=="paused":
                 self.tx(f"AN,{self.mission['token']},0")
@@ -347,7 +356,8 @@ class Autonomy:
             generation=self.action_epoch;owner=await self.grant()
             if generation!=self.action_epoch:
                 self.tx(f"AN,{owner},0");raise ValueError("Resume was cancelled")
-            self.mission["token"]=owner;self.mission.update(state="running",reason="")
+            self.mission["token"]=owner;self.mission.update(state="running",reason="",regrants=0)
+            self.gap_since=self.regrant=None
             self.lease_key=secrets.token_hex(16);self.last_operator=self.clock();self.last_progress=self.clock();self.best_metric=math.inf
             self.event("Replay explicitly resumed")
             return {"status":self.status(),"lease_key":self.lease_key,"mission_id":self.mission["id"]}
@@ -357,6 +367,35 @@ class Autonomy:
         if not self.tx(f"AU,{self.mission['token']},{self.sequence},{v:.4f},{w:.4f}"):
             self.pause("serial motion command failed");return
         self.mission.update(command_v=round(v,4),command_w=round(w,4))
+    def hold(self,m,why):
+        """Stand still but keep the drive lease fed while something sorts itself out."""
+        self.sequence=(self.sequence+1)&0xffffffff
+        self.tx(f"AU,{m['token']},{self.sequence},0.0000,0.0000")
+        self.last_v=self.last_w=0;m.update(command_v=0,command_w=0)
+        m["info"]=dict(m.get("info") or {},waiting=why)
+    def lease_ok(self,m,now):
+        """True when the controller still honours this mission's drive lease. A lease the
+        controller dropped for a late command is renewed; one you took with the gamepad,
+        or one it refuses to renew, pauses the mission."""
+        nav=self.link.nav;token=nav.get("token");state=nav.get("state")
+        if self.regrant:
+            pending=self.regrant
+            if token==pending["owner"] and state in (1,2):
+                m["token"]=pending["owner"];self.sequence=0;self.regrant=None
+                self.event("Drive lease renewed after "+pending["why"]);return True
+            if (token==pending["owner"] and state==NAV_REFUSED) or now>pending["until"]:
+                self.tx(f"AN,{pending['owner']},0")
+                self.pause("native lease lost: the controller would not renew it after "+pending["why"]);return False
+            m["info"]=dict(m.get("info") or {},waiting="controller link");return False
+        if token==m["token"] and state in (1,2):return True
+        if token==m["token"] and state==NAV_TAKEOVER:self.pause("gamepad takeover");return False
+        if token==m["token"] and state in (NAV_TIMEOUT,NAV_DISABLED) and m.get("regrants",0)<REGRANT_LIMIT:
+            owner=secrets.randbelow(0x7ffffffe)+1
+            if self.tx(f"AN,{owner},1"):
+                m["regrants"]=m.get("regrants",0)+1
+                self.regrant={"owner":owner,"until":now+1.2,"why":"a late command" if state==NAV_TIMEOUT else "a controller hold"}
+                m["info"]=dict(m.get("info") or {},waiting="controller link");return False
+        self.pause("native lease lost");return False
     def tick(self):
         now=self.clock();dt=max(0,now-self.last_tick);self.last_tick=now
         if self.teach and self.teach["state"]=="recording":
@@ -369,11 +408,18 @@ class Autonomy:
         if not m or m["state"] not in ENGAGED:return
         slam_frame=m.get("kind") in ("goto","explore")   # map pose: independent of odometry resets
         if self.firmware_busy() or (not slam_frame and self.link.pose_epoch!=m["epoch"]):self.stop("odometry/maintenance change","aborted");return
-        if not self.link.connected or self.link.tel.get("stale",True) or now-self.link.last_odom_monotonic>.30:self.pause("controller feedback lost");return
-        if not self.link.tel.get("balancing"):self.stop("controller disarmed/fell","aborted");return
         nav=self.link.nav
-        if nav.get("token")!=m["token"] or nav.get("state") not in (1,2) or now-nav.get("received_monotonic",0)>.35:
-            self.pause("gamepad takeover / native lease lost");return
+        fresh=(self.link.connected and not self.link.tel.get("stale",True) and now-self.link.last_odom_monotonic<=.30
+               and now-nav.get("received_monotonic",0)<=.35)
+        if not fresh:
+            if self.gap_since is None:self.gap_since=now
+            if now-self.gap_since>FEEDBACK_GRACE:self.pause("controller feedback lost");return
+            self.hold(m,"controller link");return
+        if self.gap_since is not None:
+            if now-self.gap_since>=.25:self.event(f"Rode out a {now-self.gap_since:.2f} s gap in controller feedback")
+            self.gap_since=None
+        if not self.link.tel.get("balancing"):self.stop("controller disarmed/fell","aborted");return
+        if not self.lease_ok(m,now):return
         if now-self.last_operator>3:self.pause("supervisor disconnected/backgrounded");return
         if m.get("kind") in ("roam","goto","explore"):
             self.planner_tick(m,now,dt);return
@@ -397,9 +443,13 @@ class Autonomy:
         self.last_v=command["v"];self.last_w=command["w"]
         m["elapsed_s"]+=dt;self.drive(self.last_v,self.last_w)
     async def run(self):
-        last_publish=0
+        last_publish=0;last_loop=self.clock()
         try:
             while True:
+                # Everything here shares one event loop with the serial reader. If something
+                # held it up, say so: that is what a "controller feedback" gap usually is.
+                late=self.clock()-last_loop-.05;last_loop=self.clock()
+                if late>.25 and self.mission and self.mission["state"] in ENGAGED:self.event(f"Console was busy for {late:.2f} s")
                 try:self.tick()
                 except Exception as error:self.pause("navigation error: "+str(error))
                 if self.clock()-last_publish>=.5:

@@ -134,3 +134,62 @@ def test_teaching_records_relative_points_and_detects_reset(tmp_path):
     assert len(m.teach["points"])==2
     link.pose_epoch+=1;step(m,link,clock);assert m.teach["state"]=="interrupted"
     saved=m.finish_teach();assert saved["length_m"]==.25 and m.teach is None
+
+
+# ---- 5.2.0: missions do not need the gamepad and ride out short controller gaps ----
+def lapse(manager,link,clock,seconds,odometry=False):
+    """Time passes with the supervisor present; controller feedback arrives only if asked."""
+    clock.t+=seconds
+    if odometry:link.last_odom_monotonic=clock();link.nav["received_monotonic"]=clock()
+    if manager.lease_key:manager.last_operator=clock()
+    manager.tick()
+
+
+def test_a_mission_starts_and_keeps_driving_without_a_gamepad(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);link.nav["pad"]=False
+    assert "gamepad" not in " ".join(m.prerequisites()).lower()
+    asyncio.run(m.start(route["id"]));step(m,link,clock)
+    assert m.mission["state"]=="running" and m.mission["command_v"]>0
+
+
+def test_a_short_gap_in_controller_feedback_is_ridden_out(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]));step(m,link,clock)
+    for _ in range(20):lapse(m,link,clock,.05)                      # 1 s with no odometry: hold still, keep the lease fed
+    assert m.mission["state"]=="running" and m.mission["command_v"]==0
+    assert link.sent[-1].endswith(",0.0000,0.0000") and link.sent[-1].startswith("AU,")
+    step(m,link,clock)
+    assert m.mission["state"]=="running" and m.mission["command_v"]>0
+    assert any("gap in controller feedback" in e["text"] for e in m.events)
+
+
+def test_a_long_gap_in_controller_feedback_pauses(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]));step(m,link,clock)
+    for _ in range(50):lapse(m,link,clock,.05)
+    assert m.mission["state"]=="paused" and m.mission["reason"]=="controller feedback lost"
+
+
+def test_a_lease_the_controller_timed_out_is_renewed_a_few_times_only(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]));step(m,link,clock)
+    for attempt in range(nav.REGRANT_LIMIT):
+        first=m.mission["token"];link.nav["state"]=nav.NAV_TIMEOUT;step(m,link,clock)
+        assert m.mission["state"]=="running" and link.sent[-1].startswith("AN,") and link.sent[-1].endswith(",1")
+        step(m,link,clock);step(m,link,clock)
+        assert m.mission["token"]!=first and m.mission["command_v"]>0
+    link.nav["state"]=nav.NAV_TIMEOUT;step(m,link,clock)
+    assert m.mission["state"]=="paused" and "lease lost" in m.mission["reason"]
+
+
+def test_a_gamepad_takeover_is_never_renewed(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]));step(m,link,clock)
+    grants=sum(line.startswith("AN,") and line.endswith(",1") for line in link.sent)
+    link.nav["state"]=nav.NAV_TAKEOVER;step(m,link,clock)
+    assert m.mission["state"]=="paused" and m.mission["reason"]=="gamepad takeover"
+    assert sum(line.startswith("AN,") and line.endswith(",1") for line in link.sent)==grants
+
+
+def test_a_refused_renewal_pauses(tmp_path):
+    m,link,clock,current,route=setup(tmp_path);asyncio.run(m.start(route["id"]));step(m,link,clock)
+    link.nav["state"]=nav.NAV_DISABLED
+    link.on_grant=lambda:link.nav.update(state=nav.NAV_REFUSED)
+    step(m,link,clock);step(m,link,clock)
+    assert m.mission["state"]=="paused" and "would not renew" in m.mission["reason"]

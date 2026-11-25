@@ -438,6 +438,7 @@ async def _startup():
                                   asyncio.create_task(visual_pair.run()),
                                   asyncio.create_task(doctor.run())]
     app.state.background_tasks.append(asyncio.create_task(camera.native_camera.restore()))
+    app.state.background_tasks.append(asyncio.create_task(exposure_watch.run()))
     app.state.background_tasks.append(asyncio.create_task(bubble_guard.publish()))
     slam_engine.start()                      # listen-only SLAM (defined below)
     power.lidar_enabled = os.environ.get("BOT_LIDAR", "1") != "0"
@@ -663,6 +664,23 @@ async def cam_autocal(target: float = 110.0):
     loop = asyncio.get_running_loop()
     res = await loop.run_in_executor(None, lambda: camera.autocalibrate(target=target))
     return res
+
+
+exposure_watch = camera.ExposureWatch(log=link._log)   # re-exposes when the light changes
+
+
+class AutoExposureInput(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/camera/auto_exposure")
+def cam_auto_exposure():
+    return exposure_watch.status()
+
+
+@app.post("/api/camera/auto_exposure")
+def cam_auto_exposure_set(body: AutoExposureInput):
+    return exposure_watch.set_enabled(body.enabled)
 
 
 @app.get("/api/camera/snapshot")

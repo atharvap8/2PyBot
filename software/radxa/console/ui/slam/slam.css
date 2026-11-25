@@ -59,7 +59,16 @@ input, select { background: var(--card2); border: 1px solid var(--line); border-
 .btn:disabled { opacity: .45; cursor: default; }
 
 .view { position: relative; display: flex; flex-direction: column; min-width: 0; }
-.viewbar { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+/* the view switch floats over the map: no bar of its own */
+.viewbar { position: absolute; left: 10px; right: 10px; top: 10px; z-index: 2; display: flex; align-items: center; gap: 10px; pointer-events: none; }
+.viewbar > * { pointer-events: auto; }
+.viewbar .seg, .viewbar .btn { background: rgba(20, 18, 16, .88); }
+.viewbar .seg button { padding: 3px 12px; font-size: 12.5px; }
+.viewbar .btn.small { padding: 3px 10px; }
+.viewbar .seg, .viewbar .btn { flex: none; }
+.viewbar .sub { flex: 1; min-width: 0; pointer-events: none; color: var(--mute); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.viewbar .spacer { flex: 0; }
+@media (max-width: 760px) { .viewbar .sub { visibility: hidden; } }
 .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button { padding: 5px 14px; color: var(--sub); }
 .seg button[aria-selected="true"] { background: var(--acc); color: #1b1210; font-weight: 600; }
@@ -175,9 +184,15 @@ p.kind-opts { margin: 0 0 8px; }
 .steps .step .row + .meter { margin-top: 14px; }
 
 /* even button grids: every button in a group gets the same width and gap */
-.row.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 8px; }
-.row.btns .btn { width: 100%; padding: 8px 10px; overflow: hidden; text-overflow: ellipsis; }
+.row.btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 8px; }
+.row.btns .btn { width: 100%; padding: 8px 4px; overflow: hidden; text-overflow: ellipsis; }
 
-/* hosted inside the console shell's app pane */
+/* hosted inside the console shell's app pane: the map on top, the settings below with room to breathe */
 .embed .top{display:none}
-.embed .layout{height:100%}
+.embed .layout{display:flex;flex-direction:column;height:100%}
+.embed .view{order:-1;flex:0 0 40%;min-height:0}
+.embed canvas{flex:1;height:auto}
+.embed .viewbar .sub{visibility:hidden}
+.embed .steps{flex:1;min-height:0;border-right:0;border-top:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-content:start;gap:12px;padding:12px}
+.embed .step.auto{grid-column:2;grid-row:1 / span 2}
+@media (max-width:620px){.embed .steps{grid-template-columns:minmax(0,1fr)}.embed .step.auto{grid-column:auto;grid-row:auto;order:-1}}
