@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>2PyBot · AI inference</title>
+<link rel="stylesheet" href="/ui/ai.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <img class="brand-logo" src="/ui/logo.svg" alt="2PyBot">
+    <div><span>AI inference</span></div>
+  </div>
+  <div class="spacer"></div>
+  <nav class="pagelinks"><a href="/">Console</a><a href="/sysmap/">System</a><a href="/slam/">Maps</a><a href="/deploy">Deploy</a><a href="/terminal">Terminal</a></nav>
+  <button class="estop" id="estop" title="Stops the motors the same way as the console E-STOP">STOP</button>
+</header>
+
+<main class="layout">
+  <section class="step" id="c-detect">
+    <h2>Object detection <span class="pill" id="d-pill">–</span></h2>
+    <div class="preview"><img id="d-image" alt="Camera image with detected object boxes"><div class="cap" id="d-cap">Reading detector…</div></div>
+    <div class="row btns">
+      <button class="btn primary" id="d-start">Start</button>
+      <button class="btn" id="d-stop">Stop</button>
+    </div>
+    <div class="row">
+      <label class="field">Confidence <input id="d-thr" type="number" min="0.15" max="0.95" step="0.05" value="0.5"></label>
+      <label class="field">Show <select id="d-filter"><option value="all">Common objects</option><option value="people">People only</option></select></label>
+    </div>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="d-corr" checked> Use saved lens correction</label>
+      <div class="spacer"></div>
+      <button class="btn" id="d-apply">Apply</button>
+    </div>
+    <div class="note" id="d-note"></div>
+  </section>
+
+  <section class="step" id="c-dets">
+    <h2>Detections</h2>
+    <table class="dets"><thead><tr><th>Track</th><th>Object</th><th>Conf.</th><th>Distance</th></tr></thead><tbody id="d-rows"></tbody></table>
+  </section>
+
+  <section class="step" id="c-backend">
+    <h2>Inference backend <span class="pill" id="b-pill">–</span></h2>
+    <div class="kv" id="b-kv"></div>
+  </section>
+
+  <section class="step" id="c-repair">
+    <h2>Gamepad re-pair <span class="pill" id="r-pill">–</span></h2>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="r-on"> Watch the camera for the gamepad</label>
+    </div>
+    <div class="meter"><span>Hold progress</span><div class="bar"><i id="r-bar"></i></div><b id="r-barv">–</b></div>
+    <div class="row btns">
+      <button class="btn danger" id="r-now">Clear pairings now</button>
+    </div>
+    <div class="note" id="r-note">Show the gamepad to the camera while disarmed and with no pad connected to clear pairings. HOME + A to pair.</div>
+  </section>
+
+  <section class="step" id="c-custom">
+    <h2>Custom model</h2>
+    <div class="meter"><span>Current</span><b id="m-cur" style="grid-column:2/4;text-align:right">–</b></div>
+    <div class="row">
+      <input id="m-path" placeholder="/var/lib/2pybot/models/your-model.onnx" autocomplete="off">
+      <button class="btn primary" id="m-apply">Apply</button>
+    </div>
+    <div class="note" id="m-note">Point the detector at a different SSD-MobileNet INT8 ONNX on the robot. The NPU path uses the compiled NBG at BOT_NPU_MODEL.</div>
+  </section>
+</main>
+
+<script src="/ui/ai.js"></script>
+</body>
+</html>

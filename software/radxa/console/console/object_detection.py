@@ -67,6 +67,17 @@ class ObjectDetector:
         self.session=None;self.providers=[];self.provider="CPU";self.npu=None;self._npu_failed=False;self.preview=None;self.last_frame=None;self.tracks=Tracks();self.last_inference=0.0
         self.result={"state":"off","detections":[],"message":"Enable object detection to start"}
 
+    def set_model(self,path):
+        p=Path(path)
+        if not p.is_file():raise ValueError("Model file not found: "+str(p))
+        with self.lock:
+            self.model_path=p
+            if self.npu:
+                try:self.npu.close()
+                except Exception:pass
+            self.npu=None;self._npu_failed=False;self.session=None;self.providers=[];self.provider="CPU";self.last_frame=None
+        return self.status()
+
     def configure(self,enabled,threshold=.50,people_only=False,corrected=True):
         if not .15<=threshold<=.95:raise ValueError("Confidence must be 0.15–0.95")
         if enabled and not self.model_path.is_file():raise ValueError("Detector model is not installed")

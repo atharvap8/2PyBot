@@ -44,7 +44,7 @@ private val destinations = listOf(
     Destination("auto", "Routes", "Teach and replay", Icons.Default.Route),
     Destination("map", "Trail", "Wheel odometry trail", Icons.Default.Map),
     Destination("tune", "Tune", "Controller parameters", Icons.Default.Tune),
-    Destination("cam", "Camera", "Optics and perception", Icons.Default.CameraAlt),
+    Destination("cam", "AI", "On-board inference", Icons.Default.AutoAwesome),
     Destination("data", "Sessions", "Record and export", Icons.Default.FolderOpen),
     Destination("set", "Setup", "Connection and firmware", Icons.Default.Settings),
 )
@@ -73,7 +73,7 @@ fun RobotApp(vm: BotViewModel = viewModel()) {
                 "auto" -> AutoScreen(vm)
                 "map" -> MapScreen(vm)
                 "tune" -> TuneScreen(vm)
-                "cam" -> CameraScreen(vm)
+                "cam" -> CalibrationScreen(vm, page = "/ui/ai.html", backLabel = "← Drive", onBack = goDrive)
                 "data" -> RecorderScreen(vm)
                 else -> SettingsScreen(vm)
             }

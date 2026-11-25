@@ -391,6 +391,18 @@ def detection_configure(body: DetectionOptions):
         raise HTTPException(409, str(exc)) from exc
 
 
+class ModelInput(BaseModel):
+    path: str
+
+
+@app.post("/api/ml/model")
+def detection_model(body: ModelInput):
+    try:
+        return detector.set_model(body.path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.get("/api/ml/preview.jpg")
 def detection_preview():
     image = detector.preview
