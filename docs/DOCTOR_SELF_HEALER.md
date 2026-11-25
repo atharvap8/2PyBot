@@ -75,6 +75,26 @@ A `doctor` module (host side) with three parts:
 | Powered down but operator confused | sleep mode on | "Wake up" (confirm) |
 | Disk nearly full / high temp | housekeeping | vacuum journal / warn (auto for journal, warn for temp) |
 
+## Expanded coverage (implemented)
+
+The rule engine now also diagnoses, and where safe auto-heals:
+
+| Symptom | Cause | Doctor |
+|---|---|---|
+| Hotspot service stuck `activating`/`failed` while the AP is up | oneshot never settled | restart the hotspot unit (auto, capped). This is the exact case that read as "hotspot down" in status while clients could still join |
+| `2pybot-mediamtx` / `2pybot-firmware` / `2pybot-imx708` not active | service died | restart that unit (auto, capped) |
+| NumPy 2 in the console env | a rebuild pulled numpy 2, which breaks SLAM | pin `numpy<2` (auto) |
+| Deploy phase `failed` | last rollout failed | re-run the deploy (confirm) |
+| Auto-deploy off (timer and path inactive) | pushes will not roll out | enable the timer and path watcher (confirm) |
+| Memory almost exhausted | leak / overload | drop caches (confirm) |
+
+Privilege and safety: the console runs as `radxa`, which has passwordless sudo, so
+service restarts go through `sudo -n systemctl restart`. They remain bounded by the
+global attempt cap and per-action cooldown, and are skipped entirely while the robot
+is armed (balancing or self-righting), so the healer never perturbs a balancing
+robot or becomes its own restart loop. Hardware faults (jammed wheel, bad cable)
+stay `manual`: software cannot fix them, only name them.
+
 ## Phases
 
 1. Package the signal collector + rule engine around the existing

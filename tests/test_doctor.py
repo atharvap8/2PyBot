@@ -89,6 +89,65 @@ def test_recoveries_have_valid_safety():
             assert r.safety in ("auto", "confirm", "manual")
 
 
+def _recovery_actions(cases, case_id):
+    for c in cases:
+        if c.id == case_id:
+            return {(r.action, r.safety) for r in c.recoveries}
+    return set()
+
+
+def test_hotspot_stuck_but_ap_up_is_warn_and_auto_restart():
+    cases = diagnose({"services": {"2pybot-hotspot": "activating"},
+                      "services_enabled": {"2pybot-hotspot": "enabled"},
+                      "network": {"hotspot_ap_up": True}})
+    match = [c for c in cases if c.id == "hotspot_down"]
+    assert match and match[0].severity == "warn"
+    assert ("restart_hotspot", "auto") in _recovery_actions(cases, "hotspot_down")
+
+
+def test_hotspot_down_is_critical():
+    cases = diagnose({"services": {"2pybot-hotspot": "failed"},
+                      "network": {"hotspot_ap_up": False}})
+    match = [c for c in cases if c.id == "hotspot_down"]
+    assert match and match[0].severity == "critical"
+
+
+def test_hotspot_active_or_disabled_not_flagged():
+    assert "hotspot_down" not in ids({"services": {"2pybot-hotspot": "active"}})
+    assert "hotspot_down" not in ids({"services": {"2pybot-hotspot": "failed"},
+                                      "services_enabled": {"2pybot-hotspot": "disabled"}})
+
+
+def test_service_rule_emits_a_case_per_unhealthy_service():
+    cases = diagnose({"services": {"2pybot-firmware": "failed", "2pybot-mediamtx": "inactive"}})
+    got = {c.id for c in cases}
+    assert "svc_2pybot-firmware" in got and "svc_2pybot-mediamtx" in got
+    assert ("restart_firmware", "auto") in _recovery_actions(cases, "svc_2pybot-firmware")
+
+
+def test_imx708_oneshot_inactive_is_not_flagged_but_failed_is():
+    assert "svc_2pybot-imx708" not in ids({"services": {"2pybot-imx708": "inactive"}})
+    assert "svc_2pybot-imx708" in ids({"services": {"2pybot-imx708": "failed"}})
+
+
+def test_numpy2_auto_downgrade():
+    cases = diagnose({"deps": {"numpy_major": 2}})
+    assert "numpy2" in {c.id for c in cases}
+    assert ("pin_numpy", "auto") in _recovery_actions(cases, "numpy2")
+    assert "numpy2" not in ids({"deps": {"numpy_major": 1}})
+
+
+def test_deploy_failed_and_disabled():
+    assert "deploy_failed" in ids({"deploy": {"phase": "failed"}})
+    assert "deploy_disabled" in ids({"deploy_units": {"timer": "inactive", "path": "inactive"}})
+    assert "deploy_disabled" not in ids({"deploy_units": {"timer": "active", "path": "active"}})
+
+
+def test_mem_pressure():
+    assert "mem_pressure" in ids({"system": {"mem_pct": 96}})
+    assert "mem_pressure" not in ids({"system": {"mem_pct": 70}})
+
+
 def test_to_dict_serialisable():
     import json
     for c in diagnose({"tel": {"asleep": True}}):

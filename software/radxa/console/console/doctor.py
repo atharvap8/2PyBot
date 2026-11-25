@@ -168,20 +168,137 @@ def rule_cpu_hot(s):
     return None
 
 
-RULES = [rule_deploy_deferring, rule_console_crash, rule_serial_stale, rule_camera_down,
-         rule_onnxruntime_missing, rule_rs485, rule_cpu_hot, rule_disk_full, rule_powered_down]
+# A systemd unit is unhealthy when it is enabled/expected but not "active".
+# "activating" means a oneshot is stuck (the hotspot's exact failure); "failed"
+# and "inactive" mean down. Oneshots that legitimately exit and are not
+# RemainAfterExit would read "inactive" normally, so those units are not listed
+# here. Restarting a unit is bounded by the runtime's attempt cap, so a unit that
+# cannot come up is retried a few times and then surfaced for a human.
+_BAD_SERVICE_STATES = ("failed", "activating", "inactive", "deactivating")
+
+
+def rule_hotspot(s):
+    svc = s.get("services") or {}
+    state = svc.get("2pybot-hotspot")
+    if (s.get("services_enabled") or {}).get("2pybot-hotspot") in ("disabled", "masked"):
+        return None                                   # intentionally off
+    if state in (None, "active", "unknown"):
+        return None
+    ap_up = (s.get("network") or {}).get("hotspot_ap_up")
+    if ap_up:
+        cause = (f"The hotspot service is '{state}' but the access point is actually up, so "
+                 "clients can still join. The status reads as down until the unit settles; "
+                 "restarting it clears the stuck state.")
+        severity = "warn"
+    else:
+        cause = f"The hotspot service is '{state}' and the access point is not up."
+        severity = "critical"
+    return Case(
+        "hotspot_down", "Wi-Fi hotspot not healthy", cause, severity,
+        {"service": state, "ap_up": ap_up},
+        [Recovery("Restart the hotspot service", "auto", "restart_hotspot"),
+         Recovery("Inspect /usr/local/sbin/2pybot-hotspot and journalctl -u 2pybot-hotspot", "manual")])
+
+
+# unit -> (title, severity, auto action key). Long-running services; any non-active
+# state is a fault. imx708 is a camera power-up oneshot, so only flag it failed.
+_SERVICES = {
+    "2pybot-mediamtx": ("Video server is down", "warn", "restart_mediamtx"),
+    "2pybot-firmware": ("Firmware worker is down", "critical", "restart_firmware"),
+    "2pybot-imx708": ("Camera power-up failed", "info", "restart_imx708"),
+}
+
+
+def rule_services(s):
+    svc = s.get("services") or {}
+    enabled = s.get("services_enabled") or {}
+    cases = []
+    for unit, (title, severity, action) in _SERVICES.items():
+        state = svc.get(unit)
+        if enabled.get(unit) in ("disabled", "masked") or state in (None, "active", "unknown"):
+            continue
+        if unit == "2pybot-imx708" and state not in ("failed", "activating"):
+            continue                                  # a power-up oneshot may sit inactive
+        if state not in _BAD_SERVICE_STATES:
+            continue
+        cases.append(Case(
+            "svc_" + unit, title, f"The {unit} service is '{state}'.", severity,
+            {"service": state},
+            [Recovery("Restart " + unit, "auto", action),
+             Recovery("Read: journalctl -u " + unit, "manual")]))
+    return cases
+
+
+def rule_deploy_failed(s):
+    d = s.get("deploy") or {}
+    if d.get("phase") == "failed":
+        return Case(
+            "deploy_failed", "Deployment failed",
+            d.get("recovery") or d.get("message") or "The last deploy ended in the failed state.",
+            "warn", {"phase": "failed", "commit": d.get("commit")},
+            [Recovery("Re-run the deploy", "confirm", "run_deploy"),
+             Recovery("Read: journalctl -u 2pybot-deploy", "manual")])
+    return None
+
+
+def rule_deploy_disabled(s):
+    dp = s.get("deploy_units") or {}
+    if not dp:
+        return None
+    if dp.get("timer") not in ("active", None) and dp.get("path") not in ("active", None):
+        return Case(
+            "deploy_disabled", "Auto-deploy is off",
+            "Neither the deploy timer nor the path watcher is active, so pushes to the robot's "
+            "branch will not roll out on their own.",
+            "info", {"timer": dp.get("timer"), "path": dp.get("path")},
+            [Recovery("Enable auto-deploy (timer and path watcher)", "confirm", "enable_deploy")])
+    return None
+
+
+def rule_mem_pressure(s):
+    pct = (s.get("system") or {}).get("mem_pct")
+    if isinstance(pct, (int, float)) and pct >= 94:
+        return Case(
+            "mem_pressure", "Memory almost exhausted",
+            f"RAM is {pct:.0f}% used; the out-of-memory killer may stop the console or SLAM.",
+            "warn", {"mem_pct": pct},
+            [Recovery("Drop filesystem caches", "confirm", "drop_caches"),
+             Recovery("Close a heavy workspace or reduce the detector rate", "manual")])
+    return None
+
+
+def rule_numpy2(s):
+    major = (s.get("deps") or {}).get("numpy_major")
+    if isinstance(major, int) and major >= 2:
+        return Case(
+            "numpy2", "NumPy 2 breaks SLAM",
+            f"NumPy {major} is installed in the console environment; the SLAM and onnx stack "
+            "needs NumPy 1, so mapping can fail at import.",
+            "warn", {"numpy_major": major},
+            [Recovery("Pin NumPy below 2 in the console environment", "auto", "pin_numpy")])
+    return None
+
+
+RULES = [rule_deploy_deferring, rule_deploy_failed, rule_console_crash, rule_serial_stale,
+         rule_hotspot, rule_services, rule_camera_down, rule_onnxruntime_missing, rule_numpy2,
+         rule_rs485, rule_cpu_hot, rule_mem_pressure, rule_disk_full, rule_deploy_disabled,
+         rule_powered_down]
 
 
 def diagnose(signals):
-    """Pure: signals -> ranked list of Cases (most severe first)."""
+    """Pure: signals -> ranked list of Cases (most severe first).
+
+    A rule may return a single Case, a list of Cases, or None.
+    """
     cases = []
     for rule in RULES:
         try:
-            case = rule(signals)
+            result = rule(signals)
         except Exception:  # noqa: BLE001 -- a broken rule must not break diagnosis
-            case = None
-        if case:
-            cases.append(case)
+            result = None
+        if not result:
+            continue
+        cases.extend(result if isinstance(result, list) else [result])
     cases.sort(key=lambda c: SEVERITY_RANK.get(c.severity, 0), reverse=True)
     return cases
 
@@ -190,6 +307,7 @@ def diagnose(signals):
 import asyncio  # noqa: E402
 import importlib.util  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
@@ -197,6 +315,15 @@ import sys  # noqa: E402
 AUTO_CAP = 3          # max auto-heals of one action within the window
 AUTO_WINDOW = 900     # seconds
 COOLDOWN = 120        # min seconds between auto attempts of the same action
+
+# systemd units the doctor watches and, where safe, auto-restarts. radxa holds
+# passwordless sudo, so restarts go through `sudo -n systemctl`. Restarts are
+# bounded by AUTO_CAP/COOLDOWN and are skipped while the robot is armed.
+_MONITORED = ("2pybot-console", "2pybot-mediamtx", "2pybot-firmware",
+              "2pybot-hotspot", "2pybot-imx708", "2pybot-boot-gate")
+_ENABLED_WATCH = ("2pybot-hotspot", "2pybot-mediamtx", "2pybot-firmware", "2pybot-imx708")
+# auto actions that restart a unit: not run while the robot is balancing
+_SERVICE_RESTART_ACTIONS = {"restart_hotspot", "restart_mediamtx", "restart_firmware", "restart_imx708"}
 
 
 def _dep_installed(name):
@@ -213,6 +340,33 @@ def _service_state(name):
         return "unknown"
 
 
+def _batch(verb, names):
+    """One systemctl call for many units; returns {unit: state}. Order is preserved."""
+    try:
+        out = subprocess.run(["systemctl", verb, *names], capture_output=True, text=True, timeout=5).stdout.split()
+    except Exception:  # noqa: BLE001
+        out = []
+    return {n: (out[i] if i < len(out) else "unknown") for i, n in enumerate(names)}
+
+
+def _hotspot_ap_up():
+    """True when wlan1 actually has an address (the access point is really up)."""
+    try:
+        out = subprocess.run(["ip", "-4", "-br", "addr", "show", "wlan1"],
+                             capture_output=True, text=True, timeout=4).stdout
+    except Exception:  # noqa: BLE001
+        return None
+    return bool(re.search(r"\d+\.\d+\.\d+\.\d+", out))
+
+
+def _numpy_major():
+    try:
+        import numpy
+        return int(numpy.__version__.split(".")[0])
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _system_info():
     info = {}
     try:
@@ -226,6 +380,14 @@ def _system_info():
             info["cpu_temp_c"] = int(open(p).read().strip()) / 1000.0
     except (OSError, ValueError):
         pass
+    try:
+        mem = {k.split(":")[0]: int(v.split()[0])
+               for k, v in (line.split(":", 1) for line in open("/proc/meminfo") if ":" in line)}
+        total, avail = mem.get("MemTotal", 0), mem.get("MemAvailable", 0)
+        if total:
+            info["mem_pct"] = round((total - avail) / total * 100, 1)
+    except (OSError, ValueError, KeyError):
+        pass
     return info
 
 
@@ -238,10 +400,22 @@ class Doctor:
         self.cases = []
         self.history = []
         self._attempts = {}
-        self.actions = {                      # only non-sudo, idempotent actions run here
+        self._armed = False
+        self.actions = {
+            # non-sudo, idempotent
             "restart_stream": self._restart_stream,
             "pip_onnxruntime": self._pip_onnxruntime,
+            "pin_numpy": self._pin_numpy,
             "wake": self._wake,
+            # service restarts (sudo -n; gated on not-armed in heal())
+            "restart_hotspot": lambda: self._restart_service("2pybot-hotspot.service"),
+            "restart_mediamtx": lambda: self._restart_service("2pybot-mediamtx.service"),
+            "restart_firmware": lambda: self._restart_service("2pybot-firmware.service"),
+            "restart_imx708": lambda: self._restart_service("2pybot-imx708.service"),
+            # confirm-only actions (surfaced to the operator, elevated by the CLI/TUI)
+            "enable_deploy": self._enable_deploy,
+            "run_deploy": self._run_deploy,
+            "drop_caches": self._drop_caches,
         }
 
     def collect(self):
@@ -256,21 +430,34 @@ class Doctor:
             pass
         vp = self.visual_pair.status() if self.visual_pair else {}
         events = getattr(link, "events", {}) or {}
+        services = _batch("is-active", list(_MONITORED))
+        enabled = _batch("is-enabled", list(_ENABLED_WATCH))
+        deploy_units = _batch("is-active", ["2pybot-deploy.timer", "2pybot-deploy.path"])
         return {
-            "tel": {"asleep": tel.get("asleep"), "stale": tel.get("stale"), "balancing": tel.get("balancing")},
+            "tel": {"asleep": tel.get("asleep"), "stale": tel.get("stale"),
+                    "balancing": tel.get("balancing"), "self_righting": tel.get("self_righting")},
             "serial": {"connected": getattr(link, "connected", False), "stale": tel.get("stale", True)},
             "camera": {"running": stream.get("running"), "paused": stream.get("paused"), "error": stream.get("error")},
             "hub": tel.get("hub", {}) or {},
             "hub_stats": events.get("hub_stats", {}) if isinstance(events, dict) else {},
-            "deploy": {"phase": deploy.get("phase"), "defer_count": deploy.get("defer_count"), "message": deploy.get("message")},
-            "services": {n: _service_state(n) for n in ("2pybot-console", "2pybot-mediamtx")},
-            "deps": {"onnxruntime": _dep_installed("onnxruntime")},
+            "deploy": {"phase": deploy.get("phase"), "defer_count": deploy.get("defer_count"),
+                       "message": deploy.get("message"), "commit": deploy.get("commit"),
+                       "recovery": deploy.get("recovery")},
+            "deploy_units": {"timer": deploy_units.get("2pybot-deploy.timer"),
+                             "path": deploy_units.get("2pybot-deploy.path")},
+            "services": services,
+            "services_enabled": enabled,
+            "network": {"hotspot_ap_up": _hotspot_ap_up()},
+            "deps": {"onnxruntime": _dep_installed("onnxruntime"), "numpy_major": _numpy_major()},
             "visual_pair": {"enabled": vp.get("enabled")},
             "system": _system_info(),
         }
 
     def refresh(self):
-        self.cases = diagnose(self.collect())
+        signals = self.collect()
+        tel = signals.get("tel") or {}
+        self._armed = bool(tel.get("balancing") or tel.get("self_righting"))
+        self.cases = diagnose(signals)
         return self.cases
 
     def status(self):
@@ -305,17 +492,61 @@ class Doctor:
         except Exception as exc:  # noqa: BLE001
             return False, str(exc)[-160:]
 
+    def _pin_numpy(self):
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-input", "numpy>=1.21.6,<2"],
+                           check=True, capture_output=True, timeout=600)
+            return True, "pinned numpy<2"
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)[-160:]
+
     async def _wake(self):
         if self.power:
             await self.power.wake()
             return True, "awake"
         return False, "no power controller"
 
+    # ---- sudo actions (radxa has passwordless sudo); still bounded + gated ----
+    def _restart_service(self, unit):
+        try:
+            subprocess.run(["sudo", "-n", "systemctl", "restart", unit],
+                           check=True, capture_output=True, timeout=30)
+            return True, "restarted " + unit
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)[-160:]
+
+    def _enable_deploy(self):
+        try:
+            subprocess.run(["sudo", "-n", "systemctl", "enable", "--now",
+                            "2pybot-deploy.timer", "2pybot-deploy.path"],
+                           check=True, capture_output=True, timeout=30)
+            return True, "auto-deploy enabled"
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)[-160:]
+
+    def _run_deploy(self):
+        try:
+            subprocess.run(["sudo", "-n", "systemctl", "start", "2pybot-deploy.service"],
+                           check=True, capture_output=True, timeout=30)
+            return True, "deploy triggered"
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)[-160:]
+
+    def _drop_caches(self):
+        try:
+            subprocess.run(["sudo", "-n", "sh", "-c", "sync; echo 1 > /proc/sys/vm/drop_caches"],
+                           check=True, capture_output=True, timeout=15)
+            return True, "dropped caches"
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)[-160:]
+
     async def heal(self):
         for case in self.cases:
             for rec in case.recoveries:
                 if rec.safety != "auto" or rec.action not in self.actions:
                     continue
+                if rec.action in _SERVICE_RESTART_ACTIONS and self._armed:
+                    continue                      # never perturb services while balancing
                 if not self._allowed(rec.action):
                     continue
                 fn = self.actions[rec.action]
