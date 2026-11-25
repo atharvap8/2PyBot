@@ -57,6 +57,15 @@ def test_it_rests_after_a_walk_and_longer_at_the_sensor_limit(tmp_path):
     assert [w.due(20, clock()) for _ in range(3)][-1]
 
 
+def test_out_of_range_in_the_dark_then_the_light_comes_on(tmp_path):
+    w, clock, _ = watch(tmp_path)
+    w.finished({"ok": True, "converged": False}, 1, clock())        # lens covered: exposure and gain end up at maximum
+    clock.t += w.REST + 1
+    assert not any(w.due(3, clock()) for _ in range(5)), "still dark: keep resting"
+    assert [w.due(250, clock()) for _ in range(3)] == [False, False, True], \
+        "uncovered and now washed out: act after the usual three readings, not after five minutes"
+
+
 def test_no_picture_means_no_action(tmp_path):
     w, clock, _ = watch(tmp_path)
     assert not any(w.due(None, clock()) for _ in range(6))           # asleep, or the stream is down

@@ -193,6 +193,8 @@ p.kind-opts { margin: 0 0 8px; }
 .embed .view{order:-1;flex:0 0 40%;min-height:0}
 .embed canvas{flex:1;height:auto}
 .embed .viewbar .sub{visibility:hidden}
+.embed .legend3d b{display:none}
+.embed .say{left:auto;right:12px;transform:none;max-width:calc(100% - 290px);border-radius:14px}
 .embed .steps{flex:1;min-height:0;border-right:0;border-top:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-content:start;gap:12px;padding:12px}
 .embed .step.auto{grid-column:2;grid-row:1 / span 2}
 @media (max-width:620px){.embed .steps{grid-template-columns:minmax(0,1fr)}.embed .step.auto{grid-column:auto;grid-row:auto;order:-1}}

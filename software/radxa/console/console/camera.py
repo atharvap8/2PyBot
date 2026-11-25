@@ -215,11 +215,13 @@ class ExposureWatch:
     Every PERIOD seconds this measures the picture's mean brightness. If it has been
     outside LOW..HIGH for NEED checks in a row, it runs the same exposure walk as the
     Auto-calibrate button, then leaves the camera alone for a while. The gap between
-    the trigger band and the walk's target is what stops it hunting.
+    the trigger band and the walk's target is what stops it hunting. When the sensor
+    runs out of range (a dark room, a covered lens) it rests much longer, unless the
+    picture swings to the other extreme.
     """
     PERIOD, NEED = 5.0, 3
     LOW, HIGH, TARGET = 55.0, 185.0, 110.0
-    REST, REST_AT_LIMIT = 60.0, 300.0        # s left alone after a walk; longer when the sensor ran out of range
+    REST, REST_AT_LIMIT = 30.0, 300.0        # s left alone after a walk; longer when the sensor ran out of range
 
     def __init__(self, log=print, settings=None, measure=None, calibrate=None, clock=time.monotonic):
         self.log, self.clock = log, clock
@@ -233,6 +235,7 @@ class ExposureWatch:
         except (OSError, ValueError, AttributeError):
             pass
         self.bad, self.rest_until, self.busy = 0, 0.0, False
+        self.walked_at, self.limit_side = -1e9, None     # the long rest only holds while the picture is bad the same way
         self.last = {"luma": None, "action": "", "at": None}
 
     @staticmethod
@@ -262,7 +265,13 @@ class ExposureWatch:
     def due(self, luma, now):
         """One brightness reading in; True when it is time to re-expose."""
         self.last["luma"] = None if luma is None else round(luma, 1)
-        if not self.enabled or luma is None or now < self.rest_until or self.LOW <= luma <= self.HIGH:
+        if not self.enabled or luma is None or self.LOW <= luma <= self.HIGH:
+            self.bad = 0
+            return False
+        side = "dark" if luma < self.LOW else "bright"
+        # Out of range in the dark, then the light comes on (or the lens is uncovered): do not sit out the long rest.
+        flipped = self.limit_side is not None and side != self.limit_side and now >= self.walked_at + self.REST
+        if now < self.rest_until and not flipped:
             self.bad = 0
             return False
         self.bad += 1
@@ -272,6 +281,7 @@ class ExposureWatch:
         self.bad = 0
         settled = bool(result.get("ok") and result.get("converged"))
         self.rest_until = now + (self.REST if settled else self.REST_AT_LIMIT)
+        self.walked_at, self.limit_side = now, None if settled else ("dark" if luma < self.LOW else "bright")
         why = "too dark" if luma < self.LOW else "too bright"
         outcome = (f"now {result.get('luma', 0):.0f}" if settled
                    else result.get("error") or "the sensor ran out of range for this light")

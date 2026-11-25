@@ -1,6 +1,6 @@
 /*
  * ============================================================
- *  BaseLink.ino — 2PyBot v5.0.0
+ *  BaseLink.ino — 2PyBot v5.2.0
  * ============================================================
  *  Control law: optimal full-state feedback on the linearized
  *  velocity-driven inverted pendulum, augmented with a position
@@ -399,8 +399,9 @@ void handleLine(char* line) {
         if(sscanf(line+3,"%lu,%d%c",&owner,&en,&extra)!=2 || (en!=0 && en!=1))return;
         if(!en) { if(navigation.granted && navigation.token==owner)navigation.cancel(NavigationLease::NAV_STOPPED);return; }
         const bool neutral=fabsf(joyForward*P.joyFwdSc)<.10f && fabsf(joySteering*P.joyStrSc)<.10f;
-        const bool available=!startupGate.maintenance && btgamepad_connected() &&
-                             state==STATE_BALANCING;
+        // 5.2.0: a mission does not need the gamepad. The lease still cannot arm, and
+        // moving a connected pad's stick still takes over at once.
+        const bool available=!startupGate.maintenance && state==STATE_BALANCING;
         if(navigation.grant((uint32_t)owner,millis(),state==STATE_BALANCING,available,neutral)) {
             stopGesture();radxaLastRx=0;Serial.printf("AN!,%lu\n",owner);
         } else Serial.printf("AN?,%lu\n",owner);
@@ -852,7 +853,7 @@ void setup() {
     if (!statusLedReady) Serial.println("[STATUS] GPIO32 PWM/timer setup failed; indication is best-effort");
 
     Serial.println("\n==================================================");
-    Serial.println("     2PyBot BaseLink v5.0.0");
+    Serial.println("     2PyBot BaseLink v5.2.0");
     Serial.println("==================================================");
 
     params_begin();
@@ -1039,7 +1040,8 @@ void loop() {
     const float manualSteer=clampf(joySteering*P.joyStrSc,-1.0f,1.0f)*(joySpeedHigh?1.0f:P.spdLoStr);
     const bool takeover=joyFresh && (fabsf(joyForward*P.joyFwdSc)>.12f || fabsf(joySteering*P.joyStrSc)>.18f);
     const NavigationLease::State previousNavState=navigation.state;
-    navigation.update(millis(),takeover,state==STATE_BALANCING && !startupGate.maintenance && btgamepad_connected());
+    // 5.2.0: losing the gamepad no longer revokes the lease (it used to end a mission mid-drive).
+    navigation.update(millis(),takeover,state==STATE_BALANCING && !startupGate.maintenance);
     if(previousNavState!=navigation.state && navigation.token)
         Serial.printf("[NAV] state=%u token=%lu\n",(unsigned)navigation.state,(unsigned long)navigation.token);
     if(navigation.granted) {
@@ -1129,16 +1131,31 @@ void loop() {
             cmdFwd=cmdSteer=0;
         }
     } else { // BALANCING: original fall limit remains separate from recovery
-        if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || elapsed>20000) {
-            static char reason[160];
+        // 5.2.0: one late loop is survivable; cutting the motors for it is a certain fall.
+        // (Seen 6 s after a gamepad dropped out: the loop ran late once and the robot was
+        // switched off under a mission.) An isolated late loop is logged and ridden
+        // through. A long one, or a second within a second, still stops the motors, and
+        // the stall guard still zeroes them after 150 ms whatever this code decides.
+        static uint32_t lateLoopMs = 0;
+        bool overrun = false;
+        if (elapsed > 20000) {
+            const uint32_t lateNow = millis();
+            overrun = elapsed > 100000 || (lateLoopMs && lateNow - lateLoopMs < 1000);
+            lateLoopMs = lateNow ? lateNow : 1;
+            if (!overrun && Serial.availableForWrite() >= 64)
+                Serial.printf("[MAIN] Late loop %lu ms ridden through (pad %u)\n",
+                              (unsigned long)(elapsed / 1000), (unsigned)btgamepad_connected());
+        }
+        if (!hub.linkOk(HUB_LINK_TIMEOUT_MS) || !hub.modeOk() || hub.faultBits() || overrun) {
+            static char reason[192];
             const auto& l = hub.left().fb(); const auto& r = hub.right().fb();
             snprintf(reason, sizeof(reason),
-                "%s: link=%u mode=%u fault L0x%02X R0x%02X modeL%u modeR%u ageL%lums ageR%lums toL%lu toR%lu crcL%lu crcR%lu",
-                elapsed>20000 ? "CONTROL LOOP OVERRUN" : "MOTOR LINK/MODE/FAULT",
+                "%s: link=%u mode=%u fault L0x%02X R0x%02X modeL%u modeR%u ageL%lums ageR%lums toL%lu toR%lu crcL%lu crcR%lu loop%lums",
+                overrun ? "CONTROL LOOP OVERRUN" : "MOTOR LINK/MODE/FAULT",
                 (unsigned)hub.linkOk(HUB_LINK_TIMEOUT_MS), (unsigned)hub.modeOk(), l.fault, r.fault, l.mode, r.mode,
                 (unsigned long)(millis()-l.rxMs), (unsigned long)(millis()-r.rxMs),
                 (unsigned long)l.timeouts, (unsigned long)r.timeouts,
-                (unsigned long)l.crcErrors, (unsigned long)r.crcErrors);
+                (unsigned long)l.crcErrors, (unsigned long)r.crcErrors, (unsigned long)(elapsed / 1000));
             requestDisable(reason);
         } else if (fabsf(pitchF) > P.maxTilt || fabsf(rateF) > P.maxRate) {
             leds_event(LED_EV_FALL); ledLatch(LED_ERR_FELL);

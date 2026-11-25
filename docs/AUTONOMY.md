@@ -4,9 +4,10 @@ This page covers the plan and the current state for lidar autonomy on the Radxa
 console. Everything runs in the console process. The firmware only receives the
 navigation lease (`AN`/`AU`) and the safety-bubble caps (`BG`).
 
-The host can stop the robot but can never arm it. Local START, a connected gamepad
-and an open supervising page are required. Any stick movement takes over
-immediately.
+The host can stop the robot but can never arm it. Local START and an open
+supervising page are required. Any stick movement takes over immediately. Since
+5.2.0 a mission keeps driving if the gamepad drops out: STOP on the console, the
+supervising page and the controller's 0.5 s command timeout still end it.
 
 ## Plan
 

@@ -3,10 +3,85 @@
 For the main milestones and estimated dates for future work, see the
 [Revision Table](docs/REVISION_HISTORY.md).
 
-## Unreleased (branch feature/drive-visualization): 3D console
+## 5.2.0: 3D console, autopilot that goes round things, missions without the gamepad
 
-Not released and not versioned yet: VERSION is unchanged on purpose, so deploying
-this branch only restarts the console (no firmware or app rebuild).
+Firmware changes in this revision compile but have not been driven on the robot
+yet. Test them with a hand on the robot before trusting them: see the last two
+points of "Autopilot and controller".
+
+### Autopilot and controller
+
+- **Goes round obstacles instead of waiting at them.** A go-to mission checks the
+  next 1.6 m of its route against the live lidar scan four times a second and
+  plans a new route as soon as something sits on it, while still driving. Routes
+  are planned on the map plus what the lidar and the depth sensor see now. If the
+  robot is stopped by something the lidar cannot see (too low), it marks the spot,
+  reverses 0.2 m and plans round it. If there is no way round it waits clear of
+  the obstacle, keeps looking, carries on when the way opens, and ends the mission
+  only after 40 s stuck in one place. The old behaviour was to drive up to the
+  obstacle, wait 2 s, and give up after six tries.
+- **"Lost contact with the controller" no longer ends a drive for a blip.** That
+  pause fired when the console had not processed an odometry line for 0.3 s. The
+  console reads the serial port on the same event loop as everything else, so a
+  busy moment looked like a lost controller. A mission now holds still and rides
+  out gaps of up to 2 s (the controller itself stops 0.5 s after the last
+  command, which is the real safety net), renews a drive lease the controller
+  timed out (at most three times per mission), and logs how long each gap was. A
+  gamepad takeover or STOP is never renewed.
+- **Missions do not need the gamepad.** The console no longer asks for a connected
+  gamepad to start, and the firmware no longer revokes the drive lease when the
+  gamepad drops out (before, that paused the mission mid-drive). Arming is still
+  local START, moving a stick still takes over at once, and STOP, the supervising
+  Maps page and the 0.5 s command timeout still end a drive.
+- **One late control loop no longer switches the motors off.** After a gamepad
+  dropped out, the balance loop once ran late and the firmware cut the motors for
+  it ("CONTROL LOOP OVERRUN"), which is a certain fall. An isolated late loop of up
+  to 100 ms is now logged (`[MAIN] Late loop N ms ridden through`) and ridden
+  through. A longer one, or a second within a second, still stops the motors, and
+  the stall guard still zeroes them after 150 ms. Why the loop ran late is not yet
+  known; the new log line and the `loopNms` field in the stop reason are there to
+  find out.
+- Pause reasons are told apart: "gamepad takeover" and "native lease lost" were one
+  message that always blamed the gamepad.
+
+### Camera
+
+- **Re-exposes by itself.** When the picture stays too dark or too bright (mean
+  luma below 55 or above 185 for 15 s) the camera runs the same exposure walk as
+  the Auto-calibrate button, then rests for a minute (five when the sensor has run
+  out of range, so a dark room does not make it hunt). Switch in the Camera app;
+  on by default. Each action is written to the console log.
+
+### Console
+
+- **System view on the robot itself.** The System button turns the 3D robot to face
+  you and puts every part around it as a block with its live reading, wired to
+  where the part sits. Hover (or tap) a block and its wire and its part light up
+  while the rest fades. The full diagram and logs are one link away.
+- **Live labels on the parked robot.** Camera, depth sensor, controller, lidar,
+  Radxa and both motors show their state and reading (frame rate, nearest object,
+  loop time, scan rate, CPU temperature and load, motor temperatures), from the
+  same health data as the system map. Left and right are the robot's own.
+- **Smooth driving view.** The robot is drawn from wheel odometry at telemetry rate
+  and only corrected by the SLAM pose, instead of stepping five times a second.
+  Map walls are clean outlines traced on the robot (`/slam/api/scene_vector`,
+  about 13 kB for a house instead of 317 kB of cells) and fade in when the map
+  changes. A live obstacle has to be seen in three scans before it is drawn and
+  lingers for a moment after, so nothing flickers. The speed readout is steadied.
+- **View follows the robot's state.** Disarming always returns to the parked view
+  and balancing always switches to the driving view, even if a view was held.
+  The wheels do not turn in the parked view. View changes are a little slower and
+  travel less; the app pane fades in instead of sliding across the screen.
+- **No log lines over the view.** Controller log lines go to the Console log only.
+  The result of something you did shows in the status pill for a few seconds. A
+  paused mission is announced for a few seconds and then stays on its card.
+- **Maps.** Inside the console the map sits on top and the settings get the room
+  below in two columns. The 3D/Map switch floats over the map with no bar of its
+  own. The Radar view is gone.
+- **Phones.** The dock fits a narrow screen, the parked robot is framed to fit, and
+  the system view stacks its blocks under the robot.
+
+### 3D console (new in this revision)
 
 - **New console home.** The console opens on a live 3D view of the robot with an
   app pane beside it and a dock below, replacing the tab rail. The view chooses
@@ -22,8 +97,7 @@ this branch only restarts the console (no firmware or app rebuild).
   returns the map does not explain, depth-sensor obstacles and drop-offs, and
   proximity arcs computed from the scan.
 - **Apps in the pane.** Drive (map, camera, mission), Maps, Camera, ML, Controls
-  (telemetry, calibration, log and every parameter group), System, Terminal and
-  Deploy. Existing pages are hosted with their own header hidden.
+  (telemetry, calibration, log and every parameter group), Terminal and Deploy. Existing pages are hosted with their own header hidden.
 - **Safety unchanged.** The new page can stop things (STOP, pause or end a mission,
   power down) but never starts motion; missions still start from Maps, which keeps
   its own supervision lease.

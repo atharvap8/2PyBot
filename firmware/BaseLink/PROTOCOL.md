@@ -264,16 +264,17 @@ field only triggers a balancing stop on a 1-to-0 transition. It never arms. A fi
 
 `PR,NAVIGATION,1` advertises support. These internal host commands cannot arm:
 
-- `AN,<nonzero-token>,1`: grant only while balancing, local gamepad connected,
-  drive sticks neutral and attitude stable. Replies `AN!,<token>` or
-  `AN?,<token>`. A cancelled token cannot be reused.
+- `AN,<nonzero-token>,1`: grant only while balancing, with the drive sticks neutral
+  and attitude stable. Replies `AN!,<token>` or `AN?,<token>`. A cancelled token
+  cannot be reused. Since 5.2.0 the gamepad does not have to be connected.
 - `AU,<token>,<sequence>,<forward-m/s>,<yaw-rad/s>`: finite values, monotonically
   increasing sequence (32-bit wrap supported). Speed is clamped to ±`DRIVEV`
   (reverse allowed) and yaw to the `MAXSTR` wheel-speed limit. Lidar missions plan at
   most ±0.85 rad/s. Commands expire after 500 ms.
 - `AN,<token>,0`: release that lease without disarming. Local drive-stick input,
-  disconnect, disarm, unsafe attitude and timeout also revoke it; stale commands
-  cannot restore authority. SELECT remains an immediate motor stop.
+  disarm, unsafe attitude and timeout also revoke it; stale commands cannot restore
+  authority. SELECT remains an immediate motor stop. Since 5.2.0 a gamepad that
+  drops out no longer revokes the lease (before, it ended a mission mid-drive).
 
 Separate 10 Hz feedback leaves the 53-field debug schema unchanged:
 `NR,<ms>,<token>,<state>,<sequence>,<command-age-ms>,<pad-connected>,<asleep>`.
