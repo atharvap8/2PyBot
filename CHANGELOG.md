@@ -22,8 +22,8 @@ Firmware changes compile but have not been driven yet.
   1.5 s switches it on at 25 %, then it steps its own brightness to keep
   the picture's mean luma between 75 and 150, steps down hard when washed out,
   and switches off when there is enough light without it. It also aims: the beam
-  leads into turns and is tight when the way ahead is open, wide when something is
-  within 0.8 m. Use the flashlight from the gamepad and the bot hands over at
+  leads into turns and is kept at its widest (the other end of the zoom is a small
+  dot). Use the flashlight from the gamepad and the bot hands over at
   once: it takes what you set as its starting point and carries on 1.5 s after
   your last touch. Parked or powered down, a light the bot switched on goes off.
   The camera's automatic re-exposure steps back while the light can still act.

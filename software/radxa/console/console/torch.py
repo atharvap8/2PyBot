@@ -10,8 +10,9 @@ picture once a second:
   * washed out                      -> a big step down at once
 
 and it points the beam where it is useful. It leads into turns like a car's cornering
-light, and it is tight (thrown far) when the way ahead is open and wide when something
-is close.
+light, and it keeps the beam at its widest. (It used to tighten the beam when the way
+ahead was open; on the robot that end of the zoom is a small dot, which lights nothing
+useful, so the beam is now always the full flood.)
 
 Every command goes through the firmware's own clamp and hard cap (TL / P= / Z=). The bot
 hands over at once, the way the autopilot does for the sticks: touch the flashlight from
@@ -50,7 +51,6 @@ class AutoTorch:
     MIN_OFF_S = 20.0         # s the light stays off after the bot switched it off
     MANUAL_HOLD_S = 1.5      # s after the operator's last touch before the bot carries on
     PAN_PER_RADS = 25.0      # degrees of beam lead per rad/s of turning
-    NEAR_M, FAR_M = 0.8, 2.5 # free distance ahead: wide beam at NEAR or closer, tight at FAR or beyond
 
     def __init__(self, link, measure, front_m=lambda: None, log=print, settings=None, clock=time.monotonic):
         self.link, self.measure, self.front_m, self.log, self.clock = link, measure, front_m, log, clock
@@ -190,19 +190,15 @@ class AutoTorch:
         return math.radians(_wrap_deg(heading - prev[0])) / (now - prev[1])
 
     def aim(self, now):
-        """Lead into the turn; tight beam when the way ahead is open, wide when something is close.
-        Larger pan angle is to the right and larger zoom angle is tighter, as on the gamepad's
-        right stick. Sent only when it changes enough to be worth moving a servo for."""
+        """Lead into the turn, with the beam at its widest (the low end of the zoom servo; the
+        high end is a small dot). Larger pan angle is to the right, as on the gamepad's right
+        stick. Sent only when it changes enough to be worth moving a servo for."""
         rate = self.turn_rate(now)
         if not (self.on and self.aim_enabled) or now - self.aimed_at < 0.7:
             return
         lo, hi, home = self._param("SVYAWMIN", 120), self._param("SVYAWMAX", 190), self._param("SVYAWHOME", 165)
         pan = max(lo, min(hi, home - self.PAN_PER_RADS * (rate if abs(rate) > 0.15 else 0.0)))
-        zlo, zhi = self._param("SVZMIN", 80), self._param("SVZMAX", 140)
-        front = self.front_m()
-        open_ahead = 1.0 if not isinstance(front, (int, float)) or not math.isfinite(front) else (
-            max(0.0, min(1.0, (front - self.NEAR_M) / (self.FAR_M - self.NEAR_M))))
-        zoom = zlo + (zhi - zlo) * open_ahead
+        zoom = self._param("SVZMIN", 80)                       # full flood, always
         if self._pan is None or abs(pan - self._pan) >= 4.0:
             if self.link.send(f"P={pan:.0f}"):
                 self._pan, self.aimed_at = pan, now

@@ -177,7 +177,7 @@ def test_the_switch_sticks_and_switching_off_turns_the_light_off(tmp_path):
     assert again.enabled is False
 
 
-def test_beam_leads_into_turns_and_tightens_when_the_way_is_open(tmp_path):
+def test_beam_leads_into_turns_and_stays_at_its_widest(tmp_path):
     t, link, clock, _ = make(tmp_path, front=None)     # nothing ahead within range
     feed(t, clock, [20, 20, 20])
     t.aim(clock())                                     # first reading of the heading
@@ -187,11 +187,11 @@ def test_beam_leads_into_turns_and_tightens_when_the_way_is_open(tmp_path):
     pan = [s for s in link.sent if s.startswith("P=")][-1]
     zoom = [s for s in link.sent if s.startswith("Z=")][-1]
     assert int(pan[2:]) < 165, "a left turn pans the beam left (a smaller angle than home)"
-    assert zoom == "Z=140", "open ahead: tight beam"
+    assert zoom == "Z=80", "always the full flood: the other end of the zoom is a small dot"
     assert 120 <= int(pan[2:]) <= 190
 
 
-def test_beam_goes_wide_when_something_is_close(tmp_path):
+def test_beam_is_wide_whatever_is_ahead_and_the_servo_is_not_nagged(tmp_path):
     t, link, clock, _ = make(tmp_path, front=0.5)
     feed(t, clock, [20, 20, 20])
     t.aim(clock())

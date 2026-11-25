@@ -46,7 +46,7 @@ export default function register(registerTab) {
         </div>
         <div class=bar>
           <label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type=checkbox id=atAim>
-            Aim the beam: lead into turns, tight when the way is open, wide when something is close</label>
+            Aim the beam: lead into turns, and keep it at its widest</label>
         </div>
         <p class=hint id=atNote></p>
       </div>
