@@ -174,10 +174,10 @@ export default function register(registerTab) {
         if (!a || !atOn.isConnected) return;
         atOn.checked = !!a.enabled; atAim.checked = !!a.aim; atAim.disabled = !a.enabled;
         atNote.textContent = !a.enabled ? 'Off: the flashlight is only what you set from the gamepad.'
-          : a.holding_s > 0 ? `You used the flashlight: the bot leaves it alone for ${Math.ceil(a.holding_s / 60)} more min.`
+          : a.holding_s > 0 ? 'You are setting the flashlight: the bot carries on from there in a moment.'
           : !a.available ? 'Waiting for the controller (needs firmware 5.4.0, and the robot awake).'
           : a.on ? `On at ${a.percent}%. ${a.action || ''}`
-          : (a.action ? a.action + '. ' : '') + `Works while the robot is balancing: on when the mean luma stays below ${a.dark_below} for 3 s.`;
+          : (a.action ? a.action + '. ' : '') + `Works while the robot is balancing: on when the mean luma stays below ${a.dark_below} for 1.5 s.`;
       };
       const sendAt = async () => {
         try { showAt(await c.API.post('/api/torch/auto', { enabled: atOn.checked, aim: atAim.checked })); }

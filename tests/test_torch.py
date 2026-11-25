@@ -40,17 +40,25 @@ def feed(t, clock, values, dt=2.0):
         t.step(luma, clock())
 
 
-def test_dark_for_a_few_seconds_switches_it_on_low(tmp_path):
+def test_dark_for_a_second_and_a_half_switches_it_on_low(tmp_path):
     t, link, clock, logs = make(tmp_path)
-    feed(t, clock, [20, 20])
-    assert not link.sent, "two dark readings are not enough (a shadow passing is not night)"
-    feed(t, clock, [20])
+    feed(t, clock, [20, 20, 20], dt=0.5)               # dark for 1.0 s so far
+    assert not link.sent, "a shadow passing is not night"
+    feed(t, clock, [20], dt=0.5)                       # 1.5 s
     assert link.sent == ["TL,1,25"] and t.on and "dark" in logs[-1]
+
+
+def test_a_bright_moment_starts_the_dark_count_again(tmp_path):
+    t, link, clock, _ = make(tmp_path)
+    feed(t, clock, [20, 20, 90, 20, 20], dt=0.6)
+    assert not link.sent
+    feed(t, clock, [20, 20], dt=0.6)
+    assert t.on
 
 
 def test_it_finds_its_own_brightness(tmp_path):
     t, link, clock, _ = make(tmp_path)
-    feed(t, clock, [20, 20, 20])                       # on at 25
+    feed(t, clock, [20, 20])                           # on at 25
     feed(t, clock, [50, 60, 70])                       # still dim: 35, 45, 55
     assert t.pct == 55
     feed(t, clock, [110, 120])                         # in the band: leave it
@@ -71,7 +79,7 @@ def test_it_never_asks_for_more_than_the_cap_or_less_than_the_floor(tmp_path):
 
 def test_enough_light_without_it_switches_it_off_and_it_stays_off_a_while(tmp_path):
     t, link, clock, logs = make(tmp_path)
-    feed(t, clock, [20, 20, 20])
+    feed(t, clock, [20, 20])
     feed(t, clock, [180, 180])                         # down to the floor (25 -> 15 -> 10)
     assert t.on and t.pct == 10
     feed(t, clock, [180, 180, 180])                    # at the floor and still bright: the room lights are on
@@ -101,20 +109,40 @@ def test_parked_robot_gets_its_light_switched_off_and_is_otherwise_left_alone(tm
     assert len(link.sent) == n, "it must not light the room while parked"
 
 
-def test_using_the_flashlight_from_the_gamepad_makes_the_bot_keep_off(tmp_path):
+def test_the_gamepad_takes_the_flashlight_at_once_and_the_bot_carries_on_from_there(tmp_path):
     t, link, clock, _ = make(tmp_path)
     feed(t, clock, [20, 20, 20])
     t.on_line("[PAY] Torch ON (25%)")                  # the echo of the bot's own command: not the operator
     assert t.on and t.status()["holding_s"] == 0
     clock.t += 5
-    t.on_line("[PAY] Torch off")                       # RB on the gamepad
-    assert not t.on and t.status()["holding_s"] > 250
+    t.on_line("[PAY] Torch 65%")                       # D-pad right, twice
+    assert t.on and t.pct == 65 and 0 < t.status()["holding_s"] <= 1.5
     n = len(link.sent)
-    feed(t, clock, [10] * 20)
-    assert len(link.sent) == n, "the operator switched it off: it stays off"
-    clock.t += t.MANUAL_HOLD_S
-    feed(t, clock, [10] * 3)
+    feed(t, clock, [230, 230], dt=0.5)                 # washed out, but they are still at it
+    assert len(link.sent) == n, "hands off while the operator is setting it"
+    feed(t, clock, [230], dt=1.2)                      # 1.5 s after their last touch
+    assert link.sent[-1] == "TL,1,35", "it carries on from the brightness they chose, not from its own old one"
+
+
+def test_switching_it_off_from_the_gamepad_is_respected_for_a_moment_then_the_dark_wins(tmp_path):
+    t, link, clock, _ = make(tmp_path)
+    feed(t, clock, [20, 20, 20])
+    clock.t += 5
+    t.on_line("[PAY] Torch off")                       # RB on the gamepad
+    assert not t.on
+    n = len(link.sent)
+    feed(t, clock, [10, 10], dt=0.5)
+    assert len(link.sent) == n
+    feed(t, clock, [10] * 6, dt=0.5)                   # past the hand-over and 1.5 s of darkness
     assert t.on
+
+
+def test_a_light_the_operator_switched_on_is_regulated_and_switched_off_like_its_own(tmp_path):
+    t, link, clock, _ = make(tmp_path)
+    t.on_line("[PAY] Torch ON (25%)")                  # RB: the bot had not switched anything on
+    assert t.on and t.pct == 25
+    feed(t, clock, [180] * 8)                          # plenty of light: down to the floor, then off
+    assert not t.on and link.sent[-1].startswith("TL,0,")
 
 
 def test_the_controllers_boot_banner_is_not_the_operator_using_the_flashlight(tmp_path):
@@ -126,7 +154,7 @@ def test_the_controllers_boot_banner_is_not_the_operator_using_the_flashlight(tm
     assert t.on
     clock.t += 5
     t.on_line("[PAY] Torch 35%")                       # D-pad on the gamepad
-    assert t.status()["holding_s"] > 250
+    assert 0 < t.status()["holding_s"] <= 1.5 and t.pct == 35
 
 
 def test_old_firmware_or_a_sleeping_robot_is_not_commanded(tmp_path):

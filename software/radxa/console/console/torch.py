@@ -3,7 +3,7 @@
 While the robot is up (balancing), the console watches the brightness of the camera
 picture once a second:
 
-  * dark for three seconds          -> flashlight on, at a low brightness
+  * dark for a second and a half    -> flashlight on, at a low brightness
   * still dim with the light on     -> brighter, a step at a time, up to the hard cap
   * too bright with the light on    -> dimmer; at the lowest setting and still bright
                                        (the room lights came on) -> off
@@ -14,9 +14,10 @@ light, and it is tight (thrown far) when the way ahead is open and wide when som
 is close.
 
 Every command goes through the firmware's own clamp and hard cap (TL / P= / Z=). The bot
-only ever switches off a light it switched on itself: touch the flashlight from the
-gamepad and the bot leaves it alone for five minutes. When the robot is parked or
-powered down, a light the bot switched on goes off.
+hands over at once, the way the autopilot does for the sticks: touch the flashlight from
+the gamepad and the bot takes whatever you set as the new starting point, waits a second
+and a half after your last touch, and carries on from there. When the robot is parked or
+powered down, the light goes off.
 
 It shares the job with the camera's automatic re-exposure (camera.ExposureWatch) so the
 two do not fight: while the light can still act, darkness is the light's problem and
@@ -37,16 +38,17 @@ def _wrap_deg(a):
 
 
 class AutoTorch:
-    PERIOD = 1.0             # s between looks at the picture
+    PERIOD = 0.5             # s between looks at the picture
     SETTLE = 1.6             # s after changing the light before the picture is trusted (snapshots are 1 Hz)
     DARK = 40.0              # mean luma below this is "dark" (0 to 255)
     LOW, HIGH = 75.0, 150.0  # with the light on, keep the picture in this band
     WASHED = 200.0           # far too bright: step down hard
-    NEED = 3                 # readings in a row before switching on or off
+    ON_DELAY = 1.5           # s of darkness before switching on
+    NEED = 3                 # bright readings in a row, at the lowest setting, before switching off
     START, STEP, BIG_STEP = 25, 10, 30
     FLOOR, CEILING = 10, 90  # percent; the firmware caps at 90 whatever is asked
     MIN_OFF_S = 20.0         # s the light stays off after the bot switched it off
-    MANUAL_HOLD_S = 300.0    # s the bot keeps its hands off after the operator used the flashlight
+    MANUAL_HOLD_S = 1.5      # s after the operator's last touch before the bot carries on
     PAN_PER_RADS = 25.0      # degrees of beam lead per rad/s of turning
     NEAR_M, FAR_M = 0.8, 2.5 # free distance ahead: wide beam at NEAR or closer, tight at FAR or beyond
 
@@ -62,7 +64,7 @@ class AutoTorch:
         except (OSError, ValueError, AttributeError):
             pass
         self.on, self.pct = False, self.START          # `on`: the bot switched the light on and still owns it
-        self.dark_n = self.bright_n = 0
+        self.dark_since, self.bright_n = None, 0
         self.changed_at = self.off_at = self.aimed_at = -1e9
         self.hold_until = 0.0
         self._sent = None                              # (on, pct, when) of the bot's last command, to tell it from the pad
@@ -101,7 +103,7 @@ class AutoTorch:
         was = self.on
         self.on, self.pct, self.changed_at = bool(on), pct, now
         self._sent = (bool(on), pct, now)
-        self.dark_n = self.bright_n = 0
+        self.dark_since, self.bright_n = None, 0
         if not on:
             self.off_at = now
             if was and self._pan is not None:
@@ -126,11 +128,19 @@ class AutoTorch:
         now = self.clock()
         if self._sent and now - self._sent[2] < 1.5:
             return                                                 # the echo of our own command
-        if self.on or self.enabled:
-            self.on = False
+        # Take what the operator set as the state to carry on from, and wait for them to finish.
+        on = not line.startswith("[PAY] Torch off") and not line.rstrip().endswith("(off)")
+        digits = "".join(ch for ch in line.split("%")[0][-3:] if ch.isdigit()) if "%" in line else ""
+        self.on = on
+        if digits:
+            self.pct = int(max(self.FLOOR, min(self.CEILING, int(digits))))
+        if not on:
+            self.off_at = -1e9                                     # their choice: no minimum-off wait on top
             self._pan = self._zoom = None
-            self.hold_until = now + self.MANUAL_HOLD_S
-            self.last.update(action="You used the flashlight: the bot leaves it alone for 5 minutes", at=time.time())
+        self.dark_since, self.bright_n = None, 0
+        self.changed_at = now
+        self.hold_until = now + self.MANUAL_HOLD_S
+        self.last.update(action="You set the flashlight: the bot carries on from there", at=time.time())
 
     # ------------------------------------------------------------ the decision, once a second
     def step(self, luma, now):
@@ -140,14 +150,19 @@ class AutoTorch:
         if not self.active():
             if self.on:
                 self._set(False, self.pct, "the robot is parked")
-            self.dark_n = self.bright_n = 0
+            self.dark_since, self.bright_n = None, 0
             return
-        if luma is None or now - self.changed_at < self.SETTLE:
+        if luma is None:
             return
         if not self.on:
-            self.dark_n = self.dark_n + 1 if luma < self.DARK else 0
-            if self.dark_n >= self.NEED and now - self.off_at >= self.MIN_OFF_S:
+            if luma >= self.DARK:
+                self.dark_since = None
+            elif self.dark_since is None:
+                self.dark_since = now
+            elif now - self.dark_since >= self.ON_DELAY and now - self.off_at >= self.MIN_OFF_S:
                 self._set(True, self.START, f"the picture is dark ({luma:.0f})")
+            return
+        if now - self.changed_at < self.SETTLE:
             return
         if luma >= self.WASHED and self.pct > self.FLOOR:
             self._set(True, self.pct - self.BIG_STEP, f"washed out ({luma:.0f})")
